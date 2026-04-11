@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dcc-mcp-unreal"
+version = "0.1.0"
+description = "Unreal Engine plugin for the DCC Model Context Protocol (MCP) ecosystem — embeds a Streamable HTTP MCP server directly inside Unreal Engine"
+authors = [{ name = "Long Hao", email = "hal.long@outlook.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.7"
+keywords = ["unreal", "unreal-engine", "mcp", "dcc", "ai", "llm", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Games/Entertainment",
+]
+
+dependencies = [
+    "dcc-mcp-core>=0.12.14,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.8.0",
+    "hatchling",
+]
+
+[project.urls]
+Homepage = "https://github.com/loonghao/dcc-mcp-unreal"
+Repository = "https://github.com/loonghao/dcc-mcp-unreal"
+
+[project.entry-points."dcc_mcp.adapters"]
+unreal = "dcc_mcp_unreal:UnrealMcpServer"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dcc_mcp_unreal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+markers = [
+    "e2e: end-to-end tests that require a real Unreal Engine instance",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py37"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
