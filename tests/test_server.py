@@ -1,54 +1,129 @@
-"""Basic tests for UnrealMcpServer (without real Unreal Engine)."""
+"""Tests for dcc-mcp-unreal (without a real Unreal Engine instance).
+
+All tests run in a plain Python environment — no ``unreal`` module is available.
+This covers the public API surface, helpers, and the server instantiation path.
+"""
 
 from __future__ import annotations
 
 import pytest
 
 
+# ---------------------------------------------------------------------------
+# Package-level imports
+# ---------------------------------------------------------------------------
+
+
 def test_import():
     """Package imports without errors."""
-    import dcc_mcp_unreal  # noqa: F401
+    import dcc_mcp_unreal
 
     assert dcc_mcp_unreal.__version__ == "0.1.0"
 
 
 def test_api_imports():
-    """All public API symbols are importable."""
+    """All public API symbols are importable from the top-level package."""
     from dcc_mcp_unreal import (
+        UNREAL_CAPABILITIES_DICT,
+        MissingParamError,
         UnrealMcpServer,
+        UnrealNotAvailableError,
+        actor_to_dict,
+        build_context_dict,
+        ensure_valid_name,
+        get_param_list,
+        get_unreal,
         is_unreal_available,
+        missing_param_error,
+        require_any_param,
+        require_param,
+        require_unreal,
+        rotator_to_list,
         start_server,
         stop_server,
+        unreal_capabilities,
         unreal_error,
+        unreal_from_exception,
         unreal_success,
+        unreal_warning,
+        vector_to_list,
         with_unreal,
     )
 
-    assert callable(UnrealMcpServer)
-    assert callable(start_server)
-    assert callable(stop_server)
-    assert callable(unreal_success)
-    assert callable(unreal_error)
-    assert callable(with_unreal)
-    assert callable(is_unreal_available)
+    for sym in (
+        UnrealMcpServer, start_server, stop_server,
+        unreal_success, unreal_error, unreal_warning, unreal_from_exception,
+        with_unreal, require_unreal, get_unreal, is_unreal_available,
+        require_param, require_any_param, get_param_list, missing_param_error,
+        ensure_valid_name, build_context_dict,
+        vector_to_list, rotator_to_list, actor_to_dict,
+        unreal_capabilities,
+    ):
+        assert callable(sym), f"{sym} should be callable"
+
+    assert isinstance(UNREAL_CAPABILITIES_DICT, dict)
+    assert issubclass(MissingParamError, ValueError)
+    assert issubclass(UnrealNotAvailableError, ImportError)
+
+
+# ---------------------------------------------------------------------------
+# Availability helpers
+# ---------------------------------------------------------------------------
 
 
 def test_is_unreal_available_false_outside_unreal():
     """is_unreal_available() returns False outside Unreal Engine."""
     from dcc_mcp_unreal import is_unreal_available
 
-    # Outside Unreal Engine, unreal module is not available
     assert is_unreal_available() is False
 
 
+def test_get_unreal_returns_none_outside_unreal():
+    """get_unreal() returns None when unreal module is absent."""
+    from dcc_mcp_unreal import get_unreal
+
+    assert get_unreal() is None
+
+
+def test_require_unreal_raises_outside_unreal():
+    """require_unreal() raises UnrealNotAvailableError when not in UE."""
+    from dcc_mcp_unreal import UnrealNotAvailableError, require_unreal
+
+    with pytest.raises(UnrealNotAvailableError):
+        require_unreal()
+
+
+# ---------------------------------------------------------------------------
+# Result helpers
+# ---------------------------------------------------------------------------
+
+
 def test_unreal_success_returns_dict():
-    """unreal_success() returns a dict with expected keys."""
+    """unreal_success() returns a success dict with expected keys."""
     from dcc_mcp_unreal import unreal_success
 
     result = unreal_success("test done", count=3)
     assert isinstance(result, dict)
     assert result.get("success") is True
     assert result.get("message") == "test done"
+
+
+def test_unreal_success_with_prompt():
+    """unreal_success() preserves the prompt field."""
+    from dcc_mcp_unreal import unreal_success
+
+    result = unreal_success("done", prompt="Check the viewport")
+    assert result.get("prompt") == "Check the viewport"
+
+
+def test_unreal_success_with_context():
+    """unreal_success() stores extra kwargs in context."""
+    from dcc_mcp_unreal import unreal_success
+
+    result = unreal_success("ok", actor_name="SM_Cube", count=5)
+    ctx = result.get("context", {})
+    assert ctx.get("actor_name") == "SM_Cube"
+    assert ctx.get("count") == 5
 
 
 def test_unreal_error_returns_dict():
@@ -61,47 +136,8 @@ def test_unreal_error_returns_dict():
     assert result.get("error") == "ImportError: unreal"
 
 
-def test_with_unreal_catches_import_error():
-    """@with_unreal decorator catches ImportError and returns error dict."""
-    from dcc_mcp_unreal import unreal_success, with_unreal
-
-    @with_unreal
-    def needs_unreal(**kwargs):
-        import no_such_module_unreal  # noqa: F401
-
-        return unreal_success("never")
-
-    result = needs_unreal()
-    assert result.get("success") is False
-    assert "not available" in result.get("message", "").lower()
-
-
-def test_server_instantiation():
-    """UnrealMcpServer can be instantiated with custom port."""
-    from dcc_mcp_unreal import UnrealMcpServer
-
-    server = UnrealMcpServer(port=9999)
-    assert server._port == 9999
-
-
-def test_server_with_extra_paths():
-    """UnrealMcpServer accepts extra_skill_paths."""
-    from dcc_mcp_unreal import UnrealMcpServer
-
-    server = UnrealMcpServer(port=8765, extra_skill_paths=["/custom/skills"])
-    assert "/custom/skills" in server._extra_skill_paths
-
-
-def test_unreal_success_with_prompt():
-    """unreal_success() preserves prompt field."""
-    from dcc_mcp_unreal import unreal_success
-
-    result = unreal_success("done", prompt="Check the viewport")
-    assert result.get("prompt") == "Check the viewport"
-
-
 def test_unreal_error_with_possible_solutions():
-    """unreal_error() stores possible_solutions in context or accessible field."""
+    """unreal_error() stores possible_solutions in context."""
     from dcc_mcp_unreal import unreal_error
 
     result = unreal_error(
@@ -110,10 +146,21 @@ def test_unreal_error_with_possible_solutions():
         possible_solutions=["Enable Python Editor Script Plugin"],
     )
     assert result.get("success") is False
-    # possible_solutions is stored in context
     ctx = result.get("context", {})
     assert "possible_solutions" in ctx
     assert "Enable Python Editor Script Plugin" in ctx["possible_solutions"]
+
+
+def test_unreal_warning_returns_success_dict():
+    """unreal_warning() returns success=True with a warning in context."""
+    from dcc_mcp_unreal import unreal_warning
+
+    result = unreal_warning("Done with issues", warning="Asset not found, used default")
+    assert isinstance(result, dict)
+    assert result.get("success") is True
+    ctx = result.get("context", {})
+    assert "warning" in ctx
+    assert "Asset not found" in ctx["warning"]
 
 
 def test_unreal_from_exception():
@@ -127,3 +174,266 @@ def test_unreal_from_exception():
 
     assert result.get("success") is False
     assert result.get("message") == "Skill failed"
+
+
+def test_unreal_from_exception_default_message():
+    """unreal_from_exception() uses default message when none given."""
+    from dcc_mcp_unreal import unreal_from_exception
+
+    try:
+        raise ValueError("oops")
+    except ValueError as exc:
+        result = unreal_from_exception(exc)
+
+    assert result.get("success") is False
+    assert result.get("message") == "Unreal operation failed"
+
+
+# ---------------------------------------------------------------------------
+# with_unreal decorator
+# ---------------------------------------------------------------------------
+
+
+def test_with_unreal_catches_import_error():
+    """@with_unreal catches ImportError and returns error dict."""
+    from dcc_mcp_unreal import unreal_success, with_unreal
+
+    @with_unreal
+    def needs_unreal(**kwargs):
+        import no_such_module_unreal  # noqa: F401
+
+        return unreal_success("never")
+
+    result = needs_unreal()
+    assert result.get("success") is False
+    assert "not available" in result.get("message", "").lower()
+
+
+def test_with_unreal_catches_generic_exception():
+    """@with_unreal catches general exceptions and returns error dict."""
+    from dcc_mcp_unreal import with_unreal
+
+    @with_unreal
+    def broken(**kwargs):
+        raise RuntimeError("something went wrong")
+
+    result = broken()
+    assert result.get("success") is False
+
+
+def test_with_unreal_passes_through_success():
+    """@with_unreal passes through a successful return value unchanged."""
+    from dcc_mcp_unreal import unreal_success, with_unreal
+
+    @with_unreal
+    def good_func(x: int = 1, **kwargs):
+        return unreal_success("good", value=x)
+
+    result = good_func(x=42)
+    assert result.get("success") is True
+    assert result.get("context", {}).get("value") == 42
+
+
+def test_with_unreal_accepts_positional_args():
+    """@with_unreal accepts both *args and **kwargs."""
+    from dcc_mcp_unreal import unreal_success, with_unreal
+
+    @with_unreal
+    def func_with_args(a, b, **kwargs):
+        return unreal_success("ok", a=a, b=b)
+
+    result = func_with_args(1, 2)
+    assert result.get("success") is True
+
+
+# ---------------------------------------------------------------------------
+# Parameter helpers
+# ---------------------------------------------------------------------------
+
+
+def test_require_param_returns_value():
+    """require_param() returns the value when key exists."""
+    from dcc_mcp_unreal import require_param
+
+    params = {"actor_name": "SM_Cube", "radius": 100.0}
+    assert require_param(params, "actor_name") == "SM_Cube"
+    assert require_param(params, "radius") == 100.0
+
+
+def test_require_param_returns_default():
+    """require_param() returns default when key is absent."""
+    from dcc_mcp_unreal import require_param
+
+    params = {}
+    assert require_param(params, "radius", 50.0) == 50.0
+
+
+def test_require_param_raises_when_missing():
+    """require_param() raises MissingParamError when key is absent and no default."""
+    from dcc_mcp_unreal import MissingParamError, require_param
+
+    with pytest.raises(MissingParamError, match="actor_name"):
+        require_param({}, "actor_name")
+
+
+def test_require_any_param_first_match():
+    """require_any_param() returns first matching key."""
+    from dcc_mcp_unreal import require_any_param
+
+    params = {"node_name": "cube"}
+    assert require_any_param(params, "actor_name", "node_name", "name") == "cube"
+
+
+def test_require_any_param_raises_when_all_missing():
+    """require_any_param() raises MissingParamError when none of the keys exist."""
+    from dcc_mcp_unreal import MissingParamError, require_any_param
+
+    with pytest.raises(MissingParamError):
+        require_any_param({}, "actor_name", "name")
+
+
+def test_missing_param_error_returns_dict():
+    """missing_param_error() returns a failure dict."""
+    from dcc_mcp_unreal import missing_param_error
+
+    result = missing_param_error("actor_name")
+    assert result.get("success") is False
+    assert "actor_name" in result.get("message", "")
+
+
+def test_get_param_list_bare_string():
+    """get_param_list() coerces a bare string to a single-element list."""
+    from dcc_mcp_unreal import get_param_list
+
+    params = {"actors": "SM_Cube"}
+    assert get_param_list(params, "actors") == ["SM_Cube"]
+
+
+def test_get_param_list_already_list():
+    """get_param_list() returns a list as-is."""
+    from dcc_mcp_unreal import get_param_list
+
+    params = {"actors": ["SM_Cube", "BP_Player"]}
+    assert get_param_list(params, "actors") == ["SM_Cube", "BP_Player"]
+
+
+def test_get_param_list_default():
+    """get_param_list() returns [] when key is absent."""
+    from dcc_mcp_unreal import get_param_list
+
+    assert get_param_list({}, "actors") == []
+
+
+# ---------------------------------------------------------------------------
+# Name and context helpers
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_valid_name_passes():
+    """ensure_valid_name() returns None for a valid name."""
+    from dcc_mcp_unreal import ensure_valid_name
+
+    assert ensure_valid_name("SM_Cube") is None
+
+
+def test_ensure_valid_name_empty():
+    """ensure_valid_name() returns error dict for empty name."""
+    from dcc_mcp_unreal import ensure_valid_name
+
+    result = ensure_valid_name("", param="actor_name")
+    assert isinstance(result, dict)
+    assert result.get("success") is False
+    assert "actor_name" in result.get("message", "")
+
+
+def test_ensure_valid_name_whitespace():
+    """ensure_valid_name() returns error dict for whitespace-only name."""
+    from dcc_mcp_unreal import ensure_valid_name
+
+    result = ensure_valid_name("   ")
+    assert result.get("success") is False
+
+
+def test_build_context_dict_filters_none():
+    """build_context_dict() excludes None-valued keys."""
+    from dcc_mcp_unreal import build_context_dict
+
+    result = build_context_dict(a=1, b=None, c="hello")
+    assert result == {"a": 1, "c": "hello"}
+
+
+# ---------------------------------------------------------------------------
+# Unreal data model helpers (no real unreal module)
+# ---------------------------------------------------------------------------
+
+
+class _FakeVector:
+    def __init__(self, x, y, z):
+        self.x = x
+        self.y = y
+        self.z = z
+
+
+class _FakeRotator:
+    def __init__(self, pitch, yaw, roll):
+        self.pitch = pitch
+        self.yaw = yaw
+        self.roll = roll
+
+
+def test_vector_to_list():
+    """vector_to_list() converts a Vector-like object to [x, y, z]."""
+    from dcc_mcp_unreal import vector_to_list
+
+    v = _FakeVector(100.0, 200.0, 300.0)
+    assert vector_to_list(v) == [100.0, 200.0, 300.0]
+
+
+def test_rotator_to_list():
+    """rotator_to_list() converts a Rotator-like object to [pitch, yaw, roll]."""
+    from dcc_mcp_unreal import rotator_to_list
+
+    r = _FakeRotator(10.0, 20.0, 30.0)
+    assert rotator_to_list(r) == [10.0, 20.0, 30.0]
+
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+
+
+def test_unreal_capabilities_dict():
+    """UNREAL_CAPABILITIES_DICT has expected keys and Unreal-specific values."""
+    from dcc_mcp_unreal import UNREAL_CAPABILITIES_DICT
+
+    assert UNREAL_CAPABILITIES_DICT["transform"] is True
+    assert UNREAL_CAPABILITIES_DICT["scene_manager"] is True
+    assert UNREAL_CAPABILITIES_DICT["has_embedded_python"] is True
+    # Unreal-specific: no DAG hierarchy, no progress window
+    assert UNREAL_CAPABILITIES_DICT["hierarchy"] is False
+    assert UNREAL_CAPABILITIES_DICT["progress_reporting"] is False
+
+
+# ---------------------------------------------------------------------------
+# Server instantiation (no real dcc-mcp-core required for these tests)
+# ---------------------------------------------------------------------------
+
+
+def test_server_instantiation():
+    """UnrealMcpServer can be instantiated (requires dcc-mcp-core)."""
+    from dcc_mcp_unreal import UnrealMcpServer
+
+    server = UnrealMcpServer(port=9999)
+    assert server._config is not None
+    assert server._server is not None
+    assert server.is_running is False
+    assert server.mcp_url is None
+
+
+def test_server_custom_name():
+    """UnrealMcpServer accepts custom server_name and server_version."""
+    from dcc_mcp_unreal import UnrealMcpServer
+
+    server = UnrealMcpServer(port=8765, server_name="my-unreal-mcp", server_version="1.2.3")
+    assert server._config.server_name == "my-unreal-mcp"
+    assert server._config.server_version == "1.2.3"
