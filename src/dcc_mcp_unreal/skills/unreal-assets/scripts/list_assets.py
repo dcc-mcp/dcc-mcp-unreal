@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_core.skill import skill_error
-from dcc_mcp_core.skill import skill_success
+from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry
@@ -49,19 +47,18 @@ def list_assets(
     # Apply optional class filter
     if asset_class_filter:
         filter_lower = asset_class_filter.lower()
-        asset_data_list = [
-            a for a in asset_data_list
-            if filter_lower in str(a.asset_class_path.asset_name).lower()
-        ]
+        asset_data_list = [a for a in asset_data_list if filter_lower in str(a.asset_class_path.asset_name).lower()]
 
     assets = []
     for asset_data in asset_data_list:
-        assets.append({
-            "name": str(asset_data.asset_name),
-            "path": str(asset_data.package_name),
-            "class": str(asset_data.asset_class_path.asset_name),
-            "object_path": str(asset_data.object_path),
-        })
+        assets.append(
+            {
+                "name": str(asset_data.asset_name),
+                "path": str(asset_data.package_name),
+                "class": str(asset_data.asset_class_path.asset_name),
+                "object_path": str(asset_data.object_path),
+            }
+        )
 
     # Sort by path for deterministic output
     assets.sort(key=lambda a: a["path"])
@@ -83,4 +80,5 @@ def main(**kwargs) -> dict:
 
 if __name__ == "__main__":
     from dcc_mcp_core.skill import run_main
+
     run_main(main)

@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -157,7 +157,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -167,14 +167,17 @@ jobs:
       - name: Simulate plugin install (copy + pip into python/)
         shell: bash
         run: |
-          mkdir -p /tmp/DccMcpUnreal
-          cp -R unreal/plugin/. /tmp/DccMcpUnreal/
-          pip install dcc-mcp-unreal --target /tmp/DccMcpUnreal/python -q || \
-          pip install -e . --target /tmp/DccMcpUnreal/python -q
+          PLUGIN_TMP="${RUNNER_TEMP}/DccMcpUnreal"
+          mkdir -p "$PLUGIN_TMP"
+          cp -R unreal/plugin/. "$PLUGIN_TMP/"
+          pip install dcc-mcp-unreal --target "$PLUGIN_TMP/python" -q || \
+          pip install -e . --target "$PLUGIN_TMP/python" -q
+          echo "PLUGIN_TMP=$PLUGIN_TMP" >> "$GITHUB_ENV"
           echo "Simulated install complete"
 
       - name: Run post_install against simulated install
-        run: python packaging/post_install.py --plugin-root /tmp/DccMcpUnreal
+        shell: bash
+        run: python packaging/post_install.py --plugin-root "$PLUGIN_TMP"
 
   # ── Layer 4: MCP protocol conformance (headless, mocked unreal) ───────────
   mcp-conformance:
@@ -184,7 +187,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
