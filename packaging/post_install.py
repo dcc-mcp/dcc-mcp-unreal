@@ -84,7 +84,7 @@ def verify(plugin_root: Path) -> bool:
 
     print()
     if passed:
-        print("[dcc-mcp-unreal] All checks passed. ✓")
+        print("[dcc-mcp-unreal] All checks passed. OK")
     else:
         print("[dcc-mcp-unreal] Some checks FAILED. See above for details.")
     return passed
