@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_core.skill import skill_error
-from dcc_mcp_core.skill import skill_success
+from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry
@@ -59,6 +57,7 @@ def save_level(
         except Exception as exc:
             # Non-fatal — level was saved, only dirty packages failed
             from dcc_mcp_core.skill import skill_warning
+
             return skill_warning(
                 f"Level '{level_name}' saved; some dirty packages could not be saved",
                 warning=str(exc),
@@ -81,4 +80,5 @@ def main(**kwargs) -> dict:
 
 if __name__ == "__main__":
     from dcc_mcp_core.skill import run_main
+
     run_main(main)

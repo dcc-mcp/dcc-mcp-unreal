@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 
-from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_core.skill import skill_error
-from dcc_mcp_core.skill import skill_success
+from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry
@@ -102,4 +100,5 @@ def main(**kwargs) -> dict:
 
 if __name__ == "__main__":
     from dcc_mcp_core.skill import run_main
+
     run_main(main)

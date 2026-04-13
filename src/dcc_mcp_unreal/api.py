@@ -108,6 +108,7 @@ def is_unreal_available() -> bool:
     # A real unreal module always exposes top-level engine symbols.
     # A namespace package from the project's unreal/ directory does not.
     import unreal as _ue  # noqa: PLC0415
+
     return hasattr(_ue, "log") and hasattr(_ue, "EditorLevelLibrary")
 
 
@@ -156,6 +157,7 @@ def get_unreal():
     """
     try:
         import unreal
+
         if not (hasattr(unreal, "log") and hasattr(unreal, "EditorLevelLibrary")):
             return None
         return unreal

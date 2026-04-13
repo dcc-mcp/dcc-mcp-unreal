@@ -17,7 +17,6 @@ import os
 import sys
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Remove project root from sys.path at collection time
 # ---------------------------------------------------------------------------
@@ -28,7 +27,8 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 def _remove_project_root_from_syspath() -> None:
     """Remove the project root so ``import unreal`` finds no namespace package."""
     paths_to_remove = [
-        p for p in sys.path
+        p
+        for p in sys.path
         if p and os.path.normcase(os.path.realpath(p)) == os.path.normcase(os.path.realpath(_PROJECT_ROOT))
     ]
     for p in paths_to_remove:

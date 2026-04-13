@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_core.skill import skill_success
+from dcc_mcp_core.skill import skill_entry, skill_success
 
 
 @skill_entry
@@ -22,6 +21,7 @@ def get_level_info(**kwargs) -> dict:
     world = unreal.EditorLevelLibrary.get_editor_world()
     if world is None:
         from dcc_mcp_core.skill import skill_error
+
         return skill_error(
             "No editor world available",
             "EditorLevelLibrary.get_editor_world() returned None",
@@ -51,11 +51,13 @@ def get_level_info(**kwargs) -> dict:
     streaming_levels = []
     try:
         for sl in world.streaming_levels:
-            streaming_levels.append({
-                "name": sl.get_name(),
-                "loaded": sl.is_level_loaded(),
-                "visible": sl.is_level_visible() if hasattr(sl, "is_level_visible") else None,
-            })
+            streaming_levels.append(
+                {
+                    "name": sl.get_name(),
+                    "loaded": sl.is_level_loaded(),
+                    "visible": sl.is_level_visible() if hasattr(sl, "is_level_visible") else None,
+                }
+            )
     except Exception:
         pass
 
@@ -78,4 +80,5 @@ def main(**kwargs) -> dict:
 
 if __name__ == "__main__":
     from dcc_mcp_core.skill import run_main
+
     run_main(main)
