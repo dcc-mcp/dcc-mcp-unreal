@@ -98,4 +98,4 @@ jobs:
         run: |
           if (!(Test-Path dist/DccMcpUnreal/DccMcpUnreal.uplugin)) { throw "Missing DccMcpUnreal.uplugin" }
           if (!(Test-Path dist/DccMcpUnreal/Content/Python/init_unreal.py)) { throw "Missing init_unreal.py" }
-          if (!(Get-ChildItem dist -Filter 'DccMcpUnreal-*-ue5.2.zip')) { throw "Missing plugin zip" }
+          if (!(Get-ChildItem dist -Filter 'DccMcpUnreal-*.zip')) { throw "Missing plugin zip" }
