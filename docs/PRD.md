@@ -40,7 +40,7 @@ Existing solutions are bespoke integrations that:
 - Package structure identical to `dcc-mcp-maya`
 - `unreal_success` / `unreal_error` / `unreal_from_exception` helpers
 - `@with_unreal` decorator for error handling
-- `UnrealMcpServer` wrapping `dcc-mcp-core`'s `create_skill_manager`
+- `UnrealMcpServer` built on `dcc-mcp-core`'s `DccServerBase`
 - At least one working built-in skill (`unreal-actors`)
 - Unit tests that run without Unreal Engine installed
 
@@ -112,7 +112,7 @@ Unreal Engine Python API (UE5 main thread)
 
 | Component | Location | Responsibility |
 |-----------|----------|---------------|
-| `UnrealMcpServer` | `server.py` | Lifecycle wrapper around `create_skill_manager` |
+| `UnrealMcpServer` | `server.py` | Lifecycle adapter around `DccServerBase` |
 | `api.py` | `api.py` | `unreal_success/error/from_exception`, `@with_unreal` |
 | Built-in skills | `skills/` | Ready-to-use Unreal operations |
 | `dcc-mcp-core` | dependency | HTTP server, skill discovery, JSON-RPC dispatch |
@@ -239,7 +239,7 @@ from dcc_mcp_unreal.api import (
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| `dcc-mcp-core` | >=0.12.14,<1.0.0 | MCP server, skill system, result types |
+| `dcc-mcp-core` | >=0.17.20,<1.0.0 | MCP server, skill system, result types |
 | `unreal` | bundled with UE5 | Unreal Engine Python API (runtime only) |
 
 Dev dependencies:

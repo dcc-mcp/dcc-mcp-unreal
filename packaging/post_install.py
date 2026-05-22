@@ -39,8 +39,11 @@ def verify(plugin_root: Path) -> bool:
         return False
 
     # 2. .uplugin descriptor
-    uplugin = plugin_root / "dcc_mcp_unreal.uplugin"
-    passed &= check(uplugin.exists(), ".uplugin descriptor found", f".uplugin not found at {uplugin}")
+    uplugin = plugin_root / "DccMcpUnreal.uplugin"
+    if not uplugin.exists():
+        matches = sorted(plugin_root.glob("*.uplugin"))
+        uplugin = matches[0] if matches else uplugin
+    passed &= check(uplugin.exists(), f".uplugin descriptor found: {uplugin.name}", f".uplugin not found at {uplugin}")
     if uplugin.exists():
         try:
             data = json.loads(uplugin.read_text(encoding="utf-8"))

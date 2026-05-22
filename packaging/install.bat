@@ -41,7 +41,8 @@ goto :parse_args
 
 REM Read version from plugin descriptor
 set "VERSION=0.1.0"
-for /f "tokens=2 delims=:, " %%v in ('findstr /i "VersionName" "%PLUGIN_DIR%\dcc_mcp_unreal.uplugin"') do (
+for %%p in ("%PLUGIN_DIR%\*.uplugin") do set "UPLUGIN=%%~fp"
+for /f "tokens=2 delims=:, " %%v in ('findstr /i "VersionName" "%UPLUGIN%"') do (
     set "VERSION=%%~v"
     goto :got_version
 )

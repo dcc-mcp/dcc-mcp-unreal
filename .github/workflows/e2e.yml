@@ -56,7 +56,7 @@ jobs:
         run: |
           python -c "
           import json, sys
-          data = json.load(open('unreal/plugin/dcc_mcp_unreal.uplugin'))
+          data = json.load(open('unreal/plugin/DccMcpUnreal.uplugin'))
           required = ['FileVersion', 'VersionName', 'FriendlyName', 'Description']
           missing = [k for k in required if k not in data]
           if missing:

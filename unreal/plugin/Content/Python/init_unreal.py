@@ -40,37 +40,55 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_package_importable() -> None:
-    """Add the plugin's python/ directory to sys.path if needed.
+    """Add the plugin's python/ directory to sys.path.
 
     When the plugin is installed as a project plugin, the ``python/``
     subdirectory contains the ``dcc_mcp_unreal`` package and its dependency
     ``dcc_mcp_core``.  Unreal does not automatically add plugin subdirectories
     to sys.path, so we do it here.
     """
-    try:
-        import dcc_mcp_unreal  # noqa: F401
-
-        return  # already importable
-    except ImportError:
-        pass
-
     # This script lives in <plugin_root>/Content/Python/
     # The python/ package directory is at <plugin_root>/python/
     content_python_dir = Path(__file__).resolve().parent
     plugin_root = content_python_dir.parent.parent  # Content/Python -> Content -> plugin root
     python_dir = plugin_root / "python"
 
+    # Development fallback for this repository's local test project:
+    # <repo>/Plugins/DccMcpUnreal/Content/Python/init_unreal.py
+    # should be able to import <repo>/src and ../dcc-mcp-core/src even when
+    # packaging is run with --skip-python-deps.
+    project_root = plugin_root.parent.parent if plugin_root.parent.name == "Plugins" else None
+    if project_root is not None:
+        _add_sys_path(project_root / "src", prepend=False)
+        _add_sys_path(project_root.parent / "dcc-mcp-core" / "src", prepend=False)
+        _add_sys_path(project_root.parent / "dcc-mcp-core" / "python", prepend=False)
+
+    # Packaged dependencies must win over source checkout paths and globally
+    # installed packages; otherwise a smoke test can pass against stale local
+    # code instead of the distributable plugin.
     if python_dir.is_dir():
-        python_str = str(python_dir)
-        if python_str not in sys.path:
-            sys.path.insert(0, python_str)
-            logger.debug("[dcc-mcp-unreal] Added %s to sys.path", python_str)
-    else:
+        _add_sys_path(python_dir, prepend=True)
+
+    try:
+        import dcc_mcp_unreal  # noqa: F401, PLC0415
+
+        return
+    except ImportError:
         logger.warning(
-            "[dcc-mcp-unreal] python/ directory not found at %s. "
-            "Install dcc-mcp-unreal via pip or copy the package manually.",
-            python_dir,
+            "[dcc-mcp-unreal] dcc_mcp_unreal could not be imported. "
+            "Install a packaged plugin with python/ dependencies or run from a source checkout.",
         )
+
+
+def _add_sys_path(path: Path, *, prepend: bool = True) -> None:
+    if path.is_dir():
+        path_str = str(path)
+        if path_str not in sys.path:
+            if prepend:
+                sys.path.insert(0, path_str)
+            else:
+                sys.path.append(path_str)
+            logger.debug("[dcc-mcp-unreal] Added %s to sys.path", path_str)
 
 
 _ensure_package_importable()
@@ -183,9 +201,15 @@ def _register_menus() -> None:
         import unreal  # noqa: PLC0415
 
         tool_menus = unreal.ToolMenus.get()
+        if tool_menus is None:
+            logger.debug("[dcc-mcp-unreal] ToolMenus unavailable; skipping editor menu registration")
+            return
 
         # Add a top-level "DCC MCP" menu under the main menu bar
         main_menu = tool_menus.extend_menu("MainFrame.MainMenu")
+        if main_menu is None:
+            logger.debug("[dcc-mcp-unreal] MainFrame.MainMenu unavailable; skipping editor menu registration")
+            return
 
         section = main_menu.add_section("DccMcpSection", unreal.Text("DCC MCP"))
 
@@ -299,6 +323,9 @@ def _initialize() -> None:
         return
 
     # Register menus only when running in editor (not commandlet / game)
+    if os.environ.get("DCC_MCP_UNREAL_DISABLE_MENUS", "").lower() in ("1", "true", "yes"):
+        return
+
     try:
         import unreal  # noqa: PLC0415
 

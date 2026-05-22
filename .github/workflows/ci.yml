@@ -76,3 +76,26 @@ jobs:
 
       - name: Lint SKILL.md files
         run: python tools/lint_skills.py --error-only
+
+  package-unreal-plugin:
+    name: Package Unreal Plugin
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.9 for Unreal 5.2
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Build plugin layout without vendored deps
+        shell: pwsh
+        run: |
+          python packaging/build_plugin.py --python (Get-Command python).Source --clean --zip --skip-python-deps
+
+      - name: Verify plugin descriptor
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/DccMcpUnreal/DccMcpUnreal.uplugin)) { throw "Missing DccMcpUnreal.uplugin" }
+          if (!(Test-Path dist/DccMcpUnreal/Content/Python/init_unreal.py)) { throw "Missing init_unreal.py" }
+          if (!(Get-ChildItem dist -Filter 'DccMcpUnreal-*-ue5.2.zip')) { throw "Missing plugin zip" }

@@ -38,7 +38,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Read version from .uplugin
-VERSION=$(python3 -c "import json; d=json.load(open('$PLUGIN_DIR/dcc_mcp_unreal.uplugin')); print(d.get('VersionName','0.1.0'))" 2>/dev/null || echo "0.1.0")
+UPLUGIN="$(find "$PLUGIN_DIR" -maxdepth 1 -name '*.uplugin' | head -n 1)"
+VERSION=$(python3 -c "import json; d=json.load(open('$UPLUGIN')); print(d.get('VersionName','0.1.0'))" 2>/dev/null || echo "0.1.0")
 echo "[dcc-mcp-unreal] Installing version $VERSION"
 
 # Determine destination
