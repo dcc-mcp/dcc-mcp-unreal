@@ -10,7 +10,7 @@
 
 Unreal Engine plugin for the **DCC Model Context Protocol (MCP)** ecosystem.
 Embeds a standards-compliant MCP Streamable HTTP server (2025-03-26 spec)
-directly inside Unreal Engine using
+directly inside Unreal Engine using the current
 [dcc-mcp-core](https://github.com/loonghao/dcc-mcp-core).
 
 MCP-compatible agents (Claude Desktop, Cursor, OpenClaw, …) can call Unreal
@@ -28,15 +28,15 @@ assets, run Python scripts — all through a single HTTP endpoint.
 Agent (Claude / Cursor)
     │  MCP tools/call  (HTTP POST /mcp)
     ▼
-UnrealMcpServer  ←  dcc-mcp-core  ←  SkillCatalog
+UnrealMcpServer  ←  dcc-mcp-core DccServerBase  ←  SkillCatalog
     │
-    ▼  subprocess
-Python skill scripts  →  import unreal  →  Unreal Editor API
+    ▼  in-process HostExecutionBridge
+Python skill scripts  →  Unreal main-thread dispatcher  →  Unreal Editor API
 ```
 
 Each skill script is a standalone Python file that uses Unreal Engine's
-`unreal` Python module. Scripts are discovered from configurable directories
-and exposed as MCP tools automatically — no manual registration needed.
+`unreal` Python module. Scripts are discovered from `SKILL.md` plus sibling
+`tools.yaml` metadata and exposed as MCP tools automatically.
 
 ---
 
@@ -63,7 +63,7 @@ and exposed as MCP tools automatically — no manual registration needed.
 | Unreal Engine | 5.0+ |
 | Unreal Python Editor Script Plugin | must be **enabled** |
 | Python (embedded in UE) | 3.9+ (UE 5.0 ships Python 3.9) |
-| dcc-mcp-core | >= 0.12.14 |
+| dcc-mcp-core | >= 0.17.20 |
 
 ### Enable the Python Plugin
 
@@ -96,6 +96,61 @@ cd dcc-mcp-unreal
 pip install -e ".[dev]"
 ```
 
+### Build a deployable UE 5.2 plugin package
+
+The repo includes `vx just` recipes. By default they use
+`C:\Program Files\Epic Games\UE_5.2` and install `dcc-mcp-core` from a
+prebuilt wheel, which keeps CI/release packaging deterministic.
+
+```bash
+vx just package
+```
+
+Outputs use the standard Unreal project-plugin layout:
+
+- `dist/DccMcpUnreal/DccMcpUnreal.uplugin`
+- `dist/DccMcpUnreal/Content/Python/init_unreal.py`
+- `dist/DccMcpUnreal/python/` — vendored Python package dependencies
+- `dist/DccMcpUnreal-<version>-ue5.2.zip` — zipped plugin package
+
+Deploy directly into a project:
+
+```bash
+vx just deploy "C:\Path\To\MyUnrealProject"
+```
+
+Run the packaged plugin inside a local UE project with `UnrealEditor-Cmd.exe`:
+
+```bash
+vx just ue-smoke "C:\Path\To\MyUnrealProject"
+```
+
+The smoke test runs the native Unreal Automation Test
+`DccMcp.Smoke.ServerStarts`, verifies HTTP readiness, and confirms the built-in
+Unreal tools are registered. It writes UE Automation reports under
+`Saved/Automation/Reports`.
+
+For direct Python-script debugging, bypass the native Automation layer:
+
+```bash
+vx just ue-smoke-python "C:\Path\To\MyUnrealProject"
+```
+
+Override paths when needed:
+
+```bash
+set UE_ROOT=C:\Program Files\Epic Games\UE_5.7
+vx just package
+```
+
+To test an unpublished local core checkout, use the source-build path
+explicitly:
+
+```bash
+set DCC_MCP_CORE_ROOT=G:\PycharmProjects\github\dcc-mcp-core
+vx just package-local-core
+```
+
 ---
 
 ## Quick Start
@@ -123,6 +178,9 @@ Point your MCP host at `http://127.0.0.1:8765/mcp`.
 |-----------|-------------|
 | `unreal_actors__list_actors` | List all actors in the current level |
 | `unreal_actors__spawn_actor` | Spawn an actor by class at a world position |
+| `unreal_automation__mcp_self_check` | Validate the active MCP server without restarting it |
+| `unreal_automation__list_automation_tests` | List native Unreal Automation tests |
+| `unreal_automation__queue_automation_tests` | Queue native Unreal Automation tests from MCP |
 
 ---
 
@@ -147,12 +205,36 @@ my-unreal-skill/
 ---
 name: my-unreal-skill
 description: "What this skill does"
-dcc: unreal
-version: "1.0.0"
-tags: [unreal, my-tag]
 license: "MIT"
-depends: []
+allowed-tools: Bash Read
+metadata:
+  dcc-mcp:
+    dcc: unreal
+    version: "1.0.0"
+    layer: domain
+    tags: "unreal, my-tag"
+    tools: tools.yaml
 ---
+```
+
+Declare MCP tools in a sibling `tools.yaml`:
+
+```yaml
+tools:
+  - name: my_tool
+    description: Do something in the Unreal Editor.
+    source_file: scripts/my_tool.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      properties:
+        param:
+          type: string
 ```
 
 ### Script pattern (recommended)
@@ -245,11 +327,12 @@ set DCC_MCP_UNREAL_SKILL_PATHS=C:\my\studio\unreal-skills;C:\shared\skills
 dcc-mcp-unreal
 ├── src/dcc_mcp_unreal/
 │   ├── __init__.py          ← Public API: start_server, stop_server, helpers
-│   ├── server.py            ← UnrealMcpServer, start_server(), stop_server()
+│   ├── server.py            ← DccServerBase adapter, dispatcher, start/stop
 │   ├── api.py               ← unreal_success/error/from_exception, with_unreal
 │   └── skills/              ← Built-in skill packages
 │       └── unreal-actors/
 │           ├── SKILL.md
+│           ├── tools.yaml
 │           └── scripts/
 │               ├── list_actors.py
 │               └── spawn_actor.py
@@ -268,8 +351,9 @@ dcc-mcp-unreal          (this package)
 `dcc-mcp-core` handles all MCP protocol plumbing. `dcc-mcp-unreal` only
 provides:
 1. Unreal-specific path resolution for the skills directory
-2. Convenience helpers (`unreal_success`, `@with_unreal`, etc.)
-3. Built-in skills for common Unreal operations
+2. Unreal main-thread dispatch for in-process skill execution
+3. Convenience helpers (`unreal_success`, `@with_unreal`, etc.)
+4. Built-in skills for common Unreal operations
 
 ---
 
@@ -279,7 +363,7 @@ provides:
 - [x] Project structure mirroring `dcc-mcp-maya`
 - [x] `unreal_success` / `unreal_error` / `unreal_from_exception` helpers
 - [x] `@with_unreal` decorator
-- [x] `UnrealMcpServer` wrapper around `create_skill_manager`
+- [x] `UnrealMcpServer` adapter built on `DccServerBase`
 - [x] `unreal-actors` skill (list, spawn)
 - [x] Unit tests (no real UE required)
 

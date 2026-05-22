@@ -15,7 +15,13 @@
     "IsExperimentalVersion": false,
     "Installed": false,
     "EnabledByDefault": true,
-    "Modules": [],
+    "Modules": [
+        {
+            "Name": "DccMcpUnreal",
+            "Type": "Editor",
+            "LoadingPhase": "PostEngineInit"
+        }
+    ],
     "Plugins": [
         {
             "Name": "PythonScriptPlugin",

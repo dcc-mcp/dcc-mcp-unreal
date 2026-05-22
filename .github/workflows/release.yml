@@ -9,6 +9,10 @@ on:
         description: "Tag name for manual build (e.g. v0.2.0). Leave empty to only run release-please."
         required: false
         default: ""
+      core_version:
+        description: "dcc-mcp-core release tag/version to download, for example v0.17.20"
+        required: false
+        default: "latest"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,7 +30,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name || inputs.tag_name }}
+      tag_name: ${{ steps.release.outputs.tag_name || github.event.inputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v4
@@ -39,7 +43,7 @@ jobs:
   # ── Build wheel — only when release-please creates a release ───────────────
   build:
     needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
+    if: needs.release-please.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,8 +67,89 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
+
+  # ── Build Unreal plugin packages on a self-hosted UE runner ───────────────
+  build-unreal-plugin:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
+    runs-on: [self-hosted, Windows, X64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue_version: "5.7"
+            ue_root: C:\Program Files\Epic Games\UE_5.7
+            package_mode: native
+            artifact_suffix: win64
+          - ue_version: "5.2"
+            ue_root: C:\Program Files\Epic Games\UE_5.2
+            package_mode: native
+            artifact_suffix: win64
+          - ue_version: "4.18"
+            ue_root: C:\Program Files\Epic Games\UE_4.18
+            package_mode: python-only
+            artifact_suffix: python-only
+    env:
+      CORE_REPO: loonghao/dcc-mcp-core
+      CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python build tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatchling build pyyaml ruff pytest
+
+      - name: Validate Python package and skills
+        shell: pwsh
+        run: |
+          python tools/lint_skills.py --error-only
+          python -m ruff check src tests unreal/plugin/Content/Python
+          python -m pytest
+
+      - name: Download dcc-mcp-core wheel from release
+        id: core
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
+          $tag = "${env:CORE_VERSION}"
+          if ($tag -eq "" -or $tag -eq "latest") {
+            gh release download --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+          } else {
+            gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+          }
+          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded" }
+          "wheel=$($wheel.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Output "Using core wheel: $($wheel.FullName)"
+
+      - name: Build distributable uplugin
+        shell: pwsh
+        env:
+          UE_ROOT: ${{ matrix.ue_root }}
+          DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
+        run: |
+          python packaging/build_distributable.py `
+            --ue-root "${env:UE_ROOT}" `
+            --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
+            --core-wheel "${{ steps.core.outputs.wheel }}"
+
+      - name: Upload Unreal plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-plugin-ue${{ matrix.ue_version }}-${{ matrix.artifact_suffix }}
+          path: dist/DccMcpUnreal-*-ue${{ matrix.ue_version }}-${{ matrix.artifact_suffix }}.zip
+          if-no-files-found: error
 
   # ── Publish to PyPI ─────────────────────────────────────────────────────────
   publish:
@@ -81,7 +166,7 @@ jobs:
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
 
       - name: List dist
@@ -95,7 +180,7 @@ jobs:
 
   # ── Attach wheels to GitHub Release ─────────────────────────────────────────
   attach-release-assets:
-    needs: [release-please, publish]
+    needs: [release-please, publish, build-unreal-plugin]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -105,11 +190,20 @@ jobs:
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
+
+      - name: Download Unreal plugin package
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unreal-plugin-*
+          path: unreal-plugin/
+          merge-multiple: true
 
       - name: Attach wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: dist/*
+          files: |
+            dist/*
+            unreal-plugin/*.zip

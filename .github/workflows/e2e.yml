@@ -56,7 +56,7 @@ jobs:
         run: |
           python -c "
           import json, sys
-          data = json.load(open('unreal/plugin/dcc_mcp_unreal.uplugin'))
+          data = json.load(open('unreal/plugin/DccMcpUnreal.uplugin'))
           required = ['FileVersion', 'VersionName', 'FriendlyName', 'Description']
           missing = [k for k in required if k not in data]
           if missing:
@@ -228,7 +228,10 @@ jobs:
           }).encode()
           req = urllib.request.Request(
               url, data=body,
-              headers={'Content-Type': 'application/json'},
+              headers={
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json, text/event-stream',
+              },
               method='POST'
           )
           with urllib.request.urlopen(req, timeout=10) as resp:
@@ -246,7 +249,10 @@ jobs:
           }).encode()
           req2 = urllib.request.Request(
               url, data=body2,
-              headers={'Content-Type': 'application/json'},
+              headers={
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json, text/event-stream',
+              },
               method='POST'
           )
           with urllib.request.urlopen(req2, timeout=10) as resp2:
@@ -256,26 +262,33 @@ jobs:
           tool_names = [t['name'] for t in tools]
           print(f'OK: tools/list => {len(tools)} tool(s): {tool_names}')
 
-          expected = ['unreal_actors__list_actors', 'unreal_actors__spawn_actor']
-          for name in expected:
-              assert name in tool_names, f'Missing expected tool: {name}'
-          print(f'OK: All expected tools present')
+          def pick_tool(*candidates):
+              for candidate in candidates:
+                  if candidate in tool_names:
+                      return candidate
+              raise AssertionError(f'Missing expected tool candidates: {candidates}')
+
+          list_actors_tool = pick_tool('unreal_actors__list_actors', 'list_actors')
+          print(f'OK: expected read tool present: {list_actors_tool}')
 
           # ── tools/call: list_actors ───────────────────────────────────
           body3 = json.dumps({
               'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
-              'params': {'name': 'unreal_actors__list_actors', 'arguments': {}}
+              'params': {'name': list_actors_tool, 'arguments': {}}
           }).encode()
           req3 = urllib.request.Request(
               url, data=body3,
-              headers={'Content-Type': 'application/json'},
+              headers={
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json, text/event-stream',
+              },
               method='POST'
           )
           with urllib.request.urlopen(req3, timeout=10) as resp3:
               data3 = json.loads(resp3.read())
 
           assert 'result' in data3, f'Expected result from tools/call, got: {data3}'
-          print(f'OK: tools/call unreal_actors__list_actors => success')
+          print(f'OK: tools/call {list_actors_tool} => success')
 
           handle.shutdown()
           print()

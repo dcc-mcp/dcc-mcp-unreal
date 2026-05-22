@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "dcc-mcp-core>=0.12.18,<1.0.0",
+    "dcc-mcp-core>=0.17.20,<1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +53,9 @@ unreal = "dcc_mcp_unreal:UnrealMcpServer"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dcc_mcp_unreal"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/dcc_mcp_unreal/skills" = "dcc_mcp_unreal/skills"
 
 # Version is managed by release-please — do not edit manually.
 
