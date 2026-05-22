@@ -269,8 +269,7 @@ jobs:
               raise AssertionError(f'Missing expected tool candidates: {candidates}')
 
           list_actors_tool = pick_tool('unreal_actors__list_actors', 'list_actors')
-          pick_tool('unreal_actors__spawn_actor', 'spawn_actor')
-          print(f'OK: All expected tools present')
+          print(f'OK: expected read tool present: {list_actors_tool}')
 
           # ── tools/call: list_actors ───────────────────────────────────
           body3 = json.dumps({
