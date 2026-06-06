@@ -60,6 +60,7 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force"
 
       - name: Set up Python
+        id: python
         shell: pwsh
         run: |
           $pythonVersion = "3.12.10"
@@ -72,19 +73,23 @@ jobs:
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
             Remove-Item $zipPath
           }
-          Write-Host "Python $pythonVersion ready at $installDir"
-          "$installDir" >> $env:GITHUB_PATH
-          "$installDir\Scripts" >> $env:GITHUB_PATH
+          "python-dir=$installDir" >> $env:GITHUB_OUTPUT
 
       - name: Install Python build tools
         shell: pwsh
+        env:
+          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
+          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
           python -m pip install --upgrade pip
           pip install hatchling build pyyaml ruff pytest
 
       - name: Validate Python package and skills
         shell: pwsh
+        env:
+          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
+          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
           python tools/lint_skills.py --error-only
           python -m ruff check src tests unreal/plugin/Content/Python
           python -m pytest
@@ -94,7 +99,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
+          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
           New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
           $tag = "${env:CORE_VERSION}"
           if ($tag -eq "" -or $tag -eq "latest") {
@@ -109,7 +116,10 @@ jobs:
 
       - name: Build distributable uplugin
         shell: pwsh
+        env:
+          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
+          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
           python packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
