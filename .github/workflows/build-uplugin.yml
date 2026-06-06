@@ -59,6 +59,16 @@ jobs:
         shell: cmd
         run: powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force"
 
+      - name: Clean stale Python tool cache
+        shell: pwsh
+        run: |
+          $toolCache = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { Join-Path $env:RUNNER_WORKSPACE "_tool" }
+          $pythonCache = Join-Path $toolCache "Python"
+          if (Test-Path $pythonCache) {
+            Write-Host "Removing stale Python tool cache: $pythonCache"
+            Remove-Item -Recurse -Force $pythonCache
+          }
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
