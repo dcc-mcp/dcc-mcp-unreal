@@ -59,20 +59,22 @@ jobs:
         shell: cmd
         run: powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force"
 
-      - name: Clean stale Python tool cache
+      - name: Set up Python
         shell: pwsh
         run: |
-          $toolCache = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { Join-Path $env:RUNNER_WORKSPACE "_tool" }
-          $pythonCache = Join-Path $toolCache "Python"
-          if (Test-Path $pythonCache) {
-            Write-Host "Removing stale Python tool cache: $pythonCache"
-            Remove-Item -Recurse -Force $pythonCache
+          $pythonVersion = "3.12.10"
+          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
+          if (-not (Test-Path "$installDir\python.exe")) {
+            $zipUrl = "https://github.com/actions/python-versions/releases/download/$pythonVersion-14343898437/python-$pythonVersion-win32-x64.zip"
+            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-x64.zip"
+            Write-Host "Downloading Python $pythonVersion from actions/python-versions"
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+            Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            Remove-Item $zipPath
           }
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          Add-Content $env:GITHUB_PATH $installDir
+          Add-Content $env:GITHUB_PATH "$installDir\Scripts"
+          Write-Host "Python $pythonVersion ready at $installDir"
 
       - name: Install Python build tools
         shell: pwsh
