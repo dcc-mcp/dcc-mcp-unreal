@@ -9,6 +9,8 @@ on:
       - "src/**"
       - "pyproject.toml"
       - ".github/workflows/build-uplugin.yml"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       core_version:
@@ -28,6 +30,7 @@ jobs:
     # Unreal Engine is not installed on GitHub-hosted runners. Use a Windows
     # self-hosted runner with UE and VS Build Tools installed. The repository
     # runner `ue-builder` currently exposes the default labels below.
+    if: github.event_name != 'pull_request'
     runs-on: [self-hosted, Windows, X64]
     strategy:
       fail-fast: false
@@ -54,10 +57,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Bypass PowerShell execution policy
-        shell: cmd
-        run: powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force"
 
       - name: Set up Python
         shell: pwsh
@@ -122,3 +121,47 @@ jobs:
             dist/package/DccMcpUnreal/
             dist/DccMcpUnreal-*-ue${{ matrix.ue_version }}-${{ matrix.artifact_suffix }}.zip
           if-no-files-found: error
+
+  # PR-level smoke test that validates the Python bootstrap and build flow
+  # without a self-hosted Unreal Engine runner.
+  verify-build-flow:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        shell: pwsh
+        run: |
+          $pythonVersion = "3.12.10"
+          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
+          if (-not (Test-Path "$installDir\python.exe")) {
+            $zipUrl = "https://github.com/actions/python-versions/releases/download/$pythonVersion-14343898437/python-$pythonVersion-win32-x64.zip"
+            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-x64.zip"
+            Write-Host "Downloading Python $pythonVersion from actions/python-versions"
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+            Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            Remove-Item $zipPath
+          }
+          "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Python $pythonVersion ready at $installDir"
+
+      - name: Install Python build tools
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
+          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
+
+      - name: Validate Python package and skills
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" tools/lint_skills.py --error-only
+          & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
+          & "$env:PYTHON_HOME\python.exe" -m pytest
+
+      - name: Build plugin layout (without vendored deps)
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" packaging/build_plugin.py `
+            --python "$env:PYTHON_HOME\python.exe" `
+            --clean --zip --skip-python-deps
