@@ -72,9 +72,9 @@ jobs:
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
             Remove-Item $zipPath
           }
-          Add-Content $env:GITHUB_PATH $installDir
-          Add-Content $env:GITHUB_PATH "$installDir\Scripts"
           Write-Host "Python $pythonVersion ready at $installDir"
+          "$installDir" >> $env:GITHUB_PATH
+          "$installDir\Scripts" >> $env:GITHUB_PATH
 
       - name: Install Python build tools
         shell: pwsh
