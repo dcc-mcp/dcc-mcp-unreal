@@ -69,6 +69,14 @@ jobs:
             Write-Host "Downloading Python $pythonVersion from actions/python-versions"
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            # The actions/python-versions zip nests files under a root directory; flatten it
+            if (-not (Test-Path "$installDir\python.exe")) {
+              $nested = Get-ChildItem -Path $installDir -Directory | Select-Object -First 1
+              if ($nested) {
+                Get-ChildItem -Path $nested.FullName | Move-Item -Destination $installDir -Force
+                Remove-Item $nested.FullName -Force
+              }
+            }
             Remove-Item $zipPath
           }
           "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -141,6 +149,14 @@ jobs:
             Write-Host "Downloading Python $pythonVersion from actions/python-versions"
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            # The actions/python-versions zip nests files under a root directory; flatten it
+            if (-not (Test-Path "$installDir\python.exe")) {
+              $nested = Get-ChildItem -Path $installDir -Directory | Select-Object -First 1
+              if ($nested) {
+                Get-ChildItem -Path $nested.FullName | Move-Item -Destination $installDir -Force
+                Remove-Item $nested.FullName -Force
+              }
+            }
             Remove-Item $zipPath
           }
           "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
