@@ -60,7 +60,6 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force"
 
       - name: Set up Python
-        id: python
         shell: pwsh
         run: |
           $pythonVersion = "3.12.10"
@@ -73,35 +72,28 @@ jobs:
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
             Remove-Item $zipPath
           }
-          "python-dir=$installDir" >> $env:GITHUB_OUTPUT
+          "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Python $pythonVersion ready at $installDir"
 
       - name: Install Python build tools
         shell: pwsh
-        env:
-          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
-          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
-          python -m pip install --upgrade pip
-          pip install hatchling build pyyaml ruff pytest
+          & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
+          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
 
       - name: Validate Python package and skills
         shell: pwsh
-        env:
-          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
-          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
-          python tools/lint_skills.py --error-only
-          python -m ruff check src tests unreal/plugin/Content/Python
-          python -m pytest
+          & "$env:PYTHON_HOME\python.exe" tools/lint_skills.py --error-only
+          & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
+          & "$env:PYTHON_HOME\python.exe" -m pytest
 
       - name: Download dcc-mcp-core wheel from release
         id: core
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
-          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
-          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
           New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
           $tag = "${env:CORE_VERSION}"
           if ($tag -eq "" -or $tag -eq "latest") {
@@ -111,16 +103,13 @@ jobs:
           }
           $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded" }
-          "wheel=$($wheel.FullName)" >> $env:GITHUB_OUTPUT
+          "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
 
       - name: Build distributable uplugin
         shell: pwsh
-        env:
-          PYTHON_HOME: ${{ steps.python.outputs.python-dir }}
         run: |
-          $env:PATH = "$env:PYTHON_HOME;$env:PYTHON_HOME\Scripts;$env:PATH"
-          python packaging/build_distributable.py `
+          & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
             --core-wheel "${{ steps.core.outputs.wheel }}"
