@@ -268,13 +268,13 @@ jobs:
                       return candidate
               raise AssertionError(f'Missing expected tool candidates: {candidates}')
 
-          list_actors_tool = pick_tool('unreal_actors__list_actors', 'list_actors')
-          print(f'OK: expected read tool present: {list_actors_tool}')
+          read_tool = pick_tool('list_assets', 'get_level_info', 'get_world_settings')
+          print(f'OK: expected read tool present: {read_tool}')
 
-          # ── tools/call: list_actors ───────────────────────────────────
+          # ── tools/call: read-only tool ───────────────────────────────
           body3 = json.dumps({
               'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
-              'params': {'name': list_actors_tool, 'arguments': {}}
+              'params': {'name': read_tool, 'arguments': {}}
           }).encode()
           req3 = urllib.request.Request(
               url, data=body3,
@@ -288,7 +288,7 @@ jobs:
               data3 = json.loads(resp3.read())
 
           assert 'result' in data3, f'Expected result from tools/call, got: {data3}'
-          print(f'OK: tools/call {list_actors_tool} => success')
+          print(f'OK: tools/call {read_tool} => success')
 
           handle.shutdown()
           print()
