@@ -74,9 +74,11 @@ jobs:
             Remove-Item $zipPath
             # Remove python._pth to allow site-packages (required for pip)
             Remove-Item "$installDir\python._pth" -Force -ErrorAction SilentlyContinue
-            # Bootstrap pip via ensurepip
-            & "$installDir\python.exe" -m ensurepip --upgrade --default-pip
+            # Bootstrap pip via get-pip.py (ensurepip not available in embeddable)
+            Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$installDir\get-pip.py" -UseBasicParsing
+            & "$installDir\python.exe" "$installDir\get-pip.py"
             if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (exit code $LASTEXITCODE)" }
+            Remove-Item "$installDir\get-pip.py" -Force -ErrorAction SilentlyContinue
           }
           "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Python $pythonVersion ready at $installDir"
