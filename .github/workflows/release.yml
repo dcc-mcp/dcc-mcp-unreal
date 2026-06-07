@@ -29,16 +29,29 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name || github.event.inputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      release_created: ${{ steps.decide.outputs.release_created }}
+      tag_name: ${{ steps.decide.outputs.tag_name }}
+      version: ${{ steps.decide.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: actions/checkout@v4
+
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Decide release outputs
+        id: decide
+        env:
+          RP_CREATED: ${{ steps.release.outputs.release_created }}
+          RP_TAG: ${{ steps.release.outputs.tag_name }}
+          RP_VER: ${{ steps.release.outputs.version }}
+        run: |
+          echo "release_created=${RP_CREATED:-false}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${RP_TAG:-}" >> "$GITHUB_OUTPUT"
+          echo "version=${RP_VER:-}" >> "$GITHUB_OUTPUT"
 
   # ── Build wheel — only when release-please creates a release ───────────────
   build:
