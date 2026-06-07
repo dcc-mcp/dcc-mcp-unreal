@@ -138,44 +138,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        shell: pwsh
-        run: |
-          $pythonVersion = "3.12.10"
-          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
-          if (-not (Test-Path "$installDir\python.exe")) {
-            $zipUrl = "https://github.com/actions/python-versions/releases/download/$pythonVersion-14343898437/python-$pythonVersion-win32-x64.zip"
-            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-x64.zip"
-            Write-Host "Downloading Python $pythonVersion from actions/python-versions"
-            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
-            $extractDir = "$installDir.extract"
-            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-            Remove-Item $zipPath
-            $pythonExe = Get-ChildItem -Path $extractDir -Recurse -Filter python.exe | Select-Object -First 1
-            if (-not $pythonExe) { throw "python.exe not found in extracted zip" }
-            Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-            Move-Item -Path $pythonExe.Directory.FullName -Destination $installDir -Force
-            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Python $pythonVersion ready at $installDir"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Install Python build tools
-        shell: pwsh
-        run: |
-          & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
-          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
+        run: pip install hatchling build pyyaml ruff pytest
 
       - name: Validate Python package and skills
-        shell: pwsh
         run: |
-          & "$env:PYTHON_HOME\python.exe" tools/lint_skills.py --error-only
-          & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
-          & "$env:PYTHON_HOME\python.exe" -m pytest
+          python tools/lint_skills.py --error-only
+          ruff check src tests unreal/plugin/Content/Python
+          python -m pytest
 
       - name: Build plugin layout (without vendored deps)
-        shell: pwsh
-        run: |
-          & "$env:PYTHON_HOME\python.exe" packaging/build_plugin.py `
-            --python "$env:PYTHON_HOME\python.exe" `
-            --clean --zip --skip-python-deps
+        run: python packaging/build_plugin.py --python python --clean --zip --skip-python-deps
