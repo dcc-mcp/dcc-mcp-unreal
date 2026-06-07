@@ -59,30 +59,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.10"
+
+      - name: Set PYTHON_HOME
         shell: pwsh
         run: |
-          $pythonVersion = "3.12.10"
-          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
-          if (-not (Test-Path "$installDir\python.exe")) {
-            $zipUrl = "https://github.com/actions/python-versions/releases/download/$pythonVersion-14343898437/python-$pythonVersion-win32-x64.zip"
-            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-x64.zip"
-            Write-Host "Downloading Python $pythonVersion from actions/python-versions"
-            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
-            $extractDir = "$installDir.extract"
-            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-            Remove-Item $zipPath
-            # The zip contains a Python installer, not python.exe directly.
-            $installer = Get-ChildItem -Path $extractDir -Recurse -Filter "python-*-amd64.exe" | Select-Object -First 1
-            if (-not $installer) { throw "Python installer not found in extracted zip" }
-            Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-            & $installer.FullName /quiet InstallAllUsers=0 PrependPath=0 Include_pip=1 DefaultAllUsersTargetDir="$installDir"
-            if ($LASTEXITCODE -ne 0) { throw "Python installation failed (exit code $LASTEXITCODE)" }
-            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Python $pythonVersion ready at $installDir"
+          $pyHome = Split-Path -Parent (Get-Command python).Source
+          "PYTHON_HOME=$pyHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install Python build tools
         shell: pwsh
