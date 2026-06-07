@@ -29,9 +29,27 @@ name: E2E & Plugin Validation
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "unreal/plugin/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - ".github/workflows/e2e.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "unreal/plugin/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - ".github/workflows/e2e.yml"
   workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   # ── Layer 1: Plugin file structure verification ───────────────────────────
