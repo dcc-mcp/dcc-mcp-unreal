@@ -53,6 +53,9 @@ Thumbs.db
 /unreal/plugin/python/
 /unreal/plugin/BUILD_INFO.txt
 
+# Node.js
+node_modules/
+
 # Logs and transient package files
 *.log
 *.tmp
