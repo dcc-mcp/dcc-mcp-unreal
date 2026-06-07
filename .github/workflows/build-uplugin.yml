@@ -3,12 +3,22 @@ name: Build Unreal Plugin
 on:
   push:
     branches: [main]
+    paths:
+      - "packaging/**"
+      - "unreal/plugin/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/build-uplugin.yml"
   workflow_dispatch:
     inputs:
       core_version:
         description: "dcc-mcp-core release tag/version to download, for example v0.17.20"
         required: false
         default: "latest"
+
+concurrency:
+  group: build-uplugin-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

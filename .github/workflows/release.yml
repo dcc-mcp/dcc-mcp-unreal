@@ -2,7 +2,9 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag_name:
@@ -15,8 +17,8 @@ on:
         default: "latest"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}${{ inputs.tag_name && format('-{0}', inputs.tag_name) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: release-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -27,7 +29,7 @@ jobs:
   # ── Release Please — creates/updates the release PR ────────────────────────
   release-please:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     outputs:
       release_created: ${{ steps.decide.outputs.release_created }}
       tag_name: ${{ steps.decide.outputs.tag_name }}
@@ -56,7 +58,11 @@ jobs:
   # ── Build wheel — only when release-please creates a release ───────────────
   build:
     needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
+    if: |
+      needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
+      github.event_name == 'push' ||
+      github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +92,11 @@ jobs:
   # ── Build Unreal plugin packages on a self-hosted UE runner ───────────────
   build-unreal-plugin:
     needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
+    if: |
+      needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
+      github.event_name == 'push' ||
+      github.event_name == 'release'
     runs-on: [self-hosted, Windows, X64]
     strategy:
       fail-fast: false
@@ -167,7 +177,10 @@ jobs:
   # ── Publish to PyPI ─────────────────────────────────────────────────────────
   publish:
     needs: [release-please, build]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: |
+      needs.release-please.outputs.release_created == 'true' ||
+      github.event_name == 'push' ||
+      github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -194,7 +207,10 @@ jobs:
   # ── Attach wheels to GitHub Release ─────────────────────────────────────────
   attach-release-assets:
     needs: [release-please, publish, build-unreal-plugin]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: |
+      needs.release-please.outputs.release_created == 'true' ||
+      github.event_name == 'push' ||
+      github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -216,7 +232,7 @@ jobs:
       - name: Attach wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || github.ref_name }}
           files: |
             dist/*
             unreal-plugin/*.zip
