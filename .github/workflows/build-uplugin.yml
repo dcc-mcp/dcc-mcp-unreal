@@ -72,8 +72,13 @@ jobs:
             Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
             Remove-Item $zipPath
-            # Remove python._pth to allow site-packages (required for pip)
-            Remove-Item "$installDir\python._pth" -Force -ErrorAction SilentlyContinue
+            # Enable site module in .pth to allow site-packages (required for pip)
+            Get-ChildItem "$installDir" -Filter "python*._pth" | ForEach-Object {
+              $content = Get-Content $_.FullName
+              if (-not ($content -match "^import site$")) {
+                $content -replace "^#import site$", "import site" | Set-Content $_.FullName
+              }
+            }
             # Bootstrap pip via get-pip.py (ensurepip not available in embeddable)
             Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$installDir\get-pip.py" -UseBasicParsing
             & "$installDir\python.exe" "$installDir\get-pip.py"
