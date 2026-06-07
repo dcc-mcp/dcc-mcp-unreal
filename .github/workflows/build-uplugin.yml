@@ -155,4 +155,5 @@ jobs:
           python -m pytest
 
       - name: Build plugin layout (without vendored deps)
-        run: python packaging/build_plugin.py --python python --clean --zip --skip-python-deps
+        shell: pwsh
+        run: python packaging/build_plugin.py --python (Get-Command python).Source --clean --zip --skip-python-deps
