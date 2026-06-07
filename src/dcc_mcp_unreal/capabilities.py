@@ -2,7 +2,7 @@
 
 This module provides a single factory function :func:`unreal_capabilities` that
 returns a ``DccCapabilities`` instance declaring what this Unreal Engine integration
-supports.  The result is serialisable via ``to_dict()`` for cross-DCC protocol use.
+supports.  The result exposes attribute access for all capability flags.
 
 Supported capability flags:
 
@@ -45,7 +45,7 @@ def unreal_capabilities():
         caps = unreal_capabilities()
         print(caps.transform)     # True
         print(caps.hierarchy)     # False
-        print(caps.to_dict())     # {...}
+        print(UNREAL_CAPABILITIES_DICT)  # {...}
     """
     from dcc_mcp_core import DccCapabilities  # noqa: PLC0415
 

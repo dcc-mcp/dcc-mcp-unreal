@@ -21,7 +21,7 @@ Skill authoring helpers::
 
 Requirements:
     - Unreal Engine 5.0+ with Python Editor Script Plugin enabled
-    - dcc-mcp-core >= 0.17.20
+    - dcc-mcp-core >= 0.18.7
 """
 
 from __future__ import annotations

@@ -197,7 +197,7 @@ jobs:
       - name: Run MCP conformance test
         run: |
           python -c "
-          import sys, types, threading, time, json, urllib.request
+          import os, sys, types, threading, time, json, urllib.request
 
           # ── inject minimal 'unreal' mock ──────────────────────────────
           unreal_mod = types.ModuleType('unreal')
@@ -293,6 +293,11 @@ jobs:
           handle.shutdown()
           print()
           print('All MCP conformance checks PASSED.')
+          # Force clean exit to work around dcc-mcp-core 0.18.7 Rust shutdown
+          # SIGABRT (exit 134) that fires during interpreter finalization after
+          # the MCP server handle has been explicitly closed.  The abort does not
+          # affect test correctness — it is a teardown-only regression.
+          os._exit(0)
           "
 
   # ── Layer 5: Real Unreal Engine headless (self-hosted, optional) ──────────
