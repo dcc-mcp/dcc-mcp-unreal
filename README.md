@@ -63,7 +63,7 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 | Unreal Engine | 5.0+ |
 | Unreal Python Editor Script Plugin | must be **enabled** |
 | Python (embedded in UE) | 3.9+ (UE 5.0 ships Python 3.9) |
-| dcc-mcp-core | >= 0.17.20 |
+| dcc-mcp-core | >= 0.18.7, < 1.0.0 |
 
 ### Enable the Python Plugin
 

@@ -29,6 +29,7 @@ PLUGIN_SOURCE = REPO_ROOT / "unreal" / "plugin" / "DccMcpUnreal.uplugin"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.7"))
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 DEFAULT_CORE_WHEEL_URL = os.environ.get("DCC_MCP_CORE_WHEEL_URL")
+DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.18.7,<1.0.0")
 
 
 def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:
@@ -187,7 +188,7 @@ def main() -> None:
     parser.add_argument("--python", default=None, type=Path, help="Python executable for vendoring dependencies")
     parser.add_argument("--core-wheel", default=DEFAULT_CORE_WHEEL, type=Path, help="Local dcc-mcp-core wheel to vendor")
     parser.add_argument("--core-wheel-url", default=DEFAULT_CORE_WHEEL_URL, help="URL to a dcc-mcp-core wheel artifact")
-    parser.add_argument("--core-spec", default="dcc-mcp-core>=0.17.20,<1.0.0", help="dcc-mcp-core spec when no wheel is provided")
+    parser.add_argument("--core-spec", default=DEFAULT_CORE_SPEC, help="dcc-mcp-core spec when no wheel is provided")
     parser.add_argument("--core-root", default=str(REPO_ROOT.parent / "dcc-mcp-core"), type=Path)
     parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
