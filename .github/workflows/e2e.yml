@@ -286,7 +286,7 @@ jobs:
                       return candidate
               raise AssertionError(f'Missing expected tool candidates: {candidates}')
 
-          read_tool = pick_tool('list_assets', 'get_level_info', 'get_world_settings')
+          read_tool = pick_tool('unreal_assets__list_assets', 'unreal_level__get_level_info', 'unreal_level__get_world_settings')
           print(f'OK: expected read tool present: {read_tool}')
 
           # ── tools/call: read-only tool ───────────────────────────────
