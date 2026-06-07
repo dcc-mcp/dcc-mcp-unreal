@@ -72,10 +72,13 @@ jobs:
             Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
             Remove-Item $zipPath
-            $pythonExe = Get-ChildItem -Path $extractDir -Recurse -Filter python.exe | Select-Object -First 1
-            if (-not $pythonExe) { throw "python.exe not found in extracted zip" }
+            # The zip contains a Python installer, not python.exe directly.
+            $installer = Get-ChildItem -Path $extractDir -Recurse -Filter "python-*-amd64.exe" | Select-Object -First 1
+            if (-not $installer) { throw "Python installer not found in extracted zip" }
             Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-            Move-Item -Path $pythonExe.Directory.FullName -Destination $installDir -Force
+            New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+            & $installer.FullName /quiet InstallAllUsers=0 PrependPath=0 Include_pip=1 DefaultAllUsersTargetDir="$installDir"
+            if ($LASTEXITCODE -ne 0) { throw "Python installation failed (exit code $LASTEXITCODE)" }
             Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
           }
           "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
