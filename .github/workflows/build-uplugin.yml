@@ -153,13 +153,35 @@ jobs:
           if ((Test-Path "$msvcTargetDir\VC\Tools\MSVC") -and (Get-ChildItem "$msvcTargetDir\VC\Tools\MSVC" -Directory | Where-Object { $_.Name -like "$msvcVersion.*" })) {
             Write-Host "MSVC $msvcVersion toolchain already present at $msvcTargetDir"
           } else {
-            # Install msvc-kit CLI if not present (single pre-built binary, no VS dependency)
-            if (-not (Test-Path $msvcKitExe)) {
-              Write-Host "Downloading msvc-kit CLI..."
+            # Pin msvc-kit version to prevent regression from `latest` tag
+            $msvcKitVersion = "v0.2.13"
+            # Check current version; force re-download if stale or unknown
+            $needDownload = $false
+            if (Test-Path $msvcKitExe) {
+              try {
+                $currentVersion = & $msvcKitExe --version 2>$null
+                if ($LASTEXITCODE -eq 0 -and $currentVersion -match $msvcKitVersion) {
+                  Write-Host "msvc-kit $msvcKitVersion already present at $msvcKitExe"
+                  $needDownload = $false
+                } else {
+                  Write-Host "msvc-kit version mismatch (current: $currentVersion); re-downloading $msvcKitVersion..."
+                  $needDownload = $true
+                }
+              } catch {
+                Write-Host "Failed to check msvc-kit version; re-downloading..."
+                $needDownload = $true
+              }
+            } else {
+              $needDownload = $true
+            }
+            if ($needDownload) {
+              # Remove stale binary first so the target dir is clean
+              Remove-Item $msvcKitExe -Force -ErrorAction SilentlyContinue
+              Write-Host "Downloading msvc-kit $msvcKitVersion..."
               New-Item -ItemType Directory -Force -Path "C:\msvc-kit\bin" | Out-Null
-              $exeUrl = "https://github.com/loonghao/msvc-kit/releases/latest/download/msvc-kit-x86_64-windows.exe"
+              $exeUrl = "https://github.com/loonghao/msvc-kit/releases/download/$msvcKitVersion/msvc-kit-x86_64-windows.exe"
               Invoke-WebRequest -Uri $exeUrl -OutFile $msvcKitExe -UseBasicParsing
-              Write-Host "msvc-kit CLI installed at $msvcKitExe"
+              Write-Host "msvc-kit $msvcKitVersion installed at $msvcKitExe"
             }
             # Download MSVC 14.36 toolchain only (no SDK — UE ships its own)
             Write-Host "Downloading MSVC $msvcVersion toolchain via msvc-kit..."
