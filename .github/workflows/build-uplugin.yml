@@ -92,7 +92,7 @@ jobs:
         shell: pwsh
         run: |
           & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
-          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
+          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest editables
 
       - name: Install dcc-mcp-unreal
         shell: pwsh
@@ -155,7 +155,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python build tools
-        run: pip install hatchling build pyyaml ruff pytest
+        run: pip install hatchling build pyyaml ruff pytest editables
 
       - name: Install dcc-mcp-unreal
         run: pip install -e ".[dev]"
