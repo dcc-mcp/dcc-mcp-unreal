@@ -115,11 +115,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
           $tag = "${env:CORE_VERSION}"
           if ($tag -eq "" -or $tag -eq "latest") {
-            gh release download --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+            gh release download --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
           } else {
-            gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+            gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
           }
-          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded" }
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
