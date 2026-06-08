@@ -115,6 +115,24 @@ def extract_frontmatter(content: str) -> Optional[dict]:
         return _parse_yaml_minimal(yaml_text)
 
 
+def parse_yaml_file(path: Path) -> Optional[dict]:
+    try:
+        import yaml  # type: ignore[import]
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def get_dcc_mcp_metadata(fm: dict) -> dict:
+    metadata = fm.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    dcc_mcp = metadata.get("dcc-mcp") or metadata.get("dcc_mcp")
+    return dcc_mcp if isinstance(dcc_mcp, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Individual rule checks
 # ---------------------------------------------------------------------------
@@ -259,7 +277,31 @@ def check_name_field(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIss
 def check_dcc_field(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIssue]:
     issues: List[LintIssue] = []
     file_path = str(skill_dir / "SKILL.md")
-    dcc = fm.get("dcc", "python")
+    dcc_mcp = get_dcc_mcp_metadata(fm)
+    dcc = dcc_mcp.get("dcc")
+
+    if "dcc" in fm:
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="ERROR",
+                rule="TOP_LEVEL_DCC",
+                message="top-level 'dcc' is obsolete; use metadata.dcc-mcp.dcc",
+            )
+        )
+
+    if not dcc:
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="ERROR",
+                rule="NO_DCC",
+                message="frontmatter missing metadata.dcc-mcp.dcc",
+            )
+        )
+        return issues
 
     if dcc not in VALID_DCC_VALUES:
         issues.append(
@@ -288,7 +330,18 @@ def check_dcc_field(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIssu
 
 def check_version_field(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIssue]:
     issues: List[LintIssue] = []
-    version = fm.get("version", "1.0.0")
+    if "version" in fm:
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=str(skill_dir / "SKILL.md"),
+                severity="ERROR",
+                rule="TOP_LEVEL_VERSION",
+                message="top-level 'version' is obsolete; use metadata.dcc-mcp.version",
+            )
+        )
+
+    version = get_dcc_mcp_metadata(fm).get("version", "1.0.0")
     if version and not SEMVER_RE.match(str(version)):
         issues.append(
             LintIssue(
@@ -299,6 +352,73 @@ def check_version_field(skill_dir: Path, skill_name: str, fm: dict) -> List[Lint
                 message=f"version '{version}' does not follow semver (e.g. '1.0.0')",
             )
         )
+    return issues
+
+
+def check_metadata_shape(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIssue]:
+    issues: List[LintIssue] = []
+    file_path = str(skill_dir / "SKILL.md")
+    dcc_mcp = get_dcc_mcp_metadata(fm)
+
+    if not dcc_mcp:
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="ERROR",
+                rule="NO_DCC_MCP_METADATA",
+                message="frontmatter missing metadata.dcc-mcp block",
+            )
+        )
+        return issues
+
+    if not dcc_mcp.get("layer"):
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="ERROR",
+                rule="NO_LAYER",
+                message="metadata.dcc-mcp.layer is required",
+            )
+        )
+
+    tools_ref = dcc_mcp.get("tools")
+    if tools_ref and tools_ref != "tools.yaml":
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="WARNING",
+                rule="TOOLS_REF",
+                message=f"metadata.dcc-mcp.tools should normally be 'tools.yaml', got {tools_ref!r}",
+            )
+        )
+
+    for legacy_key in ("tags", "depends", "tools"):
+        if legacy_key in fm:
+            issues.append(
+                LintIssue(
+                    skill=skill_name,
+                    file=file_path,
+                    severity="ERROR",
+                    rule="TOP_LEVEL_DCC_MCP_KEY",
+                    message=f"top-level '{legacy_key}' is obsolete; move DCC-MCP extensions under metadata.dcc-mcp",
+                )
+            )
+
+    allowed_tools = fm.get("allowed-tools")
+    if isinstance(allowed_tools, list):
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=file_path,
+                severity="ERROR",
+                rule="ALLOWED_TOOLS_LIST",
+                message="'allowed-tools' must be a space-separated string, not a YAML list",
+            )
+        )
+
     return issues
 
 
@@ -359,27 +479,134 @@ def check_scripts_section(skill_dir: Path, skill_name: str, content: str) -> Lis
     return issues
 
 
-def check_tools_source_files(skill_dir: Path, skill_name: str, fm: dict) -> List[LintIssue]:
-    """Warn if tools[].source_file paths don't exist in scripts/ dir."""
+def load_tools_yaml(skill_dir: Path, skill_name: str, fm: dict) -> Tuple[List[LintIssue], List[dict]]:
     issues: List[LintIssue] = []
-    tools = fm.get("tools", [])
-    if not tools or not isinstance(tools, list):
-        return issues
+    dcc_mcp = get_dcc_mcp_metadata(fm)
+    tools_ref = dcc_mcp.get("tools")
+    if not tools_ref:
+        return issues, []
+
+    tools_path = skill_dir / str(tools_ref)
+    if not tools_path.exists():
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=str(skill_dir / "SKILL.md"),
+                severity="ERROR",
+                rule="TOOLS_YAML_MISSING",
+                message=f"metadata.dcc-mcp.tools references missing file '{tools_ref}'",
+            )
+        )
+        return issues, []
+
+    data = parse_yaml_file(tools_path)
+    if data is None:
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=str(tools_path),
+                severity="ERROR",
+                rule="TOOLS_YAML_PARSE",
+                message="tools.yaml could not be parsed as YAML",
+            )
+        )
+        return issues, []
+
+    tools = data.get("tools", [])
+    if not isinstance(tools, list):
+        issues.append(
+            LintIssue(
+                skill=skill_name,
+                file=str(tools_path),
+                severity="ERROR",
+                rule="TOOLS_YAML_SHAPE",
+                message="tools.yaml must contain a top-level list field named 'tools'",
+            )
+        )
+        return issues, []
+
+    return issues, [t for t in tools if isinstance(t, dict)]
+
+
+def check_tools_yaml(skill_dir: Path, skill_name: str, tools: List[dict]) -> List[LintIssue]:
+    """Check tools.yaml entries for current dcc-mcp-core metadata fields."""
+    issues: List[LintIssue] = []
+    tools_path = str(skill_dir / "tools.yaml")
+
+    required_keys = ("name", "description", "source_file", "execution", "affinity", "input_schema")
+    safety_keys = ("read_only", "destructive", "idempotent")
 
     for tool_entry in tools:
-        if not isinstance(tool_entry, dict):
-            continue
-        source_file = tool_entry.get("source_file", "")
+        tool_name = str(tool_entry.get("name", "<unnamed>"))
+        for key in required_keys:
+            if key not in tool_entry:
+                issues.append(
+                    LintIssue(
+                        skill=skill_name,
+                        file=tools_path,
+                        severity="ERROR",
+                        rule="TOOL_FIELD_MISSING",
+                        message=f"tool '{tool_name}' missing required field '{key}'",
+                    )
+                )
+
+        for key in safety_keys:
+            if key not in tool_entry:
+                issues.append(
+                    LintIssue(
+                        skill=skill_name,
+                        file=tools_path,
+                        severity="ERROR",
+                        rule="TOOL_SAFETY_MISSING",
+                        message=f"tool '{tool_name}' missing safety field '{key}'",
+                    )
+                )
+
+        execution = tool_entry.get("execution")
+        if execution not in (None, "sync", "async"):
+            issues.append(
+                LintIssue(
+                    skill=skill_name,
+                    file=tools_path,
+                    severity="ERROR",
+                    rule="TOOL_EXECUTION",
+                    message=f"tool '{tool_name}' has invalid execution '{execution}'",
+                )
+            )
+
+        affinity = tool_entry.get("affinity", tool_entry.get("thread_affinity"))
+        if affinity not in (None, "main", "any"):
+            issues.append(
+                LintIssue(
+                    skill=skill_name,
+                    file=tools_path,
+                    severity="ERROR",
+                    rule="TOOL_AFFINITY",
+                    message=f"tool '{tool_name}' has invalid affinity '{affinity}'",
+                )
+            )
+
+        if execution == "async" and not tool_entry.get("timeout_hint_secs"):
+            issues.append(
+                LintIssue(
+                    skill=skill_name,
+                    file=tools_path,
+                    severity="ERROR",
+                    rule="ASYNC_TIMEOUT",
+                    message=f"tool '{tool_name}' is async but missing timeout_hint_secs",
+                )
+            )
+
+        source_file = str(tool_entry.get("source_file", ""))
         if not source_file:
             continue
-        # source_file is relative to skill_dir
         full_path = skill_dir / source_file
         if not full_path.exists():
             issues.append(
                 LintIssue(
                     skill=skill_name,
-                    file=str(skill_dir / "SKILL.md"),
-                    severity="WARNING",
+                    file=tools_path,
+                    severity="ERROR",
                     rule="TOOL_SOURCE_MISSING",
                     message=f"tools entry source_file '{source_file}' not found at {full_path}",
                 )
@@ -395,7 +622,7 @@ def check_depends_exist(
 ) -> List[LintIssue]:
     """Warn if depends[] references skill names that don't exist."""
     issues: List[LintIssue] = []
-    depends = fm.get("depends", [])
+    depends = get_dcc_mcp_metadata(fm).get("depends", [])
     if not depends or not isinstance(depends, list):
         return issues
 
@@ -497,11 +724,14 @@ def lint_skill(
         return issues, info
 
     issues += check_name_field(skill_dir, skill_name, fm)
+    issues += check_metadata_shape(skill_dir, skill_name, fm)
     issues += check_dcc_field(skill_dir, skill_name, fm)
     issues += check_version_field(skill_dir, skill_name, fm)
     issues += check_description_field(skill_dir, skill_name, fm)
     issues += check_scripts_section(skill_dir, skill_name, content)
-    issues += check_tools_source_files(skill_dir, skill_name, fm)
+    tools_issues, tools = load_tools_yaml(skill_dir, skill_name, fm)
+    issues += tools_issues
+    issues += check_tools_yaml(skill_dir, skill_name, tools)
     issues += check_depends_exist(skill_dir, skill_name, fm, all_skill_names)
 
     return issues, info

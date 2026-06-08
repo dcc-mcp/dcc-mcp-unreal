@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_core.skill import skill_error
-from dcc_mcp_core.skill import skill_success
+from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry

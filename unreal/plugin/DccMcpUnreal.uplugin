@@ -1,0 +1,31 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1.0",
+    "FriendlyName": "DCC MCP Unreal",
+    "Description": "Embeds a standards-compliant MCP Streamable HTTP server inside Unreal Engine. Allows MCP-compatible AI agents (Claude, Cursor, …) to control Unreal Editor via tools.",
+    "Category": "Scripting",
+    "CreatedBy": "dcc-mcp",
+    "CreatedByURL": "https://github.com/loonghao/dcc-mcp-unreal",
+    "DocsURL": "https://github.com/loonghao/dcc-mcp-unreal#readme",
+    "MarketplaceURL": "",
+    "SupportURL": "https://github.com/loonghao/dcc-mcp-unreal/issues",
+    "CanContainContent": true,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "EnabledByDefault": true,
+    "Modules": [
+        {
+            "Name": "DccMcpUnreal",
+            "Type": "Editor",
+            "LoadingPhase": "PostEngineInit"
+        }
+    ],
+    "Plugins": [
+        {
+            "Name": "PythonScriptPlugin",
+            "Enabled": true
+        }
+    ]
+}

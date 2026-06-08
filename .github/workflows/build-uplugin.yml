@@ -1,0 +1,166 @@
+name: Build Unreal Plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packaging/**"
+      - "unreal/plugin/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/build-uplugin.yml"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      core_version:
+        description: "dcc-mcp-core release tag/version to download, for example v0.17.20"
+        required: false
+        default: "latest"
+
+concurrency:
+  group: build-uplugin-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-uplugin:
+    # Unreal Engine is not installed on GitHub-hosted runners. Use a Windows
+    # self-hosted runner with UE and VS Build Tools installed. The repository
+    # runner `ue-builder` currently exposes the default labels below.
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Windows, X64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue_version: "5.7"
+            ue_root: C:\Program Files\Epic Games\UE_5.7
+            package_mode: native
+            artifact_suffix: win64
+          - ue_version: "5.2"
+            ue_root: C:\Program Files\Epic Games\UE_5.2
+            package_mode: native
+            artifact_suffix: win64
+          - ue_version: "4.18"
+            ue_root: C:\Program Files\Epic Games\UE_4.18
+            package_mode: python-only
+            artifact_suffix: python-only
+    env:
+      UE_VERSION: ${{ matrix.ue_version }}
+      UE_ROOT: ${{ matrix.ue_root }}
+      DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
+      CORE_REPO: loonghao/dcc-mcp-core
+      CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        shell: pwsh
+        run: |
+          $pythonVersion = "3.12.10"
+          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
+          if (-not (Test-Path "$installDir\python.exe")) {
+            # Use python.org embeddable zip — no installer, no registry access needed
+            $zipUrl = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion-embed-amd64.zip"
+            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-embed-amd64.zip"
+            Write-Host "Downloading Python $pythonVersion embeddable from python.org"
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+            Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            Remove-Item $zipPath
+            # Enable site module in .pth to allow site-packages (required for pip)
+            Get-ChildItem "$installDir" -Filter "python*._pth" | ForEach-Object {
+              $content = Get-Content $_.FullName
+              if (-not ($content -match "^import site$")) {
+                $content -replace "^#import site$", "import site" | Set-Content $_.FullName
+              }
+            }
+            # Bootstrap pip via get-pip.py (ensurepip not available in embeddable)
+            Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$installDir\get-pip.py" -UseBasicParsing
+            & "$installDir\python.exe" "$installDir\get-pip.py"
+            if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed (exit code $LASTEXITCODE)" }
+            Remove-Item "$installDir\get-pip.py" -Force -ErrorAction SilentlyContinue
+          }
+          "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Python $pythonVersion ready at $installDir"
+
+      - name: Install Python build tools
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
+          & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
+
+      - name: Validate Python package and skills
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" tools/lint_skills.py --error-only
+          & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
+          & "$env:PYTHON_HOME\python.exe" -m pytest
+
+      - name: Download dcc-mcp-core wheel from release
+        id: core
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
+          $tag = "${env:CORE_VERSION}"
+          if ($tag -eq "" -or $tag -eq "latest") {
+            gh release download --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+          } else {
+            gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+          }
+          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded" }
+          "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Output "Using core wheel: $($wheel.FullName)"
+
+      - name: Build distributable uplugin
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
+            --ue-root "${env:UE_ROOT}" `
+            --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
+            --core-wheel "${{ steps.core.outputs.wheel }}"
+
+      - name: Upload uplugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DccMcpUnreal-ue${{ matrix.ue_version }}-${{ matrix.artifact_suffix }}
+          path: |
+            dist/package/DccMcpUnreal/
+            dist/DccMcpUnreal-*-ue${{ matrix.ue_version }}-${{ matrix.artifact_suffix }}.zip
+          if-no-files-found: error
+
+  # PR-level smoke test that validates the Python bootstrap and build flow
+  # without a self-hosted Unreal Engine runner.
+  verify-build-flow:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python build tools
+        run: pip install hatchling build pyyaml ruff pytest
+
+      - name: Install dcc-mcp-unreal
+        run: pip install -e ".[dev]"
+
+      - name: Validate Python package and skills
+        run: |
+          python tools/lint_skills.py --error-only
+          ruff check src tests unreal/plugin/Content/Python
+          python -m pytest
+
+      - name: Build plugin layout (without vendored deps)
+        shell: pwsh
+        run: python packaging/build_plugin.py --python (Get-Command python).Source --clean --zip --skip-python-deps

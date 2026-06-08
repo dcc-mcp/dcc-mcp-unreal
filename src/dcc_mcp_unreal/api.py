@@ -94,20 +94,31 @@ class UnrealNotAvailableError(ImportError):
 
 
 def is_unreal_available() -> bool:
-    """Return ``True`` if the ``unreal`` module can be imported."""
+    """Return ``True`` if the real Unreal Engine ``unreal`` module is available.
+
+    Returns ``False`` when running outside Unreal Engine, including when the
+    project's own ``unreal/`` directory is on ``sys.path`` and Python resolves
+    it as a namespace package (which has no real UE API).
+    """
     try:
         import unreal  # noqa: F401
-
-        return True
     except ImportError:
         return False
+
+    # A real unreal module always exposes top-level engine symbols.
+    # A namespace package from the project's unreal/ directory does not.
+    import unreal as _ue  # noqa: PLC0415
+
+    return hasattr(_ue, "log") and hasattr(_ue, "EditorLevelLibrary")
 
 
 def require_unreal():
     """Import and return the ``unreal`` module.
 
     Raises:
-        UnrealNotAvailableError: If not running inside Unreal Engine.
+        UnrealNotAvailableError: If not running inside Unreal Engine, or if
+            the ``unreal`` name resolves to a namespace package rather than
+            the real Unreal Engine Python API.
 
     Example::
 
@@ -116,20 +127,27 @@ def require_unreal():
     """
     try:
         import unreal
-
-        return unreal
     except ImportError as exc:
         raise UnrealNotAvailableError(
             "The 'unreal' module is not available. "
             "Ensure Unreal Engine is running with the Python Editor Script Plugin enabled."
         ) from exc
 
+    # Guard against the project's own unreal/ directory being resolved as a
+    # namespace package (which lacks the real UE API).
+    if not (hasattr(unreal, "log") and hasattr(unreal, "EditorLevelLibrary")):
+        raise UnrealNotAvailableError(
+            "The 'unreal' module was found but does not expose Unreal Engine API symbols. "
+            "Ensure you are running inside Unreal Engine with the Python Editor Script Plugin enabled."
+        )
+    return unreal
+
 
 def get_unreal():
     """Return the ``unreal`` module or ``None`` if not available.
 
     Unlike :func:`require_unreal`, this never raises; it returns ``None``
-    when Unreal is not available.
+    when Unreal is not available or the module is a namespace package.
 
     Example::
 
@@ -140,6 +158,8 @@ def get_unreal():
     try:
         import unreal
 
+        if not (hasattr(unreal, "log") and hasattr(unreal, "EditorLevelLibrary")):
+            return None
         return unreal
     except ImportError:
         return None
