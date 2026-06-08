@@ -145,35 +145,65 @@ jobs:
         if: matrix.vctoolchain_version != ''
         shell: pwsh
         run: |
-          $component = "$env:MSVC_14_36_COMPONENT"
-          $installPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
-          $vsInstaller = "$installPath\vs_BuildTools.exe"
-          $msvcDir = "$installPath\VC\Tools\MSVC\14.36.32532"
-          if (-not (Test-Path $msvcDir)) {
-            Write-Host "MSVC 14.36 toolchain not found"
-            if (-not (Test-Path $vsInstaller)) {
-              Write-Host "vs_BuildTools.exe not found --- downloading bootstrapper"
-              $bootstrapperUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
-              $bootstrapperPath = "$env:RUNNER_TEMP\vs_BuildTools.exe"
-              Invoke-WebRequest -Uri $bootstrapperUrl -OutFile $bootstrapperPath -UseBasicParsing
-              $vsInstaller = $bootstrapperPath
+          $component = "Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64"
+          # UBT discovers toolchains via VS installer metadata, not a fixed path.
+          # Check the canonical BuildTools path as a fast probe, but don't rely on it.
+          $probeDirs = @(
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.36.32532",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\14.36.32532",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.36.32532",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.36.32532"
+          )
+          foreach ($d in $probeDirs) {
+            if (Test-Path $d) {
+              Write-Host "MSVC 14.36 toolchain already installed at $d"
+              exit 0
             }
-            $commonToolsDir = "$installPath\Common7\Tools"
-            if (Test-Path $commonToolsDir) {
-              Write-Host "VS Build Tools already installed --- modifying to add component"
-              & $vsInstaller modify --installPath $installPath --add $component --passive --norestart --wait
-            } else {
-              Write-Host "VS Build Tools not installed --- performing fresh install"
-              & $vsInstaller --installPath $installPath --add $component --passive --norestart --wait
-            }
-            $exitCode = $LASTEXITCODE
-            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
-              throw "MSVC 14.36 install failed (exit code $exitCode). Install manually: vs_BuildTools.exe install --add $component"
-            }
-            Write-Host "MSVC 14.36 toolchain installed (exit $exitCode)"
-          } else {
-            Write-Host "MSVC 14.36 toolchain already installed"
           }
+          Write-Host "MSVC 14.36 toolchain not found; locating VS installer..."
+          $vsInstaller = $null
+          # Discover existing VS 2022 installation via vswhere (ships with VS)
+          $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $existingPath = & $vswhere -latest -property installationPath 2>$null
+            if ($LASTEXITCODE -eq 0 -and $existingPath) {
+              $installPath = $existingPath.Trim()
+              Write-Host "Found existing VS installation at $installPath"
+              $vsInstaller = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe"
+            }
+          }
+          if (-not $vsInstaller) {
+            # Fallback: check edition-specific installer paths
+            $candidates = @(
+              "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\vs_BuildTools.exe",
+              "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\vs_Professional.exe",
+              "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\vs_Enterprise.exe",
+              "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\vs_Community.exe"
+            )
+            foreach ($p in $candidates) {
+              if (Test-Path $p) {
+                $vsInstaller = $p
+                $installPath = Split-Path -Parent (Split-Path -Parent $p)
+                break
+              }
+            }
+          }
+          if (-not $vsInstaller) {
+            Write-Host "No VS installer found; downloading BuildTools bootstrapper..."
+            $bootstrapper = "$env:RUNNER_TEMP\vs_buildtools.exe"
+            Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" -OutFile $bootstrapper -UseBasicParsing
+            $installPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+            Write-Host "Running fresh install to $installPath (this may take several minutes)..."
+            & $bootstrapper --add $component --passive --norestart --wait --installPath $installPath
+          } else {
+            Write-Host "Modifying installation at $installPath (this may take several minutes)..."
+            & $vsInstaller modify --installPath $installPath --add $component --passive --norestart --wait
+          }
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+            throw "MSVC 14.36 install failed (exit code $exitCode). Install manually: download VS 2022 BuildTools from https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022 and add component $component"
+          }
+          Write-Host "MSVC 14.36 toolchain installed (exit code $exitCode)"
       - name: Build distributable uplugin
         shell: pwsh
         run: |
