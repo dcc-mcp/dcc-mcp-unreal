@@ -122,7 +122,20 @@ jobs:
             gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
           }
           $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded" }
+          # PyPI fallback when GitHub Release doesn't have the wheel yet (timing race)
+          if ($null -eq $wheel) {
+            Write-Host "::warning::dcc-mcp-core wheel not found in GitHub Release; falling back to PyPI"
+            $pipVersion = ""
+            if ($tag -eq "" -or $tag -eq "latest") {
+              $latestTag = gh release view --repo "${env:CORE_REPO}" --json tagName -q '.tagName'
+              $pipVersion = $latestTag -replace "^v", ""
+            } else {
+              $pipVersion = $tag -replace "^v", ""
+            }
+            & "$env:PYTHON_HOME\python.exe" -m pip download "dcc-mcp-core-semantic==$pipVersion" --only-binary=:all: --platform win_amd64 --python-version 3.8 --dest dist/core-wheel
+            $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          }
+          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded from GitHub Release or PyPI" }
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
 
