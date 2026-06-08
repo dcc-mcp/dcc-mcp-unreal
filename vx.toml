@@ -1,0 +1,24 @@
+[project]
+name = "dcc-mcp-unreal"
+description = "Unreal Engine plugin for dcc-mcp — Python + C++ native bridge"
+
+[tools]
+python = "3.12"
+# MSVC toolchain is managed by Visual Studio Build Tools, not directly by vx.
+# UE 5.2 builds require MSVC 14.36 (VS 2022 17.6).
+# The CI workflow installs it via vs_BuildTools.exe when needed.
+
+[env]
+UE_5_ROOT = "C:\\Program Files\\Epic Games\\UE_5.7"
+UE_5_2_ROOT = "C:\\Program Files\\Epic Games\\UE_5.2"
+UE_4_ROOT = "C:\\Program Files\\Epic Games\\UE_4.18"
+VCTOOLCHAIN_VERSION = "14.36"
+MSVC_14_36_COMPONENT = "Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64"
+
+[scripts]
+# Build for each UE version using the host Python (set up by CI or `vx setup`)
+build-ue5.7 = "python packaging/build_distributable.py --ue-root \"${UE_5_ROOT}\" --mode native"
+build-ue5.2 = '''
+python packaging/build_distributable.py --ue-root "${UE_5_2_ROOT}" --mode native --vctoolchain-version "${VCTOOLCHAIN_VERSION}"
+'''
+build-ue4.18 = "python packaging/build_distributable.py --ue-root \"${UE_4_ROOT}\" --mode python-only"
