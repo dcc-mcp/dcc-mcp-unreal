@@ -193,7 +193,7 @@ jobs:
           Write-Host "Activating MSVC $msvcVersion environment (job-scoped)..."
           $envScript = & $msvcKitExe setup --script --shell powershell --dir $msvcTargetDir
           if ($LASTEXITCODE -ne 0) { throw "msvc-kit setup failed (exit code $LASTEXITCODE)" }
-          Invoke-Expression $envScript
+          Invoke-Expression ($envScript -join "`n")
           Write-Host "MSVC $msvcVersion environment activated"
       - name: Build distributable uplugin
         shell: pwsh
