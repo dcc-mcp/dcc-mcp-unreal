@@ -124,6 +124,16 @@ jobs:
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
 
+      - name: Select compatible MSVC toolchain for UE 5.2
+        # UE 5.2 engine headers use `#if __has_feature(address_sanitizer)` without
+        # guarding for compilers that don't define `__has_feature`. MSVC >= 14.4x
+        # treats this as error C4067. Pin to MSVC 14.36 (VS 2022 17.8) which is
+        # the latest toolchain compatible with UE 5.2.
+        if: matrix.ue_version == '5.2'
+        shell: pwsh
+        run: |
+          "VCToolchainVersion=14.36" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build distributable uplugin
         shell: pwsh
         run: |
