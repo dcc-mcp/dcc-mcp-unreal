@@ -157,11 +157,8 @@ jobs:
             if (-not (Test-Path $msvcKitExe)) {
               Write-Host "Downloading msvc-kit CLI..."
               New-Item -ItemType Directory -Force -Path "C:\msvc-kit\bin" | Out-Null
-              $zipUrl = "https://github.com/loonghao/msvc-kit/releases/latest/download/msvc-kit-x86_64-pc-windows-msvc.zip"
-              $zipPath = "$env:RUNNER_TEMP\msvc-kit.zip"
-              Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
-              Expand-Archive -Path $zipPath -DestinationPath "C:\msvc-kit\bin" -Force
-              Remove-Item $zipPath -Force
+              $exeUrl = "https://github.com/loonghao/msvc-kit/releases/latest/download/msvc-kit-x86_64-windows.exe"
+              Invoke-WebRequest -Uri $exeUrl -OutFile $msvcKitExe -UseBasicParsing
               Write-Host "msvc-kit CLI installed at $msvcKitExe"
             }
             # Download MSVC 14.36 toolchain only (no SDK — UE ships its own)
