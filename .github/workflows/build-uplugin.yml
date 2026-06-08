@@ -94,6 +94,11 @@ jobs:
           & "$env:PYTHON_HOME\python.exe" -m pip install --upgrade pip
           & "$env:PYTHON_HOME\python.exe" -m pip install hatchling build pyyaml ruff pytest
 
+      - name: Install dcc-mcp-unreal
+        shell: pwsh
+        run: |
+          & "$env:PYTHON_HOME\python.exe" -m pip install -e ".[dev]"
+
       - name: Validate Python package and skills
         shell: pwsh
         run: |
