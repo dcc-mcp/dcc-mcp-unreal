@@ -119,15 +119,16 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
 
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     uat = resolve_uat(args.ue_root)
-    run(
-        [
-            str(uat),
-            "BuildPlugin",
-            "-Plugin={}".format(PLUGIN_SOURCE),
-            "-Package={}".format(uat_dir),
-            "-TargetPlatforms=Win64",
-        ]
-    )
+    cmd = [
+        str(uat),
+        "BuildPlugin",
+        "-Plugin={}".format(PLUGIN_SOURCE),
+        "-Package={}".format(uat_dir),
+        "-TargetPlatforms=Win64",
+    ]
+    if args.vctoolchain_version:
+        cmd.append("-ubtargs=-VCToolchainVersion={}".format(args.vctoolchain_version))
+    run(cmd)
 
 
 def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> None:
@@ -192,6 +193,7 @@ def main() -> None:
     parser.add_argument("--core-root", default=str(REPO_ROOT.parent / "dcc-mcp-core"), type=Path)
     parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
+    parser.add_argument("--vctoolchain-version", default=os.environ.get("VCTOOLCHAIN_VERSION", ""), help="MSVC toolchain version passed to UBT via -VCToolchainVersion=")
     parser.add_argument(
         "--mode",
         choices=("native", "source", "python-only"),
