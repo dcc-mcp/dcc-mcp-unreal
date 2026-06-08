@@ -54,6 +54,7 @@ jobs:
       UE_ROOT: ${{ matrix.ue_root }}
       DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
       VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}
+      MSVC_14_36_COMPONENT: Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
       CORE_REPO: loonghao/dcc-mcp-core
       CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
 
@@ -126,6 +127,25 @@ jobs:
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
 
+
+      - name: Ensure MSVC 14.36 toolchain (UE 5.2)
+        if: matrix.vctoolchain_version != ''
+        shell: pwsh
+        run: |
+          $component = "$env:MSVC_14_36_COMPONENT"
+          $msvcDir = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.36.32532"
+          if (-not (Test-Path $msvcDir)) {
+            Write-Host "MSVC 14.36 toolchain not found — installing via vs_BuildTools.exe"
+            $vsInstaller = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\vs_BuildTools.exe"
+            & $vsInstaller modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add $component --passive --norestart --wait
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+              throw "MSVC 14.36 install failed (exit code $exitCode). Install manually: vs_BuildTools.exe modify --add $component"
+            }
+            Write-Host "MSVC 14.36 toolchain installed (exit $exitCode)"
+          } else {
+            Write-Host "MSVC 14.36 toolchain already installed"
+          }
 
       - name: Build distributable uplugin
         shell: pwsh

@@ -117,7 +117,47 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
     run(cmd)
 
 
+def _msvc_toolchain_roots() -> List[Path]:
+    """Return paths to installed MSVC toolchains under VS Build Tools."""
+    candidates = [
+        Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"),
+        Path(r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"),
+        Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"),
+        Path(r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"),
+    ]
+    roots = []
+    for p in candidates:
+        if p.is_dir():
+            roots.extend(sorted(p.iterdir()))
+    return roots
+
+
+def _check_msvc_toolchain(version: str) -> None:
+    """Verify the requested MSVC toolchain version is installed.
+
+    Prints available toolchains and a helpful install suggestion when the
+    requested version is not found. This is best-effort — UBT does its own
+    resolution and may fall back to a different version.
+    """
+    if not version:
+        return
+    installed = [d.name for d in _msvc_toolchain_roots() if d.is_dir()]
+    if not installed:
+        # Runner may be configured differently — skip check
+        return
+    if not any(v.startswith(version) for v in installed):
+        print("[build-uplugin] WARNING: MSVC toolchain {} not found".format(version), file=sys.stderr)
+        print("[build-uplugin] Installed: {}".format(", ".join(sorted(installed))), file=sys.stderr)
+        print(
+            "[build-uplugin] Install: vs_BuildTools.exe modify --add Microsoft.VisualStudio.Component.VC.{}.17.6.x86.x64".format(
+                version.replace(".", ".")
+            ),
+            file=sys.stderr,
+        )
+
+
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
+    _check_msvc_toolchain(args.vctoolchain_version)
     uat = resolve_uat(args.ue_root)
     cmd = [
         str(uat),
