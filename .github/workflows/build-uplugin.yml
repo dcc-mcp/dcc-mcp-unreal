@@ -185,13 +185,13 @@ jobs:
             }
             # Download MSVC 14.36 toolchain only (no SDK — UE ships its own)
             Write-Host "Downloading MSVC $msvcVersion toolchain via msvc-kit..."
-            & $msvcKitExe download --msvc-version $msvcVersion --no-sdk --target $msvcTargetDir --arch x64
+            & $msvcKitExe download --msvc-version $msvcVersion --no-sdk --dir $msvcTargetDir --arch x64
             if ($LASTEXITCODE -ne 0) { throw "msvc-kit download failed (exit code $LASTEXITCODE)" }
             Write-Host "MSVC $msvcVersion toolchain downloaded to $msvcTargetDir"
           }
           # Apply environment for this job only (NO --persistent — not global)
           Write-Host "Activating MSVC $msvcVersion environment (job-scoped)..."
-          $envScript = & $msvcKitExe setup --script --shell powershell --target $msvcTargetDir
+          $envScript = & $msvcKitExe setup --script --shell powershell --dir $msvcTargetDir
           if ($LASTEXITCODE -ne 0) { throw "msvc-kit setup failed (exit code $LASTEXITCODE)" }
           Invoke-Expression $envScript
           Write-Host "MSVC $msvcVersion environment activated"
