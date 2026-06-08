@@ -146,20 +146,34 @@ jobs:
         shell: pwsh
         run: |
           $component = "$env:MSVC_14_36_COMPONENT"
-          $msvcDir = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.36.32532"
+          $installPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+          $vsInstaller = "$installPath\vs_BuildTools.exe"
+          $msvcDir = "$installPath\VC\Tools\MSVC\14.36.32532"
           if (-not (Test-Path $msvcDir)) {
-            Write-Host "MSVC 14.36 toolchain not found — installing via vs_BuildTools.exe"
-            $vsInstaller = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\vs_BuildTools.exe"
-            & $vsInstaller modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add $component --passive --norestart --wait
+            Write-Host "MSVC 14.36 toolchain not found"
+            if (-not (Test-Path $vsInstaller)) {
+              Write-Host "vs_BuildTools.exe not found --- downloading bootstrapper"
+              $bootstrapperUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+              $bootstrapperPath = "$env:RUNNER_TEMP\vs_BuildTools.exe"
+              Invoke-WebRequest -Uri $bootstrapperUrl -OutFile $bootstrapperPath -UseBasicParsing
+              $vsInstaller = $bootstrapperPath
+            }
+            $commonToolsDir = "$installPath\Common7\Tools"
+            if (Test-Path $commonToolsDir) {
+              Write-Host "VS Build Tools already installed --- modifying to add component"
+              & $vsInstaller modify --installPath $installPath --add $component --passive --norestart --wait
+            } else {
+              Write-Host "VS Build Tools not installed --- performing fresh install"
+              & $vsInstaller --installPath $installPath --add $component --passive --norestart --wait
+            }
             $exitCode = $LASTEXITCODE
             if ($exitCode -ne 0 -and $exitCode -ne 3010) {
-              throw "MSVC 14.36 install failed (exit code $exitCode). Install manually: vs_BuildTools.exe modify --add $component"
+              throw "MSVC 14.36 install failed (exit code $exitCode). Install manually: vs_BuildTools.exe install --add $component"
             }
             Write-Host "MSVC 14.36 toolchain installed (exit $exitCode)"
           } else {
             Write-Host "MSVC 14.36 toolchain already installed"
           }
-
       - name: Build distributable uplugin
         shell: pwsh
         run: |
