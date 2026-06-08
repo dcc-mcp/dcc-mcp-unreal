@@ -146,57 +146,117 @@ jobs:
         shell: pwsh
         run: |
           $msvcVersion = "14.36"
-          # Persistent target dir so subsequent CI runs reuse the cached download
+          $vsToolsRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+          $vsToolchainRoot = "$vsToolsRoot\VC\Tools\MSVC"
           $msvcTargetDir = "C:\msvc-kit\$msvcVersion"
           $msvcKitExe = "C:\msvc-kit\bin\msvc-kit.exe"
-          # Quick probe: if cl.exe for the requested version is already set up, skip
-          if ((Test-Path "$msvcTargetDir\VC\Tools\MSVC") -and (Get-ChildItem "$msvcTargetDir\VC\Tools\MSVC" -Directory | Where-Object { $_.Name -like "$msvcVersion.*" })) {
-            Write-Host "MSVC $msvcVersion toolchain already present at $msvcTargetDir"
-          } else {
-            # Pin msvc-kit version to prevent regression from `latest` tag
-            $msvcKitVersion = "v0.2.13"
-            # Check current version; force re-download if stale or unknown
-            $needDownload = $false
-            if (Test-Path $msvcKitExe) {
-              try {
-                $currentVersion = & $msvcKitExe --version 2>$null
-                if ($LASTEXITCODE -eq 0 -and $currentVersion -match $msvcKitVersion) {
-                  Write-Host "msvc-kit $msvcKitVersion already present at $msvcKitExe"
-                  $needDownload = $false
-                } else {
-                  Write-Host "msvc-kit version mismatch (current: $currentVersion); re-downloading $msvcKitVersion..."
-                  $needDownload = $true
+
+          # Step 1: Check if MSVC 14.36 is registered with VS (UBT-discoverable)
+          $registered = $false
+          if (Test-Path $vsToolchainRoot) {
+            $existing = Get-ChildItem $vsToolchainRoot -Directory |
+              Where-Object { $_.Name -like "$msvcVersion.*" }
+            if ($existing) {
+              Write-Host "MSVC $msvcVersion toolchain already registered with VS: $($existing.FullName)"
+              $registered = $true
+            }
+          }
+
+          # Step 2: Install via VS installer if not registered
+          if (-not $registered) {
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (Test-Path $vsInstaller) {
+              Write-Host "Installing MSVC $msvcVersion component via VS installer..."
+              & $vsInstaller modify --installPath "$vsToolsRoot" `
+                --add "Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64" `
+                --passive --norestart --wait
+              $vsExitCode = $LASTEXITCODE
+              if ($vsExitCode -eq 0 -or $vsExitCode -eq 3010) {
+                Write-Host "MSVC $msvcVersion component installed (exit code $vsExitCode)"
+                if (Test-Path $vsToolchainRoot) {
+                  $existing = Get-ChildItem $vsToolchainRoot -Directory |
+                    Where-Object { $_.Name -like "$msvcVersion.*" }
+                  if ($existing) {
+                    Write-Host "Confirmed: MSVC $msvcVersion registered at $($existing.FullName)"
+                    $registered = $true
+                  }
                 }
-              } catch {
-                Write-Host "Failed to check msvc-kit version; re-downloading..."
-                $needDownload = $true
+              } else {
+                Write-Host "VS installer exited with code $vsExitCode; msvc-kit fallback"
               }
             } else {
-              $needDownload = $true
+              Write-Host "VS installer not found; using msvc-kit"
             }
-            if ($needDownload) {
-              # Remove stale binary first so the target dir is clean
-              Remove-Item $msvcKitExe -Force -ErrorAction SilentlyContinue
-              Write-Host "Downloading msvc-kit $msvcKitVersion..."
-              New-Item -ItemType Directory -Force -Path "C:\msvc-kit\bin" | Out-Null
-              $exeUrl = "https://github.com/loonghao/msvc-kit/releases/download/$msvcKitVersion/msvc-kit-x86_64-windows.exe"
-              Invoke-WebRequest -Uri $exeUrl -OutFile $msvcKitExe -UseBasicParsing
-              Write-Host "msvc-kit $msvcKitVersion installed at $msvcKitExe"
-            }
-            # Download MSVC 14.36 toolchain only (no SDK — UE ships its own)
-            Write-Host "Downloading MSVC $msvcVersion toolchain via msvc-kit..."
-            & $msvcKitExe download --msvc-version $msvcVersion --no-sdk --dir $msvcTargetDir --arch x64
-            if ($LASTEXITCODE -ne 0) { throw "msvc-kit download failed (exit code $LASTEXITCODE)" }
-            Write-Host "MSVC $msvcVersion toolchain downloaded to $msvcTargetDir"
           }
-          # Apply environment for this job only (NO --persistent — not global)
+
+          # Step 3: Fallback -- msvc-kit download + VS junction registration
+          if (-not $registered) {
+            if ((Test-Path "$msvcTargetDir\VC\Tools\MSVC") -and
+                (Get-ChildItem "$msvcTargetDir\VC\Tools\MSVC" -Directory |
+                  Where-Object { $_.Name -like "$msvcVersion.*" })) {
+              Write-Host "MSVC $msvcVersion toolchain already present at $msvcTargetDir"
+            } else {
+              $msvcKitVersion = "v0.2.13"
+              $needDownload = $false
+              if (Test-Path $msvcKitExe) {
+                try {
+                  $currentVersion = & $msvcKitExe --version 2>$null
+                  if ($LASTEXITCODE -eq 0 -and $currentVersion -match $msvcKitVersion) {
+                    Write-Host "msvc-kit $msvcKitVersion already present at $msvcKitExe"
+                    $needDownload = $false
+                  } else {
+                    Write-Host "msvc-kit version mismatch; re-downloading $msvcKitVersion..."
+                    $needDownload = $true
+                  }
+                } catch {
+                  Write-Host "Failed to check msvc-kit version; re-downloading..."
+                  $needDownload = $true
+                }
+              } else {
+                $needDownload = $true
+              }
+              if ($needDownload) {
+                Remove-Item $msvcKitExe -Force -ErrorAction SilentlyContinue
+                Write-Host "Downloading msvc-kit $msvcKitVersion..."
+                New-Item -ItemType Directory -Force -Path "C:\msvc-kit\bin" | Out-Null
+                $exeUrl = "https://github.com/loonghao/msvc-kit/releases/download/$msvcKitVersion/msvc-kit-x86_64-windows.exe"
+                Invoke-WebRequest -Uri $exeUrl -OutFile $msvcKitExe -UseBasicParsing
+                Write-Host "msvc-kit $msvcKitVersion installed at $msvcKitExe"
+              }
+              Write-Host "Downloading MSVC $msvcVersion toolchain via msvc-kit..."
+              & $msvcKitExe download --msvc-version $msvcVersion --no-sdk --dir $msvcTargetDir --arch x64
+              if ($LASTEXITCODE -ne 0) { throw "msvc-kit download failed (exit code $LASTEXITCODE)" }
+              Write-Host "MSVC $msvcVersion toolchain downloaded to $msvcTargetDir"
+            }
+
+            # Register msvc-kit toolchain with VS via directory junction
+            $kitToolchainRoot = "$msvcTargetDir\VC\Tools\MSVC"
+            if ((Test-Path $kitToolchainRoot) -and (Test-Path $vsToolchainRoot)) {
+              Get-ChildItem $kitToolchainRoot | ForEach-Object {
+                $target = Join-Path $vsToolchainRoot $_.Name
+                if (-not (Test-Path $target)) {
+                  try {
+                    New-Item -ItemType Junction -Path $target -Target $_.FullName -Force -ErrorAction Stop | Out-Null
+                    Write-Host "Registered $($_.Name) with VS via junction (UBT-discoverable)"
+                  } catch {
+                    Write-Host "Could not create VS junction (non-admin): $_"
+                  }
+                }
+              }
+            }
+          }
+
+          # Step 4: Apply environment variables (PATH, INCLUDE, LIB) for this job
           Write-Host "Activating MSVC $msvcVersion environment (job-scoped)..."
-          $envScript = & $msvcKitExe setup --script --shell powershell --dir $msvcTargetDir
-          if ($LASTEXITCODE -ne 0) { throw "msvc-kit setup failed (exit code $LASTEXITCODE)" }
-          # setup --script may return multiple lines (Object[]); join into a single
-          # string so Invoke-Expression can accept it
-          Invoke-Expression ($envScript -join "`n")
-          Write-Host "MSVC $msvcVersion environment activated"
+          if (Test-Path $msvcKitExe) {
+            $envScript = & $msvcKitExe setup --script --shell powershell --dir $msvcTargetDir
+            if ($LASTEXITCODE -ne 0) { throw "msvc-kit setup failed (exit code $LASTEXITCODE)" }
+            Invoke-Expression ($envScript -join "`n")
+            Write-Host "MSVC $msvcVersion environment activated"
+          } else {
+            Write-Host "msvc-kit not found; loading VS-native environment..."
+            & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          }
       - name: Build distributable uplugin
         shell: pwsh
         run: |
