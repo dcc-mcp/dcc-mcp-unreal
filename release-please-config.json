@@ -1,21 +1,43 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-v-in-tag": true,
   "packages": {
     ".": {
+      "package-name": "dcc-mcp-unreal",
+      "include-component-in-tag": false,
       "release-type": "python",
-      "bump-minor-pre-major": true
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "generic",
+          "path": "src/dcc_mcp_unreal/__version__.py"
+        },
+        {
+          "type": "json",
+          "path": "unreal/plugin/DccMcpUnreal.uplugin",
+          "jsonpath": "$.VersionName"
+        }
+      ]
     }
   },
   "changelog-sections": [
-    {"type": "feat", "section": "Features"},
-    {"type": "fix", "section": "Bug Fixes"},
-    {"type": "perf", "section": "Performance Improvements"},
-    {"type": "revert", "section": "Reverts"},
-    {"type": "docs", "section": "Documentation"},
-    {"type": "chore", "section": "Miscellaneous Chores"},
-    {"type": "refactor", "section": "Code Refactoring"},
-    {"type": "test", "section": "Tests"},
-    {"type": "build", "section": "Build System"},
-    {"type": "ci", "section": "Continuous Integration"}
+    {"type": "feat", "section": "Features", "hidden": false},
+    {"type": "fix", "section": "Bug Fixes", "hidden": false},
+    {"type": "perf", "section": "Performance Improvements", "hidden": false},
+    {"type": "refactor", "section": "Code Refactoring", "hidden": false},
+    {"type": "docs", "section": "Documentation", "hidden": false},
+    {"type": "style", "section": "Styles", "hidden": true},
+    {"type": "chore", "section": "Miscellaneous Chores", "hidden": true},
+    {"type": "test", "section": "Tests", "hidden": true},
+    {"type": "ci", "section": "Continuous Integration", "hidden": true},
+    {"type": "build", "section": "Build System", "hidden": true}
   ]
 }
