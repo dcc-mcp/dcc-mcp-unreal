@@ -229,17 +229,27 @@ jobs:
               Write-Host "MSVC $msvcVersion toolchain downloaded to $msvcTargetDir"
             }
 
-            # Register msvc-kit toolchain with VS via directory junction
+            # Register msvc-kit toolchain with VS via directory junction or copy
             $kitToolchainRoot = "$msvcTargetDir\VC\Tools\MSVC"
             if ((Test-Path $kitToolchainRoot) -and (Test-Path $vsToolchainRoot)) {
               Get-ChildItem $kitToolchainRoot | ForEach-Object {
                 $target = Join-Path $vsToolchainRoot $_.Name
                 if (-not (Test-Path $target)) {
+                  $reg = $false
                   try {
                     New-Item -ItemType Junction -Path $target -Target $_.FullName -Force -ErrorAction Stop | Out-Null
                     Write-Host "Registered $($_.Name) with VS via junction (UBT-discoverable)"
+                    $reg = $true
                   } catch {
-                    Write-Host "Could not create VS junction (non-admin): $_"
+                    Write-Host "Junction failed ($_); trying copy fallback..."
+                  }
+                  if (-not $reg) {
+                    try {
+                      Copy-Item -Path $_.FullName -Destination $target -Recurse -Force -ErrorAction Stop
+                      Write-Host "Registered $($_.Name) with VS via copy (UBT-discoverable)"
+                    } catch {
+                      Write-Host "Copy also failed ($_); toolchain not UBT-discoverable via filesystem"
+                    }
                   }
                 }
               }
