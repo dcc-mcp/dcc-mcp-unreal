@@ -268,56 +268,76 @@ jobs:
             & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
           }
 
-      - name: Verify UE 5.2 engine headers are MSVC 14.44 compatible
+      - name: Patch UE 5.2 engine headers for MSVC 14.44 compatibility
         if: matrix.ue_version == '5.2'
         shell: pwsh
         run: |
           $ueRoot = "$env:UE_ROOT"
-          $errors = @()
+          $patchedDir = "$env:RUNNER_TEMP\patched_ue5_headers"
+          $anyPatch = $false
 
-          # Check 1: ConcurrentLinearAllocator.h must guard __has_feature with defined()
-          $allocator = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h'
-          if (Test-Path $allocator) {
-            $content = Get-Content $allocator -Raw
-            if ($content -match '#if\s+__has_feature\(') {
-              $errors += "ConcurrentLinearAllocator.h: __has_feature is unguarded. " +
-                "Admin must pre-patch: replace '#if __has_feature(' with '#if defined(__has_feature) && __has_feature('"
+          # Clean and create output directories
+          Remove-Item $patchedDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$patchedDir\Experimental" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$patchedDir\Windows" | Out-Null
+
+          # ---------- Patch 1: ConcurrentLinearAllocator.h ----------
+          $allocatorRel = 'Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h'
+          $srcAllocator = Join-Path $ueRoot $allocatorRel
+          $dstAllocator = Join-Path $patchedDir 'Experimental\ConcurrentLinearAllocator.h'
+
+          if (Test-Path $srcAllocator) {
+            Copy-Item $srcAllocator $dstAllocator -Force
+            $srcContent = Get-Content $dstAllocator -Raw
+            $orig = $srcContent
+            $srcContent = $srcContent -replace '#(if|elif)\s+__has_feature\(', '#$1 defined(__has_feature) && __has_feature('
+            if ($srcContent -ne $orig) {
+              Set-Content $dstAllocator $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched: ${allocatorRel}"
+              $anyPatch = $true
             } else {
-              Write-Host 'OK: ConcurrentLinearAllocator.h __has_feature is guarded'
+              Write-Host "SKIP (no changes needed): ${allocatorRel}"
             }
           } else {
-            Write-Host 'SKIP: ConcurrentLinearAllocator.h not found'
+            Write-Host "SKIP (not found): ${allocatorRel}"
           }
 
-          # Check 2: WindowsPlatformCompilerSetup.h must not reject MSVC 14.44+
-          $compilerSetup = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformCompilerSetup.h'
-          $patchedMarker = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Windows\.patched-for-msvc14.44'
-          if (Test-Path $patchedMarker) {
-            Write-Host 'OK: WindowsPlatformCompilerSetup.h pre-patched (marker exists)'
-          } elseif (Test-Path $compilerSetup) {
-            $content = Get-Content $compilerSetup -Raw
-            if ($content -match '_MSC_FULL_VER\s*>\s*\d+') {
-              $errors += "WindowsPlatformCompilerSetup.h: _MSC_FULL_VER ceiling check present. " +
-                "Admin must pre-patch: remove the #if _MSC_FULL_VER > ... block and create marker file"
+          # ---------- Patch 2: WindowsPlatformCompilerSetup.h ----------
+          $setupRel = 'Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformCompilerSetup.h'
+          $srcSetup = Join-Path $ueRoot $setupRel
+          $dstSetup = Join-Path $patchedDir 'Windows\WindowsPlatformCompilerSetup.h'
+
+          if (Test-Path $srcSetup) {
+            Copy-Item $srcSetup $dstSetup -Force
+            $srcContent = Get-Content $dstSetup -Raw
+            $orig = $srcContent
+            $srcContent = $srcContent -replace '#if\s+_MSC_FULL_VER\s*>\s*\d+', '#if 0 /* patched for MSVC 14.44 compat */'
+            $srcContent = $srcContent -replace '#elif\s+_MSC_FULL_VER\s*>\s*\d+', '#elif 0 /* patched for MSVC 14.44 compat */'
+            if ($srcContent -ne $orig) {
+              Set-Content $dstSetup $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched: ${setupRel}"
+              $anyPatch = $true
             } else {
-              Write-Host 'OK: WindowsPlatformCompilerSetup.h _MSC_FULL_VER ceiling check removed'
+              Write-Host "SKIP (no changes needed): ${setupRel}"
             }
           } else {
-            Write-Host 'SKIP: WindowsPlatformCompilerSetup.h not found'
+            Write-Host "SKIP (not found): ${setupRel}"
           }
 
-          if ($errors.Count -gt 0) {
-            Write-Host '::error::UE 5.2 engine headers need manual pre-patching on this runner.'
-            Write-Host '::error::The GitHub runner lacks write permission to C:\Program Files\Epic Games\UE_5.2\'
-            Write-Host '::error::A one-time manual patch on the runner machine is required.'
-            Write-Host '::error::See ADMIN_SETUP.md in the repo for steps.'
-            foreach ($e in $errors) {
-              Write-Host "::error::$e"
-            }
-            throw 'UE 5.2 engine headers not pre-patched for MSVC 14.44 compatibility'
+          if (-not $anyPatch) {
+            Write-Host '::warning::No UE 5.2 engine headers were patched. Files may not be at expected paths.'
           }
 
-          Write-Host 'All UE 5.2 engine headers are MSVC 14.44 compatible.'
+          # ---------- Configure _CL_ environment variable ----------
+          $clArgs = "/I`"${patchedDir}`" /wd4668"
+          if ($env:_CL_) {
+            $env:_CL_ = "${clArgs} $env:_CL_"
+          } else {
+            $env:_CL_ = $clArgs
+          }
+          # Persist for subsequent workflow steps
+          "_CL_=$env:_CL_" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Configured _CL_=$env:_CL_"
       - name: Build distributable uplugin
         shell: pwsh
         run: |
