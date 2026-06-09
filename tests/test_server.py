@@ -6,7 +6,14 @@ This covers the public API surface, helpers, and the server instantiation path.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+
+if sys.version_info >= (3, 8):
+    from importlib.metadata import version
+else:
+    from importlib_metadata import version
 
 # ---------------------------------------------------------------------------
 # Package-level imports
@@ -16,8 +23,6 @@ import pytest
 def test_import():
     """Package imports without errors."""
     import dcc_mcp_unreal
-
-    from importlib.metadata import version
 
     assert dcc_mcp_unreal.__version__ == version("dcc-mcp-unreal")
 
