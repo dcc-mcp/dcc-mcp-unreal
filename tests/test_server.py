@@ -17,7 +17,9 @@ def test_import():
     """Package imports without errors."""
     import dcc_mcp_unreal
 
-    assert dcc_mcp_unreal.__version__ == "0.1.0"
+    from importlib.metadata import version
+
+    assert dcc_mcp_unreal.__version__ == version("dcc-mcp-unreal")
 
 
 def test_api_imports():
