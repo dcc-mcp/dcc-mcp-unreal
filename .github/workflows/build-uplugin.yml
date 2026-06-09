@@ -44,7 +44,6 @@ jobs:
             ue_root: C:\Program Files\Epic Games\UE_5.2
             package_mode: native
             artifact_suffix: win64
-            vctoolchain_version: "14.36"
           - ue_version: "4.18"
             ue_root: C:\Program Files\Epic Games\UE_4.18
             package_mode: python-only
@@ -266,6 +265,61 @@ jobs:
           } else {
             Write-Host "msvc-kit not found; loading VS-native environment..."
             & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          }
+
+      - name: Patch UE 5.2 engine headers for MSVC compatibility
+        if: matrix.ue_version == '5.2'
+        shell: pwsh
+        run: |
+          $ueRoot = "$env:UE_ROOT"
+
+          # ConcurrentLinearAllocator.h uses __has_feature which MSVC does not define.
+          # This causes C4668/C4067 when building UE 5.2 with MSVC 14.44+.
+          $allocator = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h'
+          if (Test-Path $allocator) {
+            $content = Get-Content $allocator -Raw
+            if ($content -match '#if\s+__has_feature\(') {
+              $content = $content -replace '#if\s+__has_feature\(', '#if defined(__has_feature) && __has_feature('
+              Set-Content $allocator -Value $content -NoNewline
+              Write-Host 'Patched ConcurrentLinearAllocator.h: guarded __has_feature'
+            } else {
+              Write-Host 'ConcurrentLinearAllocator.h: __has_feature pattern not found (may already be patched)'
+            }
+          } else {
+            Write-Host "ConcurrentLinearAllocator.h not found at $allocator"
+          }
+
+          # WindowsPlatformCompilerSetup.h may reject MSVC versions newer than VS 2022.
+          # Replace the _MSC_FULL_VER guard block with a comment.
+          $compilerSetup = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformCompilerSetup.h'
+          $patchedMarker = Join-Path $ueRoot 'Engine\Source\Runtime\Core\Public\Windows\.patched-for-msvc14.44'
+          if ((Test-Path $compilerSetup) -and -not (Test-Path $patchedMarker)) {
+            $lines = Get-Content $compilerSetup
+            $inBlock = $false
+            $newLines = @()
+            foreach ($line in $lines) {
+              if ($line -match '_MSC_FULL_VER\s*>\s*\d+' -and $line -match '^\s*#\s*if') {
+                $inBlock = $true
+                $newLines += '// Patched by dcc-mcp-unreal CI: allow newer MSVC for UE 5.2'
+                continue
+              }
+              if ($inBlock) {
+                if ($line -match '^\s*#\s*endif') {
+                  $inBlock = $false
+                }
+                continue
+              }
+              $newLines += $line
+            }
+            if ($newLines.Count -gt 0) {
+              $newLines -join "`n" | Set-Content $compilerSetup -NoNewline
+              New-Item -ItemType File -Path $patchedMarker -Force | Out-Null
+              Write-Host 'Patched WindowsPlatformCompilerSetup.h: removed _MSC_FULL_VER ceiling'
+            }
+          } elseif (Test-Path $patchedMarker) {
+            Write-Host 'WindowsPlatformCompilerSetup.h: already patched (marker exists)'
+          } else {
+            Write-Host "WindowsPlatformCompilerSetup.h not found at $compilerSetup"
           }
       - name: Build distributable uplugin
         shell: pwsh
