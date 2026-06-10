@@ -169,19 +169,11 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     ubtargs = []
     if args.vctoolchain_version:
         ubtargs.append("-VCToolchainVersion={}".format(args.vctoolchain_version))
-    # Pass patched engine headers via UBT AdditionalCompilerArguments.
-    # _CL_ env var does not work because UBT invokes cl.exe through
-    # AutomationTool → dotnet → UnrealBuildTool.dll and manages its own
-    # compiler arguments internally.
-    if args.patched_headers_dir:
-        patched = Path(args.patched_headers_dir)
-        if patched.is_dir():
-            ubtargs.append('-AdditionalCompilerArguments=/I{} /wd4668'.format(patched))
-            print("[build-uplugin] Patched headers dir: {}".format(patched))
-        else:
-            print("[build-uplugin] WARNING: patched headers dir not found: {}".format(patched))
     if ubtargs:
         cmd.append("-ubtargs=" + " ".join(ubtargs))
+    # _CL_ tells MSVC cl.exe to suppress C4668 unconditionally,
+    # bypassing UBT's internal compiler argument management.
+    os.environ["_CL_"] = "/wd4668"
     run(cmd)
 
 
