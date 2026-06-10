@@ -171,9 +171,6 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         ubtargs.append("-VCToolchainVersion={}".format(args.vctoolchain_version))
     if ubtargs:
         cmd.append("-ubtargs=" + " ".join(ubtargs))
-    # _CL_ tells MSVC cl.exe to suppress C4668 unconditionally,
-    # bypassing UBT's internal compiler argument management.
-    os.environ["_CL_"] = "/wd4668"
     run(cmd)
 
 
@@ -240,11 +237,6 @@ def main() -> None:
     parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
     parser.add_argument("--vctoolchain-version", default=os.environ.get("VCTOOLCHAIN_VERSION", ""), help="MSVC toolchain version passed to UBT via -VCToolchainVersion=")
-    parser.add_argument(
-        "--patched-headers-dir",
-        default=os.environ.get("PATCHED_HEADERS_DIR", ""),
-        help="Directory containing patched UE engine headers; include path is passed to UBT via -AdditionalCompilerArguments",
-    )
     parser.add_argument(
         "--mode",
         choices=("native", "source", "python-only"),
