@@ -268,33 +268,27 @@ jobs:
             & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
           }
 
-      - name: Patch UE 5.2 engine headers for MSVC 14.44 compatibility
+      - name: Patch UE 5.2 engine headers in-place for MSVC 14.44 compatibility
         if: matrix.ue_version == '5.2'
         shell: pwsh
         run: |
           $ueRoot = "$env:UE_ROOT"
-          $patchedDir = "$env:RUNNER_TEMP\patched_ue5_headers"
           $anyPatch = $false
-
-          # Clean and create output directories
-          Remove-Item $patchedDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path "$patchedDir\Experimental" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$patchedDir\Windows" | Out-Null
 
           # ---------- Patch 1: ConcurrentLinearAllocator.h ----------
           $allocatorRel = 'Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h'
           $srcAllocator = Join-Path $ueRoot $allocatorRel
-          $dstAllocator = Join-Path $patchedDir 'Experimental\ConcurrentLinearAllocator.h'
 
           if (Test-Path $srcAllocator) {
-            Copy-Item $srcAllocator $dstAllocator -Force
-            Set-ItemProperty -Path $dstAllocator -Name IsReadOnly -Value $false
-            $srcContent = Get-Content $dstAllocator -Raw
+            $bak = "$srcAllocator.bak"
+            Copy-Item $srcAllocator $bak -Force
+            Set-ItemProperty -Path $srcAllocator -Name IsReadOnly -Value $false
+            $srcContent = Get-Content $srcAllocator -Raw
             $orig = $srcContent
             $srcContent = $srcContent -replace '#(if|elif)\s+__has_feature\(', '#$1 defined(__has_feature) && __has_feature('
             if ($srcContent -ne $orig) {
-              Set-Content $dstAllocator $srcContent -NoNewline -Encoding utf8
-              Write-Host "Patched: ${allocatorRel}"
+              Set-Content $srcAllocator $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched in-place: ${allocatorRel} (backup: .bak)"
               $anyPatch = $true
             } else {
               Write-Host "SKIP (no changes needed): ${allocatorRel}"
@@ -306,18 +300,18 @@ jobs:
           # ---------- Patch 2: WindowsPlatformCompilerSetup.h ----------
           $setupRel = 'Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformCompilerSetup.h'
           $srcSetup = Join-Path $ueRoot $setupRel
-          $dstSetup = Join-Path $patchedDir 'Windows\WindowsPlatformCompilerSetup.h'
 
           if (Test-Path $srcSetup) {
-            Copy-Item $srcSetup $dstSetup -Force
-            Set-ItemProperty -Path $dstSetup -Name IsReadOnly -Value $false
-            $srcContent = Get-Content $dstSetup -Raw
+            $bak = "$srcSetup.bak"
+            Copy-Item $srcSetup $bak -Force
+            Set-ItemProperty -Path $srcSetup -Name IsReadOnly -Value $false
+            $srcContent = Get-Content $srcSetup -Raw
             $orig = $srcContent
             $srcContent = $srcContent -replace '#if\s+_MSC_FULL_VER\s*>\s*\d+', '#if 0 /* patched for MSVC 14.44 compat */'
             $srcContent = $srcContent -replace '#elif\s+_MSC_FULL_VER\s*>\s*\d+', '#elif 0 /* patched for MSVC 14.44 compat */'
             if ($srcContent -ne $orig) {
-              Set-Content $dstSetup $srcContent -NoNewline -Encoding utf8
-              Write-Host "Patched: ${setupRel}"
+              Set-Content $srcSetup $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched in-place: ${setupRel} (backup: .bak)"
               $anyPatch = $true
             } else {
               Write-Host "SKIP (no changes needed): ${setupRel}"
@@ -329,13 +323,6 @@ jobs:
           if (-not $anyPatch) {
             Write-Host '::warning::No UE 5.2 engine headers were patched. Files may not be at expected paths.'
           }
-
-          # Persist patched headers directory for the build step.
-          # build_distributable.py passes this to UBT via
-          # -AdditionalCompilerArguments so that the compiler picks up
-          # the patched headers (the _CL_ env var has no effect on UBT).
-          "PATCHED_HEADERS_DIR=$patchedDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "PATCHED_HEADERS_DIR=$patchedDir"
 
       - name: Runner context diagnostic (UE 5.2)
         if: matrix.ue_version == '5.2'
