@@ -288,6 +288,7 @@ jobs:
 
           if (Test-Path $srcAllocator) {
             Copy-Item $srcAllocator $dstAllocator -Force
+            Set-ItemProperty -Path $dstAllocator -Name IsReadOnly -Value $false
             $srcContent = Get-Content $dstAllocator -Raw
             $orig = $srcContent
             $srcContent = $srcContent -replace '#(if|elif)\s+__has_feature\(', '#$1 defined(__has_feature) && __has_feature('
@@ -309,6 +310,7 @@ jobs:
 
           if (Test-Path $srcSetup) {
             Copy-Item $srcSetup $dstSetup -Force
+            Set-ItemProperty -Path $dstSetup -Name IsReadOnly -Value $false
             $srcContent = Get-Content $dstSetup -Raw
             $orig = $srcContent
             $srcContent = $srcContent -replace '#if\s+_MSC_FULL_VER\s*>\s*\d+', '#if 0 /* patched for MSVC 14.44 compat */'
