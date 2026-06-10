@@ -176,7 +176,7 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     if args.patched_headers_dir:
         patched = Path(args.patched_headers_dir)
         if patched.is_dir():
-            ubtargs.append('-AdditionalCompilerArguments=/I"{}" /wd4668'.format(patched))
+            ubtargs.append('-AdditionalCompilerArguments=/I{} /wd4668'.format(patched))
             print("[build-uplugin] Patched headers dir: {}".format(patched))
         else:
             print("[build-uplugin] WARNING: patched headers dir not found: {}".format(patched))
