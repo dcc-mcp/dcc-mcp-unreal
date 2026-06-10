@@ -166,8 +166,22 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         "-Package={}".format(uat_dir),
         "-TargetPlatforms=Win64",
     ]
+    ubtargs = []
     if args.vctoolchain_version:
-        cmd.append("-ubtargs=-VCToolchainVersion={}".format(args.vctoolchain_version))
+        ubtargs.append("-VCToolchainVersion={}".format(args.vctoolchain_version))
+    # Pass patched engine headers via UBT AdditionalCompilerArguments.
+    # _CL_ env var does not work because UBT invokes cl.exe through
+    # AutomationTool → dotnet → UnrealBuildTool.dll and manages its own
+    # compiler arguments internally.
+    if args.patched_headers_dir:
+        patched = Path(args.patched_headers_dir)
+        if patched.is_dir():
+            ubtargs.append('-AdditionalCompilerArguments=/I"{}" /wd4668'.format(patched))
+            print("[build-uplugin] Patched headers dir: {}".format(patched))
+        else:
+            print("[build-uplugin] WARNING: patched headers dir not found: {}".format(patched))
+    if ubtargs:
+        cmd.append("-ubtargs=" + " ".join(ubtargs))
     run(cmd)
 
 
@@ -234,6 +248,11 @@ def main() -> None:
     parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
     parser.add_argument("--vctoolchain-version", default=os.environ.get("VCTOOLCHAIN_VERSION", ""), help="MSVC toolchain version passed to UBT via -VCToolchainVersion=")
+    parser.add_argument(
+        "--patched-headers-dir",
+        default=os.environ.get("PATCHED_HEADERS_DIR", ""),
+        help="Directory containing patched UE engine headers; include path is passed to UBT via -AdditionalCompilerArguments",
+    )
     parser.add_argument(
         "--mode",
         choices=("native", "source", "python-only"),
