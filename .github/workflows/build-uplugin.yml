@@ -272,19 +272,70 @@ jobs:
         if: matrix.ue_version == '5.2'
         shell: pwsh
         run: |
-          $allocatorFile = "$env:UE_ROOT\Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h"
-          if (Test-Path $allocatorFile) {
-            $content = Get-Content $allocatorFile -Raw
-            $newContent = $content -replace '#(if|elif)\s+__has_feature\(', '#$1 defined(__has_feature) && __has_feature('
-            if ($newContent -ne $content) {
-              Set-Content $allocatorFile $newContent -NoNewline -Encoding utf8
-              Write-Host "Patched in-place: ConcurrentLinearAllocator.h"
+          $ueRoot = "$env:UE_ROOT"
+          $patchedDir = "$env:RUNNER_TEMP\patched_ue5_headers"
+          $anyPatch = $false
+
+          # Clean and create output directories
+          Remove-Item $patchedDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$patchedDir\Experimental" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$patchedDir\Windows" | Out-Null
+
+          # ---------- Patch 1: ConcurrentLinearAllocator.h ----------
+          $allocatorRel = 'Engine\Source\Runtime\Core\Public\Experimental\ConcurrentLinearAllocator.h'
+          $srcAllocator = Join-Path $ueRoot $allocatorRel
+          $dstAllocator = Join-Path $patchedDir 'Experimental\ConcurrentLinearAllocator.h'
+
+          if (Test-Path $srcAllocator) {
+            Copy-Item $srcAllocator $dstAllocator -Force
+            Set-ItemProperty -Path $dstAllocator -Name IsReadOnly -Value $false
+            $srcContent = Get-Content $dstAllocator -Raw
+            $orig = $srcContent
+            $srcContent = $srcContent -replace '#(if|elif)\s+__has_feature\(', '#$1 defined(__has_feature) && __has_feature('
+            if ($srcContent -ne $orig) {
+              Set-Content $dstAllocator $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched: ${allocatorRel}"
+              $anyPatch = $true
             } else {
-              Write-Host "SKIP (no changes needed): ConcurrentLinearAllocator.h"
+              Write-Host "SKIP (no changes needed): ${allocatorRel}"
             }
           } else {
-            Write-Host "::warning::ConcurrentLinearAllocator.h not found at $allocatorFile"
+            Write-Host "SKIP (not found): ${allocatorRel}"
           }
+
+          # ---------- Patch 2: WindowsPlatformCompilerSetup.h ----------
+          $setupRel = 'Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformCompilerSetup.h'
+          $srcSetup = Join-Path $ueRoot $setupRel
+          $dstSetup = Join-Path $patchedDir 'Windows\WindowsPlatformCompilerSetup.h'
+
+          if (Test-Path $srcSetup) {
+            Copy-Item $srcSetup $dstSetup -Force
+            Set-ItemProperty -Path $dstSetup -Name IsReadOnly -Value $false
+            $srcContent = Get-Content $dstSetup -Raw
+            $orig = $srcContent
+            $srcContent = $srcContent -replace '#if\s+_MSC_FULL_VER\s*>\s*\d+', '#if 0 /* patched for MSVC 14.44 compat */'
+            $srcContent = $srcContent -replace '#elif\s+_MSC_FULL_VER\s*>\s*\d+', '#elif 0 /* patched for MSVC 14.44 compat */'
+            if ($srcContent -ne $orig) {
+              Set-Content $dstSetup $srcContent -NoNewline -Encoding utf8
+              Write-Host "Patched: ${setupRel}"
+              $anyPatch = $true
+            } else {
+              Write-Host "SKIP (no changes needed): ${setupRel}"
+            }
+          } else {
+            Write-Host "SKIP (not found): ${setupRel}"
+          }
+
+          if (-not $anyPatch) {
+            Write-Host '::warning::No UE 5.2 engine headers were patched. Files may not be at expected paths.'
+          }
+
+          # Persist patched headers directory for the build step.
+          # build_distributable.py passes this to UBT via
+          # -AdditionalCompilerArguments so that the compiler picks up
+          # the patched headers (the _CL_ env var has no effect on UBT).
+          "PATCHED_HEADERS_DIR=$patchedDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PATCHED_HEADERS_DIR=$patchedDir"
 
       - name: Runner context diagnostic (UE 5.2)
         if: matrix.ue_version == '5.2'
@@ -302,7 +353,8 @@ jobs:
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
-            --core-wheel "${{ steps.core.outputs.wheel }}"
+            --core-wheel "${{ steps.core.outputs.wheel }}" `
+            --patched-headers-dir "${env:PATCHED_HEADERS_DIR}"
 
       - name: Upload uplugin artifact
         uses: actions/upload-artifact@v4
