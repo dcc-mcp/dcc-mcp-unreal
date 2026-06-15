@@ -195,7 +195,17 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         cmd.append("-ubtargs=" + " ".join(ubtargs))
     # _CL_ tells MSVC cl.exe to suppress C4668 unconditionally,
     # bypassing UBT's internal compiler argument management.
-    os.environ["_CL_"] = "/wd4668"
+    # /FI ensures suppress_msvc_has_feature.h is included in EVERY
+    # cl.exe invocation, including Shared PCH generation (which UBT's
+    # -AdditionalCompilerArguments does not reach).
+    if args.patched_headers_dir:
+        fi_header = Path(args.patched_headers_dir) / "suppress_msvc_has_feature.h"
+        if fi_header.exists():
+            os.environ["_CL_"] = '/FI"{}" /wd4668'.format(fi_header)
+        else:
+            os.environ["_CL_"] = "/wd4668"
+    else:
+        os.environ["_CL_"] = "/wd4668"
     run(cmd)
 
 
