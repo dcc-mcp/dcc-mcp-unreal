@@ -87,7 +87,7 @@ def _run_smoke_impl() -> dict:
     import dcc_mcp_unreal.server as server_mod  # noqa: PLC0415
 
     # init_unreal.py may have started an automatic server already. Restart on a
-    # random port so this smoke test is deterministic and avoids port 8765.
+    # Explicit zero keeps this smoke test deterministic and collision-free.
     dcc_mcp_unreal.stop_server()
     handle = dcc_mcp_unreal.start_server(port=0, server_name="unreal-smoke-test")
     server = server_mod._server_instance

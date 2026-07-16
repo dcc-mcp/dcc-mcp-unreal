@@ -119,7 +119,7 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
 
     def __init__(
         self,
-        port: int = 8765,
+        port: Optional[int] = None,
         server_name: str = _DEFAULT_SERVER_NAME,
         server_version: str = _DEFAULT_SERVER_VERSION,
         *,
@@ -253,7 +253,7 @@ _lock = threading.Lock()
 
 
 def start_server(
-    port: int = 8765,
+    port: Optional[int] = None,
     server_name: str = _DEFAULT_SERVER_NAME,
     server_version: str = _DEFAULT_SERVER_VERSION,
     register_builtins: bool = True,

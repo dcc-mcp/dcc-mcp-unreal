@@ -50,7 +50,7 @@ Each skill script is a standalone Python file that uses Unreal Engine's
   (future iteration)
 - **Thread-safe singleton** — `start_server()` / `stop_server()` module helpers
   for easy use from Unreal's Python console
-- **Configurable port** — default 8765, fully configurable
+- **Collision-free instances** — the OS assigns a free MCP instance port by default
 - **Built-in actor skill** — `unreal-actors` ships out of the box (list, spawn,
   delete, transform actors)
 
@@ -63,7 +63,7 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 | Unreal Engine | 5.0+ |
 | Unreal Python Editor Script Plugin | must be **enabled** |
 | Python (embedded in UE) | 3.9+ (UE 5.0 ships Python 3.9) |
-| dcc-mcp-core | >= 0.18.7, < 1.0.0 |
+| dcc-mcp-core | >= 0.19.45, < 1.0.0 |
 
 ### Enable the Python Plugin
 
@@ -161,16 +161,17 @@ Script Plugin terminal):
 ```python
 import dcc_mcp_unreal
 
-# Start the MCP server on port 8765
-handle = dcc_mcp_unreal.start_server(port=8765)
-print(handle.mcp_url())  # http://127.0.0.1:8765/mcp
+# Start on an OS-assigned instance port
+handle = dcc_mcp_unreal.start_server()
+print(handle.mcp_url())
 
 # Connect your MCP agent to the URL above.
 # When done:
 handle.shutdown()
 ```
 
-Point your MCP host at `http://127.0.0.1:8765/mcp`.
+Agents normally connect to the stable gateway at `http://127.0.0.1:9765/mcp`.
+Use `dcc-mcp-cli list` when a direct instance URL is needed.
 
 ### Available tools (built-in)
 
@@ -308,7 +309,6 @@ def risky_operation(asset_path: str = "/Game/MyAsset", **kwargs) -> dict:
 import dcc_mcp_unreal
 
 handle = dcc_mcp_unreal.start_server(
-    port=8765,
     extra_skill_paths=["/my/studio/unreal-skills", "/shared/pipeline/skills"],
 )
 ```

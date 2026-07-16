@@ -97,7 +97,7 @@ Agent (HTTP client)
     │
     │  POST /mcp  (JSON-RPC 2.0)
     ▼
-McpHttpServer (Rust axum, port 8765)
+McpHttpServer (Rust axum, OS-assigned instance port)
     │
     │  tools/call → ActionDispatcher
     ▼
@@ -144,7 +144,7 @@ Unreal Engine Python API (UE5 main thread)
 import dcc_mcp_unreal
 
 # Start server
-handle = dcc_mcp_unreal.start_server(port=8765)
+handle = dcc_mcp_unreal.start_server()
 print(handle.mcp_url())
 
 # Stop server
@@ -253,7 +253,8 @@ Dev dependencies:
 
 - Skill scripts run in subprocesses — isolated from the MCP server process
 - `SandboxPolicy` from `dcc-mcp-core` can restrict allowed file paths
-- Default port 8765 binds to localhost only — not exposed to network
+- The OS-assigned instance port binds to localhost only; the stable gateway is
+  discoverable at `127.0.0.1:9765`
 - No authentication in v0.1.0 (localhost-only assumption)
 - v0.3.0: consider optional bearer token authentication
 
