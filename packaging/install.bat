@@ -102,7 +102,8 @@ echo  To enable in Unreal Engine:
 echo  1. Open your project in Unreal Editor
 echo  2. Edit ^> Plugins ^> search "DCC MCP Unreal"
 echo  3. Enable the plugin and restart the editor
-echo  4. The MCP server starts automatically at port 8765
+echo  4. The MCP instance uses an OS-assigned port; run dcc-mcp-cli list
+echo     or connect through the gateway at http://127.0.0.1:9765/mcp
 echo.
 echo  To configure port:
 echo    set DCC_MCP_UNREAL_PORT=9000

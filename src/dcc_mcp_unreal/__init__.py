@@ -6,8 +6,8 @@ using dcc-mcp-core. Leverages Unreal Engine's built-in Python plugin (5.0+).
 Quickstart (inside Unreal Engine's Python interpreter)::
 
     import dcc_mcp_unreal
-    handle = dcc_mcp_unreal.start_server(port=8765)
-    # MCP host connects to http://127.0.0.1:8765/mcp
+    handle = dcc_mcp_unreal.start_server()
+    # The instance URL is discovered through the stable gateway or local CLI.
     handle.shutdown()
 
 Skill authoring helpers::
@@ -21,7 +21,7 @@ Skill authoring helpers::
 
 Requirements:
     - Unreal Engine 5.0+ with Python Editor Script Plugin enabled
-    - dcc-mcp-core >= 0.18.7
+    - dcc-mcp-core >= 0.19.45
 """
 
 from __future__ import annotations

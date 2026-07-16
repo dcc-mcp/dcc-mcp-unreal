@@ -18,7 +18,7 @@ Or import from the Unreal Python console:
 
 Configuration (environment variables)
 --------------------------------------
-``DCC_MCP_UNREAL_PORT``         TCP port.  Default: ``8765``.
+``DCC_MCP_UNREAL_PORT``         Optional fixed MCP instance port.
 ``DCC_MCP_UNREAL_SERVER_NAME``  MCP server name.  Default: ``"unreal-mcp"``.
 """
 
@@ -36,9 +36,8 @@ def start() -> None:
         import dcc_mcp_unreal  # noqa: PLC0415
         import unreal  # noqa: PLC0415
 
-        port = int(os.environ.get("DCC_MCP_UNREAL_PORT", "8765"))
         server_name = os.environ.get("DCC_MCP_UNREAL_SERVER_NAME", "unreal-mcp")
-        handle = dcc_mcp_unreal.start_server(port=port, server_name=server_name)
+        handle = dcc_mcp_unreal.start_server(server_name=server_name)
         unreal.log(f"[dcc-mcp-unreal] MCP server running at {handle.mcp_url()}")
     except ImportError as exc:
         logger.error("[dcc-mcp-unreal] Import error: %s", exc)

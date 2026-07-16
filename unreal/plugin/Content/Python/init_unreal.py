@@ -19,7 +19,7 @@ This file performs the equivalent of Maya's ``initializePlugin``:
 Configuration (environment variables)
 --------------------------------------
 ``DCC_MCP_UNREAL_PORT``
-    TCP port for the MCP HTTP server.  Default: ``8765``.
+    Optional fixed MCP instance port.  By default the OS assigns a free port.
 
 ``DCC_MCP_UNREAL_SERVER_NAME``
     Name advertised in the MCP ``initialize`` response.  Default: ``"unreal-mcp"``.
@@ -127,9 +127,8 @@ def _start() -> None:
     try:
         import dcc_mcp_unreal  # noqa: PLC0415
 
-        port = int(os.environ.get("DCC_MCP_UNREAL_PORT", "8765"))
         server_name = os.environ.get("DCC_MCP_UNREAL_SERVER_NAME", "unreal-mcp")
-        _handle = dcc_mcp_unreal.start_server(port=port, server_name=server_name)
+        _handle = dcc_mcp_unreal.start_server(server_name=server_name)
         import unreal as ue  # noqa: PLC0415
 
         ue.log(f"[dcc-mcp-unreal] v{VERSION} MCP server started at {_handle.mcp_url()}")

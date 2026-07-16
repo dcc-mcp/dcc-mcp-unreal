@@ -7,6 +7,7 @@ This covers the public API surface, helpers, and the server instantiation path.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -457,3 +458,24 @@ def test_server_custom_name():
     server = UnrealMcpServer(port=8765, server_name="my-unreal-mcp", server_version="1.2.3")
     assert server._config.server_name == "my-unreal-mcp"
     assert server._config.server_version == "1.2.3"
+
+
+@pytest.mark.parametrize(("port", "expected"), [(None, 18765), (0, 0)])
+def test_server_dynamic_port_and_explicit_zero_override_env(monkeypatch, port, expected):
+    """Core owns env resolution while an explicit zero remains meaningful."""
+    from dcc_mcp_unreal import UnrealMcpServer
+
+    monkeypatch.setenv("DCC_MCP_UNREAL_PORT", "18765")
+    server = UnrealMcpServer(port=port)
+    assert server._config.port == expected
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    ["init_unreal.py", "dcc_mcp_unreal_startup.py"],
+)
+def test_unreal_bootstrap_delegates_instance_port_resolution_to_core(script_name):
+    script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / script_name
+    source = script.read_text(encoding="utf-8")
+    assert 'os.environ.get("DCC_MCP_UNREAL_PORT"' not in source
+    assert "start_server(port=" not in source
