@@ -172,10 +172,10 @@ jobs:
           "wheel=$($wheel.FullName)" >> $env:GITHUB_OUTPUT
           Write-Output "Using core wheel: $($wheel.FullName)"
 
-      - name: Configure isolated UnrealBuildTool settings
+      - name: Configure job-scoped UnrealBuildTool toolchain
         shell: pwsh
         run: |
-          & .github/scripts/configure-ubt-appdata.ps1 -UEVersion "${env:UE_VERSION}"
+          & .github/scripts/configure-ubt-toolchain.ps1 -UEVersion "${env:UE_VERSION}"
 
       - name: Build distributable uplugin
         shell: pwsh
@@ -183,9 +183,6 @@ jobs:
           UE_ROOT: ${{ matrix.ue_root }}
           DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
         run: |
-          # UBT reads BuildConfiguration.xml from APPDATA. Keep the UE 5.2
-          # compiler pin job-local so it cannot leak into UE 5.7 builds.
-          $env:APPDATA = $env:DCC_MCP_UNREAL_UBT_APPDATA
           python packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
