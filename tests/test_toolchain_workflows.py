@@ -48,7 +48,11 @@ def test_toolchain_script_selects_latest_valid_compiler_for_ue57(
 ) -> None:
     environment = _configure_toolchain("5.7", tmp_path)
 
-    assert environment == ("UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest\n")
+    assert environment == (
+        "UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest\n"
+        "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false\n"
+        "UnrealBuildTool_BuildConfiguration__MaxParallelActions=1\n"
+    )
 
 
 def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
