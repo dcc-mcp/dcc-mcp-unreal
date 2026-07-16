@@ -9,6 +9,7 @@ on:
       - "src/**"
       - "pyproject.toml"
       - ".github/workflows/build-uplugin.yml"
+      - ".github/scripts/configure-ubt-appdata.ps1"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -309,30 +310,17 @@ jobs:
           )).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
           Write-Host "IsAdmin: $isAdmin"
 
-      - name: Force MSVC 14.36 toolchain via BuildConfiguration.xml (UE 5.2)
-        if: matrix.ue_version == '5.2'
+      - name: Configure isolated UnrealBuildTool settings
         shell: pwsh
         run: |
-          # UBT ignores -VCToolchainVersion when a newer MSVC is present.
-          # BuildConfiguration.xml is the UE-official way to pin toolchain version
-          # and takes precedence over UBT auto-detection.
-          $ubtConfigDir = "$env:APPDATA\Unreal Engine\UnrealBuildTool"
-          New-Item -ItemType Directory -Force -Path $ubtConfigDir | Out-Null
-          $configPath = "$ubtConfigDir\BuildConfiguration.xml"
-          @"
-          <?xml version="1.0" encoding="utf-8" ?>
-          <Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">
-              <WindowsPlatform>
-                  <CompilerVersion>14.36.32532</CompilerVersion>
-              </WindowsPlatform>
-          </Configuration>
-          "@ | Set-Content $configPath -Encoding utf8
-          Write-Host "BuildConfiguration.xml written to $configPath"
-          Get-Content $configPath
+          & .github/scripts/configure-ubt-appdata.ps1 -UEVersion "${env:UE_VERSION}"
 
       - name: Build distributable uplugin
         shell: pwsh
         run: |
+          # UBT reads BuildConfiguration.xml from APPDATA. Keep the UE 5.2
+          # compiler pin job-local so it cannot leak into UE 5.7 builds.
+          $env:APPDATA = $env:DCC_MCP_UNREAL_UBT_APPDATA
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `

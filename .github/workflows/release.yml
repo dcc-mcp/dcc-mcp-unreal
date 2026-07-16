@@ -110,11 +110,14 @@ jobs:
             ue_root: C:\Program Files\Epic Games\UE_5.2
             package_mode: native
             artifact_suffix: win64
+            vctoolchain_version: "14.36"
           - ue_version: "4.18"
             ue_root: C:\Program Files\Epic Games\UE_4.18
             package_mode: python-only
             artifact_suffix: python-only
     env:
+      UE_VERSION: ${{ matrix.ue_version }}
+      VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}
       CORE_REPO: loonghao/dcc-mcp-core
       CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
     steps:
@@ -169,12 +172,20 @@ jobs:
           "wheel=$($wheel.FullName)" >> $env:GITHUB_OUTPUT
           Write-Output "Using core wheel: $($wheel.FullName)"
 
+      - name: Configure isolated UnrealBuildTool settings
+        shell: pwsh
+        run: |
+          & .github/scripts/configure-ubt-appdata.ps1 -UEVersion "${env:UE_VERSION}"
+
       - name: Build distributable uplugin
         shell: pwsh
         env:
           UE_ROOT: ${{ matrix.ue_root }}
           DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
         run: |
+          # UBT reads BuildConfiguration.xml from APPDATA. Keep the UE 5.2
+          # compiler pin job-local so it cannot leak into UE 5.7 builds.
+          $env:APPDATA = $env:DCC_MCP_UNREAL_UBT_APPDATA
           python packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
