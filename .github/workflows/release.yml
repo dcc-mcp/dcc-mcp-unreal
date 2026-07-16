@@ -59,10 +59,13 @@ jobs:
   build:
     needs: [release-please]
     if: |
-      needs.release-please.outputs.release_created == 'true' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-      github.event_name == 'push' ||
-      github.event_name == 'release'
+      always() &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
+        github.event_name == 'push' ||
+        github.event_name == 'release'
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,10 +96,13 @@ jobs:
   build-unreal-plugin:
     needs: [release-please]
     if: |
-      needs.release-please.outputs.release_created == 'true' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-      github.event_name == 'push' ||
-      github.event_name == 'release'
+      always() &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
+        github.event_name == 'push' ||
+        github.event_name == 'release'
+      )
     runs-on: [self-hosted, Windows, X64]
     strategy:
       fail-fast: false
@@ -199,9 +205,13 @@ jobs:
   publish:
     needs: [release-please, build]
     if: |
-      needs.release-please.outputs.release_created == 'true' ||
-      github.event_name == 'push' ||
-      github.event_name == 'release'
+      always() &&
+      needs.build.result == 'success' &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        github.event_name == 'push' ||
+        github.event_name == 'release'
+      )
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -229,9 +239,14 @@ jobs:
   attach-release-assets:
     needs: [release-please, publish, build-unreal-plugin]
     if: |
-      needs.release-please.outputs.release_created == 'true' ||
-      github.event_name == 'push' ||
-      github.event_name == 'release'
+      always() &&
+      needs.publish.result == 'success' &&
+      needs.build-unreal-plugin.result == 'success' &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        github.event_name == 'push' ||
+        github.event_name == 'release'
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_WORKFLOW = ROOT / ".github" / "workflows" / "build-uplugin.yml"
@@ -80,3 +81,15 @@ def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
         assert '$requirement = "dcc-mcp-core-semantic==$pipVersion"' in text
         assert "pip download $requirement" in text
         assert "$latestTag = gh release view" not in text
+
+
+def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
+    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+
+    for job_name in ("build", "build-unreal-plugin", "publish", "attach-release-assets"):
+        assert "always()" in jobs[job_name]["if"]
+
+    assert "needs.build.result == 'success'" in jobs["publish"]["if"]
+    assert "needs.publish.result == 'success'" in jobs["attach-release-assets"]["if"]
+    assert "needs.build-unreal-plugin.result == 'success'" in jobs["attach-release-assets"]["if"]
