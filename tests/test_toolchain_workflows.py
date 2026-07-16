@@ -36,3 +36,12 @@ def test_release_workflow_declares_ue52_toolchain_version() -> None:
 
     assert 'vctoolchain_version: "14.36"' in text
     assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
+
+
+def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
+    for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        assert '$requirement = "dcc-mcp-core-semantic"' in text
+        assert '$requirement = "dcc-mcp-core-semantic==$pipVersion"' in text
+        assert "pip download $requirement" in text
+        assert "$latestTag = gh release view" not in text

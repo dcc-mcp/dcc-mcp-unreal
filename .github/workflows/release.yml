@@ -158,14 +158,14 @@ jobs:
           # PyPI fallback when GitHub Release doesn't have the wheel yet (timing race)
           if ($null -eq $wheel) {
             Write-Host "::warning::dcc-mcp-core wheel not found in GitHub Release; falling back to PyPI"
-            $pipVersion = ""
-            if ($tag -eq "" -or $tag -eq "latest") {
-              $latestTag = gh release view --repo "${env:CORE_REPO}" --json tagName -q '.tagName'
-              $pipVersion = $latestTag -replace "^v", ""
-            } else {
+            $requirement = "dcc-mcp-core-semantic"
+            if ($tag -ne "" -and $tag -ne "latest") {
               $pipVersion = $tag -replace "^v", ""
+              $requirement = "dcc-mcp-core-semantic==$pipVersion"
+            } else {
+              Write-Host "Using the newest core wheel currently available on PyPI"
             }
-            python -m pip download "dcc-mcp-core-semantic==$pipVersion" --only-binary=:all: --platform win_amd64 --python-version 3.8 --dest dist/core-wheel
+            python -m pip download $requirement --only-binary=:all: --platform win_amd64 --python-version 3.8 --dest dist/core-wheel
             $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           }
           if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded from GitHub Release or PyPI" }
