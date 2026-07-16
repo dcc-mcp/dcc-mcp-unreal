@@ -18,8 +18,13 @@ if ($UEVersion -ne "5.7") {
 }
 
 # UE 5.7 loads UnrealBuildTool_* environment settings after user XML files.
-# This final override prevents a stale per-user compiler pin from winning.
+# The final overrides prevent stale compiler pins and keep peak memory bounded
+# on shared self-hosted runners.
 $compilerVersion = "Latest"
-"UnrealBuildTool_WindowsPlatform__CompilerVersion=$compilerVersion" |
+@(
+    "UnrealBuildTool_WindowsPlatform__CompilerVersion=$compilerVersion"
+    "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false"
+    "UnrealBuildTool_BuildConfiguration__MaxParallelActions=1"
+) |
     Out-File -FilePath $EnvironmentFile -Encoding utf8 -Append
-Write-Host "Configured UE $UEVersion to use MSVC toolchain $compilerVersion"
+Write-Host "Configured UE $UEVersion to use MSVC $compilerVersion with bounded local execution"
