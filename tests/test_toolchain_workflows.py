@@ -1,41 +1,72 @@
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_WORKFLOW = ROOT / ".github" / "workflows" / "build-uplugin.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
-CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-appdata.ps1"
+CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
+BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
 
 
-def test_plugin_workflows_isolate_unrealbuildtool_appdata() -> None:
+def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required to exercise the workflow helper")
+
+    environment_file = tmp_path / "github-env.txt"
+    subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(CONFIGURE_SCRIPT),
+            "-UEVersion",
+            ue_version,
+            "-EnvironmentFile",
+            str(environment_file),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return environment_file.read_text(encoding="utf-8-sig")
+
+
+def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
     for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
         text = workflow.read_text(encoding="utf-8")
-        assert ".github/scripts/configure-ubt-appdata.ps1" in text
-        assert "$env:APPDATA = $env:DCC_MCP_UNREAL_UBT_APPDATA" in text
+        assert ".github/scripts/configure-ubt-toolchain.ps1" in text
+        assert "$env:APPDATA" not in text
+        assert "DCC_MCP_UNREAL_UBT_APPDATA" not in text
 
 
-def test_toolchain_script_pins_only_ue52_inside_runner_temp() -> None:
-    text = CONFIGURE_SCRIPT.read_text(encoding="utf-8")
+def test_toolchain_script_selects_latest_valid_compiler_for_ue57(
+    tmp_path: Path,
+) -> None:
+    environment = _configure_toolchain("5.7", tmp_path)
 
-    assert 'if ($UEVersion -eq "5.2")' in text
-    assert "<CompilerVersion>14.36.32532</CompilerVersion>" in text
-    assert "$env:RUNNER_TEMP" in text
-    assert '"DCC_MCP_UNREAL_UBT_APPDATA=$appData"' in text
-    assert "$env:APPDATA" not in text
+    assert environment == ("UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest\n")
 
 
 def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
-    assert '".github/scripts/configure-ubt-appdata.ps1"' in text
+    assert '".github/scripts/configure-ubt-toolchain.ps1"' in text
     assert '"$env:APPDATA\\Unreal Engine\\UnrealBuildTool"' not in text
     assert "Force MSVC 14.36 toolchain via BuildConfiguration.xml" not in text
 
 
-def test_release_workflow_declares_ue52_toolchain_version() -> None:
-    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+def test_ue52_workflows_keep_the_supported_cli_toolchain_override() -> None:
+    for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
+        text = workflow.read_text(encoding="utf-8")
+        assert 'vctoolchain_version: "14.36"' in text
+        assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
 
-    assert 'vctoolchain_version: "14.36"' in text
-    assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
+    packaging = BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
+    assert 'ubtargs.append("-VCToolchainVersion={}"' in packaging
 
 
 def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
