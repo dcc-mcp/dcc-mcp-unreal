@@ -1,6 +1,13 @@
 name: Build Unreal Plugin
 
 on:
+  workflow_call:
+    inputs:
+      core_version:
+        description: "dcc-mcp-core release tag/version to download"
+        required: false
+        type: string
+        default: "latest"
   push:
     branches: [main]
     paths:
@@ -57,7 +64,7 @@ jobs:
       VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}
       MSVC_14_36_COMPONENT: Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
       CORE_REPO: loonghao/dcc-mcp-core
-      CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
+      CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}
 
     steps:
       - uses: actions/checkout@v4

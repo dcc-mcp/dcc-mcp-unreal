@@ -37,11 +37,13 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
 
 
 def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
-    for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
-        text = workflow.read_text(encoding="utf-8")
-        assert ".github/scripts/configure-ubt-toolchain.ps1" in text
-        assert "$env:APPDATA" not in text
-        assert "DCC_MCP_UNREAL_UBT_APPDATA" not in text
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    assert ".github/scripts/configure-ubt-toolchain.ps1" in text
+    assert "$env:APPDATA" not in text
+    assert "DCC_MCP_UNREAL_UBT_APPDATA" not in text
+
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    assert release["jobs"]["build-unreal-plugin"]["uses"] == ("./.github/workflows/build-uplugin.yml")
 
 
 def test_toolchain_script_selects_latest_valid_compiler_for_ue57(
@@ -65,22 +67,20 @@ def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
 
 
 def test_ue52_workflows_keep_the_supported_cli_toolchain_override() -> None:
-    for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
-        text = workflow.read_text(encoding="utf-8")
-        assert 'vctoolchain_version: "14.36"' in text
-        assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    assert 'vctoolchain_version: "14.36"' in text
+    assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
 
     packaging = BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
     assert 'ubtargs.append("-VCToolchainVersion={}"' in packaging
 
 
 def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
-    for workflow in (BUILD_WORKFLOW, RELEASE_WORKFLOW):
-        text = workflow.read_text(encoding="utf-8")
-        assert '$requirement = "dcc-mcp-core-semantic"' in text
-        assert '$requirement = "dcc-mcp-core-semantic==$pipVersion"' in text
-        assert "pip download $requirement" in text
-        assert "$latestTag = gh release view" not in text
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    assert '$requirement = "dcc-mcp-core-semantic"' in text
+    assert '$requirement = "dcc-mcp-core-semantic==$pipVersion"' in text
+    assert "pip download $requirement" in text
+    assert "$latestTag = gh release view" not in text
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
@@ -93,3 +93,54 @@ def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> No
     assert "needs.build.result == 'success'" in jobs["publish"]["if"]
     assert "needs.publish.result == 'success'" in jobs["attach-release-assets"]["if"]
     assert "needs.build-unreal-plugin.result == 'success'" in jobs["attach-release-assets"]["if"]
+
+
+def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    plugin_job = release["jobs"]["build-unreal-plugin"]
+
+    assert plugin_job["uses"] == "./.github/workflows/build-uplugin.yml"
+    assert plugin_job["with"]["core_version"] == ("${{ github.event.inputs.core_version || 'latest' }}")
+    assert plugin_job["secrets"] == "inherit"
+
+    build = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+    steps = build["jobs"]["build-uplugin"]["steps"]
+
+    assert not any(str(step.get("uses", "")).startswith("actions/setup-python@") for step in steps)
+
+    setup_step = next(step for step in steps if step.get("name") == "Set up Python")
+    assert "python.org/ftp/python" in setup_step["run"]
+    assert "python-$pythonVersion-embed-amd64.zip" in setup_step["run"]
+    assert "PYTHON_HOME=$installDir" in setup_step["run"]
+
+    run_text = "\n".join(str(step.get("run", "")) for step in steps)
+    assert '& "$env:PYTHON_HOME\\python.exe" -m pip install -e ".[dev]"' in run_text
+    assert '& "$env:PYTHON_HOME\\python.exe" -m pytest' in run_text
+    assert '& "$env:PYTHON_HOME\\python.exe" packaging/build_distributable.py' in run_text
+
+    build_text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    assert "workflow_call:" in build_text
+    assert "CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}" in build_text
+
+
+def test_manual_tag_recovery_publishes_and_attaches_to_requested_release() -> None:
+    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    manual_tag = "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != ''"
+
+    assert jobs["release-please"]["if"] == (
+        "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == ''"
+    )
+    assert manual_tag in jobs["publish"]["if"]
+    assert manual_tag in jobs["attach-release-assets"]["if"]
+
+    attach_step = next(
+        step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Attach wheels to GitHub Release"
+    )
+    tag_expression = attach_step["with"]["tag_name"]
+    assert "github.event.inputs.tag_name" in tag_expression
+    assert tag_expression.index("github.event.inputs.tag_name") < tag_expression.index("github.ref_name")
+    download_step = next(
+        step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Download Unreal plugin package"
+    )
+    assert download_step["with"]["pattern"] == "DccMcpUnreal-*"
