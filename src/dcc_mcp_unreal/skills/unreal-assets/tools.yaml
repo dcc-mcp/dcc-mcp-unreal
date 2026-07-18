@@ -70,6 +70,14 @@ tools:
           type: boolean
           description: For FBX files, import referenced textures.
           default: true
+        import_as_skeletal:
+          type: boolean
+          description: For FBX files, import a skeletal mesh instead of a static mesh.
+          default: false
+        import_animations:
+          type: boolean
+          description: For skeletal FBX files, import embedded animation.
+          default: true
     next-tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

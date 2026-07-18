@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _asset_data import configure_dependency_options
 from _asset_data import object_path as asset_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
@@ -65,13 +66,7 @@ def get_asset_info(
     # Retrieve dependencies if requested
     dependencies = []
     if include_dependencies:
-        dep_options = unreal.AssetRegistryDependencyOptions()
-        dep_options.include_packages = True
-        dep_options.include_soft_package_references = False
-        dep_options.include_hard_package_references = True
-        dep_options.include_searchable_names = False
-        dep_options.include_soft_management_references = False
-        dep_options.include_hard_management_references = False
+        dep_options = configure_dependency_options(unreal.AssetRegistryDependencyOptions())
 
         dep_data = asset_registry.get_dependencies(package_name, dep_options)
         dependencies = [str(d) for d in dep_data]

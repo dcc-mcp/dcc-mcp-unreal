@@ -17,6 +17,8 @@ def import_asset(
     combine_meshes: bool = True,
     import_materials: bool = True,
     import_textures: bool = True,
+    import_as_skeletal: bool = False,
+    import_animations: bool = True,
     **kwargs,
 ) -> dict:
     """Import a file from disk into the Content Browser.
@@ -37,6 +39,9 @@ def import_asset(
         combine_meshes: For FBX files, combine scene nodes into one static mesh.
         import_materials: For FBX files, import referenced materials.
         import_textures: For FBX files, import referenced textures.
+        import_as_skeletal: For FBX files, import a skeletal mesh instead of a
+            static mesh.
+        import_animations: For skeletal FBX files, also import embedded animation.
 
     Returns:
         dict: ActionResultModel with the imported asset's object path.
@@ -81,6 +86,8 @@ def import_asset(
                 combine_meshes=combine_meshes,
                 import_materials=import_materials,
                 import_textures=import_textures,
+                import_as_skeletal=import_as_skeletal,
+                import_animations=import_animations,
             ),
         )
 
@@ -101,7 +108,11 @@ def import_asset(
         )
 
     imported_paths = [str(path) for path in imported]
-    object_path = primary_object_path(imported_paths, asset_name)
+    object_path = primary_object_path(
+        imported_paths,
+        asset_name,
+        import_as_skeletal=import_as_skeletal,
+    )
     return skill_success(
         f"Imported '{asset_name}' to {destination_path}",
         prompt=f"Use get_asset_info to inspect the imported asset at '{object_path}'.",
