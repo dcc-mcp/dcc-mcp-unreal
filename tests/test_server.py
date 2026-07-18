@@ -619,8 +619,12 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
     assert len(callbacks) == 1
-    assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
-    assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+    if sys.platform == "win32":
+        assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
+        assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+    else:
+        assert "DCC_MCP_APP_UI_BACKEND" not in os.environ
+        assert "DCC_MCP_APP_UI_UIA_PROCESS_ID" not in os.environ
 
     callbacks[0](0.0)
 
@@ -643,13 +647,7 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
 
 def test_asset_data_object_path_supports_ue58_and_legacy_api():
     helper_path = (
-        Path(__file__).parents[1]
-        / "src"
-        / "dcc_mcp_unreal"
-        / "skills"
-        / "unreal-assets"
-        / "scripts"
-        / "_asset_data.py"
+        Path(__file__).parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-assets" / "scripts" / "_asset_data.py"
     )
     spec = importlib.util.spec_from_file_location("_test_unreal_asset_data", helper_path)
     assert spec and spec.loader
