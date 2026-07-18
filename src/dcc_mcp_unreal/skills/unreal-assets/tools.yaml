@@ -58,6 +58,69 @@ tools:
           type: boolean
           description: Replace an existing asset with the same destination name.
           default: false
+        combine_meshes:
+          type: boolean
+          description: For FBX files, combine scene nodes into one static mesh.
+          default: true
+        import_materials:
+          type: boolean
+          description: For FBX files, import referenced materials.
+          default: true
+        import_textures:
+          type: boolean
+          description: For FBX files, import referenced textures.
+          default: true
+    next-tools:
+      on-success: [unreal_assets__get_asset_info]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: create_texture_material
+    description: Create or rebuild a material whose base color comes from a texture asset.
+    source_file: scripts/create_texture_material.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 60
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [texture_path, material_name]
+      properties:
+        texture_path:
+          type: string
+          minLength: 1
+          description: Content Browser object or package path for the base-color texture.
+        destination_path:
+          type: string
+          description: Content Browser folder for the material.
+          default: /Game/GeneratedMaterials
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the material asset to create.
+        uv_scale:
+          type: number
+          exclusiveMinimum: 0
+          description: Uniform texture-coordinate tiling multiplier.
+          default: 1.0
+        roughness:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Constant surface roughness.
+          default: 0.85
+        specular:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Constant dielectric specular value.
+          default: 0.15
+        replace_existing:
+          type: boolean
+          description: Rebuild an existing material at the same path.
+          default: false
     next-tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

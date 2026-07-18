@@ -74,12 +74,12 @@ def delete_asset(
     # --- delete ---
     if force_delete:
         # Consolidate references to None, then delete
-        deleted_count = unreal.EditorAssetLibrary.consolidate_assets(None, objects_to_delete)
+        unreal.EditorAssetLibrary.consolidate_assets(None, objects_to_delete)
         # After consolidation, attempt hard delete
         success = unreal.EditorAssetLibrary.delete_loaded_assets(objects_to_delete)
     else:
         success = unreal.EditorAssetLibrary.delete_loaded_assets(objects_to_delete)
-        deleted_count = len(objects_to_delete) if success else 0
+    deleted_count = len(objects_to_delete) if success else 0
 
     deleted_paths = [p for p in paths if p not in not_found]
 

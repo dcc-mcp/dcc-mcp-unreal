@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from _asset_import import configure_fbx_options, primary_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -13,6 +14,9 @@ def import_asset(
     destination_path: str = "/Game/Imports",
     asset_name: str = "",
     replace_existing: bool = False,
+    combine_meshes: bool = True,
+    import_materials: bool = True,
+    import_textures: bool = True,
     **kwargs,
 ) -> dict:
     """Import a file from disk into the Content Browser.
@@ -30,6 +34,9 @@ def import_asset(
             file's stem if empty.
         replace_existing: If ``True``, overwrite an existing asset with the
             same name.
+        combine_meshes: For FBX files, combine scene nodes into one static mesh.
+        import_materials: For FBX files, import referenced materials.
+        import_textures: For FBX files, import referenced textures.
 
     Returns:
         dict: ActionResultModel with the imported asset's object path.
@@ -66,6 +73,16 @@ def import_asset(
     task.set_editor_property("replace_existing", replace_existing)
     task.set_editor_property("automated", True)
     task.set_editor_property("save", True)
+    if os.path.splitext(source_path)[1].lower() == ".fbx":
+        task.set_editor_property(
+            "options",
+            configure_fbx_options(
+                unreal,
+                combine_meshes=combine_meshes,
+                import_materials=import_materials,
+                import_textures=import_textures,
+            ),
+        )
 
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     asset_tools.import_asset_tasks([task])
@@ -83,7 +100,8 @@ def import_asset(
             ],
         )
 
-    object_path = imported[0]
+    imported_paths = [str(path) for path in imported]
+    object_path = primary_object_path(imported_paths, asset_name)
     return skill_success(
         f"Imported '{asset_name}' to {destination_path}",
         prompt=f"Use get_asset_info to inspect the imported asset at '{object_path}'.",
@@ -91,6 +109,7 @@ def import_asset(
         object_path=object_path,
         destination_path=destination_path,
         source_path=source_path,
+        imported_object_paths=imported_paths,
     )
 
 

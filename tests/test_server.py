@@ -663,3 +663,76 @@ def test_asset_data_object_path_supports_ue58_and_legacy_api():
     assert helper.object_path(ue58) == "/Game/New.New"
     assert helper.object_path(legacy) == "/Game/Old.Old"
     assert helper.object_path(fallback) == "/Game/Fallback.Fallback"
+
+
+def test_fbx_import_options_combine_meshes_and_select_named_asset():
+    helper_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "dcc_mcp_unreal"
+        / "skills"
+        / "unreal-assets"
+        / "scripts"
+        / "_asset_import.py"
+    )
+    spec = importlib.util.spec_from_file_location("_test_unreal_asset_import", helper_path)
+    assert spec and spec.loader
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+
+    class FakeProperties:
+        def __init__(self):
+            self.values = {}
+
+        def set_editor_property(self, name, value):
+            self.values[name] = value
+
+    class FakeOptions(FakeProperties):
+        def __init__(self):
+            super().__init__()
+            self.static_mesh_data = FakeProperties()
+
+        def get_editor_property(self, name):
+            assert name == "static_mesh_import_data"
+            return self.static_mesh_data
+
+    unreal = types.SimpleNamespace(
+        FbxImportUI=FakeOptions,
+        FBXImportType=types.SimpleNamespace(FBXIT_STATIC_MESH="static"),
+    )
+
+    options = helper.configure_fbx_options(
+        unreal,
+        combine_meshes=True,
+        import_materials=True,
+        import_textures=False,
+    )
+
+    assert options.values == {
+        "import_mesh": True,
+        "import_as_skeletal": False,
+        "mesh_type_to_import": "static",
+        "import_materials": True,
+        "import_textures": False,
+    }
+    assert options.static_mesh_data.values == {"combine_meshes": True}
+    assert (
+        helper.primary_object_path(
+            ["/Game/Import/colormap.colormap", "/Game/Import/SM_Creature.SM_Creature"],
+            "SM_Creature",
+        )
+        == "/Game/Import/SM_Creature.SM_Creature"
+    )
+
+
+def test_texture_material_skill_is_registered_and_builds_complete_graph():
+    skill_root = Path(__file__).parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-assets"
+    tools = (skill_root / "tools.yaml").read_text(encoding="utf-8")
+    script = (skill_root / "scripts" / "create_texture_material.py").read_text(encoding="utf-8")
+
+    assert "name: create_texture_material" in tools
+    assert "affinity: main" in tools
+    assert "MaterialExpressionTextureCoordinate" in script
+    assert "MP_BASE_COLOR" in script
+    assert "MP_ROUGHNESS" in script
+    assert "MP_SPECULAR" in script
