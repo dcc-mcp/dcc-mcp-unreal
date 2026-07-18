@@ -662,6 +662,21 @@ def test_asset_data_object_path_supports_ue58_and_legacy_api():
     assert helper.object_path(legacy) == "/Game/Old.Old"
     assert helper.object_path(fallback) == "/Game/Fallback.Fallback"
 
+    legacy_options = types.SimpleNamespace(
+        include_packages=False,
+        include_soft_package_references=True,
+        include_hard_package_references=False,
+        include_searchable_names=True,
+        include_soft_management_references=True,
+        include_hard_management_references=True,
+    )
+    assert helper.configure_dependency_options(legacy_options) is legacy_options
+    assert legacy_options.include_packages is True
+    assert legacy_options.include_hard_package_references is True
+    assert legacy_options.include_soft_package_references is False
+    modern_options = object()
+    assert helper.configure_dependency_options(modern_options) is modern_options
+
 
 def test_fbx_import_options_combine_meshes_and_select_named_asset():
     helper_path = (
@@ -696,7 +711,10 @@ def test_fbx_import_options_combine_meshes_and_select_named_asset():
 
     unreal = types.SimpleNamespace(
         FbxImportUI=FakeOptions,
-        FBXImportType=types.SimpleNamespace(FBXIT_STATIC_MESH="static"),
+        FBXImportType=types.SimpleNamespace(
+            FBXIT_STATIC_MESH="static",
+            FBXIT_SKELETAL_MESH="skeletal",
+        ),
     )
 
     options = helper.configure_fbx_options(
@@ -712,6 +730,7 @@ def test_fbx_import_options_combine_meshes_and_select_named_asset():
         "mesh_type_to_import": "static",
         "import_materials": True,
         "import_textures": False,
+        "import_animations": False,
     }
     assert options.static_mesh_data.values == {"combine_meshes": True}
     assert (
@@ -721,6 +740,36 @@ def test_fbx_import_options_combine_meshes_and_select_named_asset():
         )
         == "/Game/Import/SM_Creature.SM_Creature"
     )
+    assert (
+        helper.primary_object_path(
+            [
+                "/Game/Import/SK_Creature_Skeleton.SK_Creature_Skeleton",
+                "/Game/Import/SK_Creature1.SK_Creature1",
+                "/Game/Import/SK_Creature_Anim.SK_Creature_Anim",
+            ],
+            "SK_Creature",
+            import_as_skeletal=True,
+        )
+        == "/Game/Import/SK_Creature1.SK_Creature1"
+    )
+
+    skeletal_options = helper.configure_fbx_options(
+        unreal,
+        combine_meshes=True,
+        import_materials=False,
+        import_textures=True,
+        import_as_skeletal=True,
+        import_animations=True,
+    )
+    assert skeletal_options.values == {
+        "import_mesh": True,
+        "import_as_skeletal": True,
+        "mesh_type_to_import": "skeletal",
+        "import_materials": False,
+        "import_textures": True,
+        "import_animations": True,
+    }
+    assert skeletal_options.static_mesh_data.values == {}
 
 
 def test_texture_material_skill_is_registered_and_builds_complete_graph():
