@@ -30,7 +30,7 @@ validate-skills:
 check: lint test validate-skills
 
 # Download a dcc-mcp-core wheel release asset into dist/core-wheel/.
-download-core-wheel release="latest" repo="loonghao/dcc-mcp-core":
+download-core-wheel release="latest" repo="dcc-mcp/dcc-mcp-core":
     & { $dir = Resolve-Path -LiteralPath .; $target = Join-Path $dir 'dist\core-wheel'; if ((Test-Path -LiteralPath $target) -and -not ((Resolve-Path -LiteralPath $target).Path.StartsWith($dir.Path))) { throw "Refusing to clean outside repo: $target" }; Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path $target | Out-Null; if ('{{release}}' -eq 'latest') { gh release download --repo '{{repo}}' --pattern 'dcc_mcp_core-*.whl' --dir $target --clobber } else { gh release download '{{release}}' --repo '{{repo}}' --pattern 'dcc_mcp_core-*.whl' --dir $target --clobber }; Get-ChildItem -LiteralPath $target -Filter '*.whl' }
 
 # Build the distributable uplugin zip. Set DCC_MCP_CORE_WHEEL or DCC_MCP_CORE_WHEEL_URL to avoid source builds.

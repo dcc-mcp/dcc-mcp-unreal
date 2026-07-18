@@ -43,10 +43,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/loonghao/dcc-mcp-unreal"
-Repository = "https://github.com/loonghao/dcc-mcp-unreal"
-Issues = "https://github.com/loonghao/dcc-mcp-unreal/issues"
-Changelog = "https://github.com/loonghao/dcc-mcp-unreal/releases"
+Homepage = "https://github.com/dcc-mcp/dcc-mcp-unreal"
+Repository = "https://github.com/dcc-mcp/dcc-mcp-unreal"
+Issues = "https://github.com/dcc-mcp/dcc-mcp-unreal/issues"
+Changelog = "https://github.com/dcc-mcp/dcc-mcp-unreal/releases"
 
 [project.entry-points."dcc_mcp.adapters"]
 unreal = "dcc_mcp_unreal:UnrealMcpServer"
