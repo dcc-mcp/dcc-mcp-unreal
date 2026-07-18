@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import List
 
+from _asset_data import object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success, skill_warning
 
 
@@ -55,7 +56,7 @@ def delete_asset(
         if not asset_data_list:
             not_found.append(package_name)
             continue
-        obj = unreal.load_asset(str(asset_data_list[0].object_path))
+        obj = unreal.load_asset(object_path(asset_data_list[0]))
         if obj is not None:
             objects_to_delete.append(obj)
         else:

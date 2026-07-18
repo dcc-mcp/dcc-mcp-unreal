@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _asset_data import object_path as asset_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -59,7 +60,7 @@ def get_asset_info(
     asset_data = asset_data_list[0]
     asset_name = str(asset_data.asset_name)
     asset_class = str(asset_data.asset_class_path.asset_name)
-    object_path = str(asset_data.object_path)
+    object_path = asset_object_path(asset_data)
 
     # Retrieve dependencies if requested
     dependencies = []

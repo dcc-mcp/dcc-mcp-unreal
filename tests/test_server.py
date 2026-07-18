@@ -6,6 +6,7 @@ This covers the public API surface, helpers, and the server instantiation path.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import runpy
 import sys
@@ -638,3 +639,27 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         ("DccMcpServer", "DccMcp.Stop"),
     ]
     assert unregistered == ["tick-handle"]
+
+
+def test_asset_data_object_path_supports_ue58_and_legacy_api():
+    helper_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "dcc_mcp_unreal"
+        / "skills"
+        / "unreal-assets"
+        / "scripts"
+        / "_asset_data.py"
+    )
+    spec = importlib.util.spec_from_file_location("_test_unreal_asset_data", helper_path)
+    assert spec and spec.loader
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+
+    ue58 = types.SimpleNamespace(get_soft_object_path=lambda: "/Game/New.New")
+    legacy = types.SimpleNamespace(object_path="/Game/Old.Old")
+    fallback = types.SimpleNamespace(package_name="/Game/Fallback", asset_name="Fallback")
+
+    assert helper.object_path(ue58) == "/Game/New.New"
+    assert helper.object_path(legacy) == "/Game/Old.Old"
+    assert helper.object_path(fallback) == "/Game/Fallback.Fallback"

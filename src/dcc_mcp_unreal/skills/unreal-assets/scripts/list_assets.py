@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _asset_data import object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -56,7 +57,7 @@ def list_assets(
                 "name": str(asset_data.asset_name),
                 "path": str(asset_data.package_name),
                 "class": str(asset_data.asset_class_path.asset_name),
-                "object_path": str(asset_data.object_path),
+                "object_path": object_path(asset_data),
             }
         )
 
