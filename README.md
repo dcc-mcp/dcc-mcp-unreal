@@ -1,17 +1,40 @@
 # dcc-mcp-unreal
 
+<p align="center">
+  <img src="docs/assets/dcc-mcp-unreal.svg" alt="DCC-MCP · UNREAL" width="600">
+</p>
+
+## Agent workflow
+
+AI agents should use the shared gateway through `dcc-mcp-cli`; IDE users may
+continue to use the MCP endpoint. Prefer typed skills and tools over raw scripts.
+
+```bash
+dcc-mcp-cli dcc-types
+dcc-mcp-cli list
+dcc-mcp-cli search --query "<task>" --dcc-type unreal
+dcc-mcp-cli describe <tool-slug>
+dcc-mcp-cli call <tool-slug> --json '{"key":"value"}'
+```
+
+`dcc-types` reports release-catalog support; `list` reports live sessions. If a
+tool belongs to an inactive progressive skill, call `dcc-mcp-cli load-skill <skill-name> --dcc-type unreal` before retrying. For post-task improvement,
+attach a stable session id with `--meta-json`, query `dcc-mcp-cli stats --range 24h --session-id <task-id>`, then pass the bounded evidence to the
+`review_skill_improvement` prompt from `dcc-mcp-skills-creator`.
+
+
 > **Status**: Pre-Alpha — placeholder / scaffold. Core skill authoring API is
 > functional; full Unreal Engine integration requires iterative testing inside UE5.
 
 <!-- Badges (fill in once CI is configured) -->
 <!-- ![PyPI](https://img.shields.io/pypi/v/dcc-mcp-unreal) -->
 <!-- ![Python](https://img.shields.io/pypi/pyversions/dcc-mcp-unreal) -->
-<!-- ![License](https://img.shields.io/github/license/loonghao/dcc-mcp-unreal) -->
+<!-- ![License](https://img.shields.io/github/license/dcc-mcp/dcc-mcp-unreal) -->
 
 Unreal Engine plugin for the **DCC Model Context Protocol (MCP)** ecosystem.
 Embeds a standards-compliant MCP Streamable HTTP server (2025-03-26 spec)
 directly inside Unreal Engine using the current
-[dcc-mcp-core](https://github.com/loonghao/dcc-mcp-core).
+[dcc-mcp-core](https://github.com/dcc-mcp/dcc-mcp-core).
 
 MCP-compatible agents (Claude Desktop, Cursor, OpenClaw, …) can call Unreal
 Editor operations as **tools** — list actors, spawn blueprints, batch-process
@@ -22,7 +45,7 @@ assets, run Python scripts — all through a single HTTP endpoint.
 ## Overview
 
 `dcc-mcp-unreal` follows the same architecture as
-[dcc-mcp-maya](https://github.com/loonghao/dcc-mcp-maya):
+[dcc-mcp-maya](https://github.com/dcc-mcp/dcc-mcp-maya):
 
 ```
 Agent (Claude / Cursor)
@@ -91,7 +114,7 @@ Or add it to the project's `Plugins/PythonScriptPlugin/Content/Python/` folder.
 ### Development install
 
 ```bash
-git clone https://github.com/loonghao/dcc-mcp-unreal
+git clone https://github.com/dcc-mcp/dcc-mcp-unreal
 cd dcc-mcp-unreal
 pip install -e ".[dev]"
 ```
@@ -411,7 +434,7 @@ MIT — see [LICENSE](LICENSE) for details.
 
 | Project | Description |
 |---------|-------------|
-| [dcc-mcp-core](https://github.com/loonghao/dcc-mcp-core) | Core MCP infrastructure (Rust + PyO3) |
-| [dcc-mcp-maya](https://github.com/loonghao/dcc-mcp-maya) | Maya MCP adapter |
-| [dcc-mcp-photoshop](https://github.com/loonghao/dcc-mcp-photoshop) | Photoshop MCP adapter (bridge) |
-| [dcc-mcp-zbrush](https://github.com/loonghao/dcc-mcp-zbrush) | ZBrush MCP adapter (HTTP bridge) |
+| [dcc-mcp-core](https://github.com/dcc-mcp/dcc-mcp-core) | Core MCP infrastructure (Rust + PyO3) |
+| [dcc-mcp-maya](https://github.com/dcc-mcp/dcc-mcp-maya) | Maya MCP adapter |
+| [dcc-mcp-photoshop](https://github.com/dcc-mcp/dcc-mcp-photoshop) | Photoshop MCP adapter (bridge) |
+| [dcc-mcp-zbrush](https://github.com/dcc-mcp/dcc-mcp-zbrush) | ZBrush MCP adapter (HTTP bridge) |
