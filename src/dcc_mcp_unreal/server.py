@@ -10,6 +10,7 @@ small module-level start/stop helpers for ``init_unreal.py``.
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -39,6 +40,22 @@ class UnrealMainThreadDispatcher:
     def __init__(self, timeout_secs: float = 60.0, main_thread_id: Optional[int] = None) -> None:
         self.timeout_secs = timeout_secs
         self.main_thread_id = main_thread_id if main_thread_id is not None else threading.get_ident()
+        self._pending = queue.Queue()
+        self._tick_handle: Any = None
+        self._unregister_tick: Optional[Callable[[Any], Any]] = None
+        self._inside_unreal = False
+
+        try:
+            import unreal  # noqa: PLC0415
+        except ImportError:
+            return
+
+        self._inside_unreal = True
+        register_tick = getattr(unreal, "register_slate_post_tick_callback", None)
+        unregister_tick = getattr(unreal, "unregister_slate_post_tick_callback", None)
+        if callable(register_tick) and callable(unregister_tick):
+            self._unregister_tick = unregister_tick
+            self._tick_handle = register_tick(self._on_tick)
 
     def dispatch_callable(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run ``func`` inline or on the next Unreal Slate tick."""
@@ -54,64 +71,80 @@ class UnrealMainThreadDispatcher:
         if affinity != "main" or threading.get_ident() == self.main_thread_id:
             return func(*args, **kwargs)
 
-        try:
-            import unreal  # noqa: PLC0415
-        except ImportError:
-            # Standalone tests and non-UE interpreters intentionally fall back
-            # to inline execution; the script itself will return the UE import
-            # error in the normal skill result envelope.
+        if not self._inside_unreal:
+            # Standalone tests and non-UE interpreters intentionally run inline.
             return func(*args, **kwargs)
 
-        register_tick = getattr(unreal, "register_slate_post_tick_callback", None)
-        unregister_tick = getattr(unreal, "unregister_slate_post_tick_callback", None)
-        if not callable(register_tick) or not callable(unregister_tick):
-            return func(*args, **kwargs)
+        if self._tick_handle is None:
+            raise RuntimeError("Unreal main-thread dispatch is unavailable")
 
         event = threading.Event()
-        result_box: Dict[str, Any] = {}
-        handle_box: Dict[str, Any] = {}
-
-        def _on_tick(_delta: float) -> None:
-            handle = handle_box.get("handle")
-            if handle is not None:
-                try:
-                    unregister_tick(handle)
-                except Exception:
-                    logger.debug("Failed to unregister Unreal tick callback", exc_info=True)
-            try:
-                result_box["value"] = func(*args, **kwargs)
-            except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
-                result_box["error"] = exc
-            finally:
-                event.set()
-
-        handle_box["handle"] = register_tick(_on_tick)
+        task: Dict[str, Any] = {
+            "func": func,
+            "args": args,
+            "kwargs": kwargs,
+            "event": event,
+            "cancelled": False,
+        }
+        self._pending.put(task)
 
         timeout = float(timeout_hint_secs or self.timeout_secs)
         if not event.wait(timeout):
-            handle = handle_box.get("handle")
-            if handle is not None:
-                try:
-                    unregister_tick(handle)
-                except Exception:
-                    logger.debug("Failed to unregister timed-out Unreal tick callback", exc_info=True)
+            task["cancelled"] = True
             raise TimeoutError("Unreal main-thread dispatch timed out after {:.1f}s".format(timeout))
 
-        if "error" in result_box:
-            raise result_box["error"]
-        return result_box.get("value")
+        if "error" in task:
+            raise task["error"]
+        return task.get("value")
+
+    def _on_tick(self, _delta: float) -> None:
+        while True:
+            try:
+                task = self._pending.get_nowait()
+            except queue.Empty:
+                return
+
+            try:
+                if not task["cancelled"]:
+                    task["value"] = task["func"](*task["args"], **task["kwargs"])
+            except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
+                task["error"] = exc
+            finally:
+                task["event"].set()
+
+    def close(self) -> None:
+        if self._tick_handle is None:
+            return
+        if threading.get_ident() == self.main_thread_id:
+            self._unregister_tick_callback()
+            return
+        try:
+            self.dispatch_callable(
+                self._unregister_tick_callback,
+                affinity="main",
+                timeout_hint_secs=self.timeout_secs,
+            )
+        except Exception:
+            logger.warning("Failed to close Unreal main-thread dispatcher", exc_info=True)
+
+    def _unregister_tick_callback(self) -> None:
+        handle = self._tick_handle
+        self._tick_handle = None
+        if handle is not None and self._unregister_tick is not None:
+            self._unregister_tick(handle)
 
 
 def _make_execution_bridge(timeout_secs: float) -> Any:
     from dcc_mcp_core import HostExecutionBridge  # noqa: PLC0415
 
     dispatcher = UnrealMainThreadDispatcher(timeout_secs=timeout_secs)
-    return HostExecutionBridge(
+    bridge = HostExecutionBridge(
         dispatcher=dispatcher,
         default_thread_affinity="main",
         default_execution="sync",
         default_timeout_hint_secs=int(timeout_secs),
     )
+    return dispatcher, bridge
 
 
 class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
@@ -136,7 +169,7 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
 
         from dcc_mcp_core import DccServerOptions  # noqa: PLC0415
 
-        bridge = _make_execution_bridge(execution_timeout_secs)
+        self._main_thread_dispatcher, bridge = _make_execution_bridge(execution_timeout_secs)
         options = DccServerOptions.from_env(
             _DEFAULT_DCC_NAME,
             _BUILTIN_SKILLS_DIR,
@@ -152,6 +185,12 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
             execution_bridge=bridge,
         )
         super().__init__(options=options)
+
+    def stop(self) -> None:
+        try:
+            super().stop()
+        finally:
+            self._main_thread_dispatcher.close()
 
     def _version_string(self) -> str:
         try:

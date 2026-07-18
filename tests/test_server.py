@@ -6,7 +6,12 @@ This covers the public API surface, helpers, and the server instantiation path.
 
 from __future__ import annotations
 
+import os
+import runpy
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -479,3 +484,157 @@ def test_unreal_bootstrap_delegates_instance_port_resolution_to_core(script_name
     source = script.read_text(encoding="utf-8")
     assert 'os.environ.get("DCC_MCP_UNREAL_PORT"' not in source
     assert "start_server(port=" not in source
+
+
+def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(monkeypatch):
+    """Worker dispatch must queue work without touching Slate from that worker."""
+    from dcc_mcp_unreal.server import UnrealMainThreadDispatcher
+
+    main_thread_id = threading.get_ident()
+    callbacks = []
+    unregistered = []
+
+    def register_tick(callback):
+        assert threading.get_ident() == main_thread_id
+        callbacks.append(callback)
+        return "tick-handle"
+
+    def unregister_tick(handle):
+        assert threading.get_ident() == main_thread_id
+        unregistered.append(handle)
+
+    fake_unreal = types.SimpleNamespace(
+        register_slate_post_tick_callback=register_tick,
+        unregister_slate_post_tick_callback=unregister_tick,
+    )
+    monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
+
+    dispatcher = UnrealMainThreadDispatcher(timeout_secs=1.0)
+    assert len(callbacks) == 1
+
+    result = {}
+
+    def run_worker():
+        result["thread_id"] = dispatcher.dispatch_callable(threading.get_ident)
+
+    worker = threading.Thread(target=run_worker)
+    worker.start()
+    for _ in range(100):
+        if dispatcher._pending.qsize() == 1:
+            break
+        time.sleep(0.001)
+    assert dispatcher._pending.qsize() == 1
+    callbacks[0](0.0)
+    worker.join(timeout=1.0)
+
+    assert not worker.is_alive()
+    assert result["thread_id"] == main_thread_id
+    assert len(callbacks) == 1
+
+    dispatcher.close()
+    assert unregistered == ["tick-handle"]
+
+
+def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkeypatch):
+    """UE should expose one DCC MCP top-level menu, matching the other DCC hosts."""
+    callbacks = []
+    unregistered = []
+    entries = []
+    submenus = []
+
+    class FakeHandle:
+        @staticmethod
+        def mcp_url():
+            return "http://127.0.0.1:12345/mcp"
+
+    fake_package = types.ModuleType("dcc_mcp_unreal")
+    fake_package.__path__ = []
+    fake_package.start_server = lambda **_kwargs: FakeHandle()
+    fake_package.stop_server = lambda: None
+    fake_version = types.ModuleType("dcc_mcp_unreal.__version__")
+    fake_version.__version__ = "0.2.0"
+    monkeypatch.setitem(sys.modules, "dcc_mcp_unreal", fake_package)
+    monkeypatch.setitem(sys.modules, "dcc_mcp_unreal.__version__", fake_version)
+
+    class FakeEntry:
+        def __init__(self, name, type):
+            self.name = name
+            self.type = type
+
+        def set_label(self, _label):
+            pass
+
+        def set_tool_tip(self, _tooltip):
+            pass
+
+        def set_string_command(self, **_kwargs):
+            pass
+
+    class FakeSubMenu:
+        def __init__(self, name):
+            self.name = name
+
+        @staticmethod
+        def add_section(_name, _label):
+            pass
+
+        def add_menu_entry(self, section, entry):
+            entries.append((section, entry.name))
+
+    class FakeMenu:
+        @staticmethod
+        def add_sub_menu(**kwargs):
+            submenus.append(kwargs)
+            return FakeSubMenu(kwargs["name"])
+
+    class FakeToolMenusInstance:
+        @staticmethod
+        def extend_menu(_name):
+            return FakeMenu()
+
+        @staticmethod
+        def refresh_all_widgets():
+            pass
+
+    fake_unreal = types.SimpleNamespace(
+        AppMsgType=types.SimpleNamespace(OK="ok"),
+        EditorDialog=types.SimpleNamespace(show_message=lambda **_kwargs: None),
+        MultiBlockType=types.SimpleNamespace(MENU_ENTRY="menu-entry"),
+        Name=lambda value: value,
+        Text=lambda value: value,
+        ToolMenuEntry=FakeEntry,
+        ToolMenuStringCommandType=types.SimpleNamespace(PYTHON="python"),
+        ToolMenus=types.SimpleNamespace(get=lambda: FakeToolMenusInstance()),
+        is_editor=lambda: True,
+        log=lambda _message: None,
+        log_warning=lambda _message: None,
+        register_slate_post_tick_callback=lambda callback: callbacks.append(callback) or "tick-handle",
+        unregister_slate_post_tick_callback=lambda handle: unregistered.append(handle),
+    )
+    monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
+    monkeypatch.delenv("DCC_MCP_APP_UI_BACKEND", raising=False)
+    monkeypatch.delenv("DCC_MCP_APP_UI_UIA_PROCESS_ID", raising=False)
+
+    script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
+    runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
+    assert len(callbacks) == 1
+    assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
+    assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+
+    callbacks[0](0.0)
+
+    assert submenus == [
+        {
+            "owner": "DccMcp",
+            "section_name": "",
+            "name": "DccMcp",
+            "label": "DCC MCP",
+            "tool_tip": "DCC MCP server controls",
+        }
+    ]
+    assert entries == [
+        ("DccMcpServer", "DccMcp.ShowUrl"),
+        ("DccMcpServer", "DccMcp.Restart"),
+        ("DccMcpServer", "DccMcp.Stop"),
+    ]
+    assert unregistered == ["tick-handle"]

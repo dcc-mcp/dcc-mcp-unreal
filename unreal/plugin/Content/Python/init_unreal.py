@@ -23,6 +23,10 @@ Configuration (environment variables)
 
 ``DCC_MCP_UNREAL_SERVER_NAME``
     Name advertised in the MCP ``initialize`` response.  Default: ``"unreal-mcp"``.
+
+``DCC_MCP_APP_UI_BACKEND``
+    UI automation backend.  Defaults to ``"windows-uia"`` on Windows while
+    preserving an explicit user override.
 """
 
 from __future__ import annotations
@@ -33,6 +37,16 @@ import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_app_ui() -> None:
+    """Make the bundled app-ui skill target this Unreal Editor process."""
+    if sys.platform == "win32":
+        os.environ.setdefault("DCC_MCP_APP_UI_BACKEND", "windows-uia")
+        os.environ.setdefault("DCC_MCP_APP_UI_UIA_PROCESS_ID", str(os.getpid()))
+
+
+_configure_app_ui()
 
 # ---------------------------------------------------------------------------
 # Ensure dcc_mcp_unreal package is importable
@@ -210,7 +224,14 @@ def _register_menus() -> None:
             logger.debug("[dcc-mcp-unreal] MainFrame.MainMenu unavailable; skipping editor menu registration")
             return
 
-        section = main_menu.add_section("DccMcpSection", unreal.Text("DCC MCP"))
+        dcc_menu = main_menu.add_sub_menu(
+            owner="DccMcp",
+            section_name="",
+            name="DccMcp",
+            label="DCC MCP",
+            tool_tip="DCC MCP server controls",
+        )
+        dcc_menu.add_section("DccMcpServer", unreal.Text("Server"))
 
         # ── Show MCP URL ──────────────────────────────────────────────────
         show_url_entry = unreal.ToolMenuEntry(
@@ -229,7 +250,7 @@ def _register_menus() -> None:
             custom_type=unreal.Name(""),
             string="import init_unreal; init_unreal._show_url_dialog()",
         )
-        section.add_menu_entry("DccMcp.ShowUrl", show_url_entry)
+        dcc_menu.add_menu_entry("DccMcpServer", show_url_entry)
 
         # ── Restart Server ────────────────────────────────────────────────
         restart_entry = unreal.ToolMenuEntry(
@@ -243,7 +264,7 @@ def _register_menus() -> None:
             custom_type=unreal.Name(""),
             string="import init_unreal; init_unreal._restart()",
         )
-        section.add_menu_entry("DccMcp.Restart", restart_entry)
+        dcc_menu.add_menu_entry("DccMcpServer", restart_entry)
 
         # ── Stop Server ───────────────────────────────────────────────────
         stop_entry = unreal.ToolMenuEntry(
@@ -257,7 +278,7 @@ def _register_menus() -> None:
             custom_type=unreal.Name(""),
             string="import init_unreal; init_unreal._stop()",
         )
-        section.add_menu_entry("DccMcp.Stop", stop_entry)
+        dcc_menu.add_menu_entry("DccMcpServer", stop_entry)
 
         tool_menus.refresh_all_widgets()
         _menus_registered = True
@@ -273,7 +294,7 @@ def _unregister_menus() -> None:
         import unreal  # noqa: PLC0415
 
         tool_menus = unreal.ToolMenus.get()
-        tool_menus.remove_menu("MainFrame.MainMenu.DccMcpSection")
+        tool_menus.remove_menu("MainFrame.MainMenu.DccMcp")
         tool_menus.refresh_all_widgets()
         _menus_registered = False
     except Exception as exc:
@@ -315,6 +336,7 @@ def _show_url_dialog() -> None:
 
 def _initialize() -> None:
     """Plugin initialisation: start server and register menus."""
+    global _tick_handle
     try:
         _start()
     except Exception as exc:
@@ -330,7 +352,7 @@ def _initialize() -> None:
 
         if unreal.is_editor():
             # Defer menu registration until after the main menu bar is ready
-            unreal.register_slate_post_tick_callback(_on_first_tick)
+            _tick_handle = unreal.register_slate_post_tick_callback(_on_first_tick)
     except Exception as exc:
         logger.debug("[dcc-mcp-unreal] Menu registration deferred: %s", exc)
 
