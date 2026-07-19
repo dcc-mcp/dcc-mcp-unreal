@@ -25,7 +25,8 @@
     "Plugins": [
         {
             "Name": "PythonScriptPlugin",
-            "Enabled": true
+            "Enabled": true,
+            "Optional": true
         }
     ]
 }

@@ -1,0 +1,38 @@
+tools:
+  - name: official_mcp_bridge
+    description: Discover or call Epic Unreal MCP tools through its local Streamable HTTP endpoint.
+    source_file: scripts/official_mcp_bridge.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          type: string
+          enum: [status, list_tools, list_toolsets, describe_toolset, call_tool]
+        endpoint:
+          type: string
+          default: http://127.0.0.1:8000/mcp
+        toolset_name:
+          type: string
+        tool_name:
+          type: string
+        arguments:
+          type: object
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          operation: status
+        note: Confirm that Epic Unreal MCP is running before discovery.
+      - arguments:
+          operation: describe_toolset
+          toolset_name: ActorTools
+        note: Inspect the official schema before a call.

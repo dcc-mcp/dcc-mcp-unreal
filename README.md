@@ -107,10 +107,13 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 
 | Requirement | Version |
 |-------------|---------|
-| Unreal Engine | 5.0+ |
-| Unreal Python Editor Script Plugin | must be **enabled** |
-| Python (embedded in UE) | 3.9+ (UE 5.0 ships Python 3.9) |
+| Unreal Engine | 4.18+ (capability-gated) |
+| Unreal Python Editor Script Plugin | optional; required for in-editor Python skills |
+| Python (embedded in UE) | version supplied by the installed engine |
 | dcc-mcp-core | >= 0.19.45, < 1.0.0 |
+
+See the [Unreal version compatibility contract](docs/unreal-version-compatibility.md)
+for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
 
 ### Enable the Python Plugin
 
@@ -229,6 +232,8 @@ Use `dcc-mcp-cli list` when a direct instance URL is needed.
 | `unreal_automation__mcp_self_check` | Validate the active MCP server without restarting it |
 | `unreal_automation__list_automation_tests` | List native Unreal Automation tests |
 | `unreal_automation__queue_automation_tests` | Queue native Unreal Automation tests from MCP |
+| `unreal_fab_assets__prepare_asset_acquisition` | Prepare a license-aware Fab acquisition plan for the official UI workflow |
+| `unreal_official_mcp__official_mcp` | Discover and call an installed UE 5.8+ Epic MCP endpoint without redistributing it |
 
 ---
 

@@ -14,7 +14,6 @@ public class DccMcpUnreal : ModuleRules
                 "Engine",
                 "Json",
                 "Projects",
-                "PythonScriptPlugin",
             }
         );
     }
