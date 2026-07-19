@@ -1,4 +1,32 @@
 tools:
+  - name: prepare_official_mcp
+    description: Enable Epic Unreal MCP and selected official toolsets for the current UE 5.8+ project.
+    source_file: scripts/prepare_official_mcp.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: true
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        include_editor_toolset:
+          type: boolean
+          default: true
+        include_niagara_toolsets:
+          type: boolean
+          default: false
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments: {}
+        note: Enable the official MCP server and general editor tools.
+      - arguments:
+          include_niagara_toolsets: true
+        note: Also enable official Niagara tools for a Niagara authoring task.
   - name: official_mcp_bridge
     description: Discover or call Epic Unreal MCP tools through its local Streamable HTTP endpoint.
     source_file: scripts/official_mcp_bridge.py

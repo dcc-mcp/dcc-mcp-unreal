@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+from pathlib import Path
 
 import pytest
 
 from dcc_mcp_unreal import official_mcp
+
+
+def _load_prepare_module():
+    script = (
+        Path(__file__).parents[1]
+        / "src"
+        / "dcc_mcp_unreal"
+        / "skills"
+        / "unreal-official-mcp"
+        / "scripts"
+        / "prepare_official_mcp.py"
+    )
+    spec = importlib.util.spec_from_file_location("_test_prepare_official_mcp", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class _Response:
@@ -34,6 +53,46 @@ def test_decode_streamable_http_sse_response():
 def test_official_bridge_rejects_non_loopback_endpoint():
     with pytest.raises(official_mcp.OfficialMcpError, match="loopback"):
         official_mcp.OfficialMcpClient("https://example.com/mcp")
+
+
+def test_prepare_official_mcp_upserts_plugins_idempotently():
+    prepare = _load_prepare_module()
+    project = {"Plugins": [{"Name": "EditorToolset", "Enabled": False}]}
+
+    changed = prepare._upsert_plugins(project, ["ModelContextProtocol", "EditorToolset"])
+    unchanged = prepare._upsert_plugins(project, ["ModelContextProtocol", "EditorToolset"])
+
+    assert changed == ["ModelContextProtocol", "EditorToolset"]
+    assert unchanged == []
+    assert project["Plugins"] == [
+        {"Name": "EditorToolset", "Enabled": True},
+        {"Name": "ModelContextProtocol", "Enabled": True},
+    ]
+
+
+def test_prepare_official_mcp_resolves_project_and_engine(tmp_path):
+    prepare = _load_prepare_module()
+    engine = tmp_path / "UE_5.8" / "Engine"
+    executable = engine / "Binaries" / "Win64" / "UnrealEditor.exe"
+    project = tmp_path / "Rain Car" / "RainCar.uproject"
+
+    project_file, plugin_dir = prepare._resolve_project_context([str(executable), str(project)])
+
+    assert project_file == project.resolve()
+    assert plugin_dir == engine.resolve() / "Plugins"
+
+
+def test_prepare_official_mcp_writes_autostart_idempotently(tmp_path):
+    prepare = _load_prepare_module()
+    config_path = tmp_path / "DefaultEditorPerProjectUserSettings.ini"
+
+    assert prepare._configure_autostart(config_path) is True
+    assert prepare._configure_autostart(config_path) is False
+    contents = config_path.read_text(encoding="utf-8")
+    assert "ServerPortNumber=8000" in contents
+    assert "ServerUrlPath=/mcp" in contents
+    assert "bAutoStartServer=True" in contents
+    assert "bEnableToolSearch=True" in contents
 
 
 def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
