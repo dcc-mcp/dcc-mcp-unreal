@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,6 +9,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_WORKFLOW = ROOT / ".github" / "workflows" / "build-uplugin.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_CONFIG = ROOT / "release-please-config.json"
+VERSION_MODULE = ROOT / "src" / "dcc_mcp_unreal" / "__version__.py"
 CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
 
 
@@ -107,6 +110,13 @@ def test_release_please_runs_on_main_without_publishing_ordinary_pushes() -> Non
     for job_name in ("build", "build-unreal-plugin", "publish", "attach-release-assets"):
         assert tag_push in jobs[job_name]["if"]
         assert "github.event_name == 'push' ||" not in jobs[job_name]["if"]
+
+
+def test_release_please_can_update_the_runtime_version_module() -> None:
+    config = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))
+
+    assert {"type": "generic", "path": "src/dcc_mcp_unreal/__version__.py"} in (config["packages"]["."]["extra-files"])
+    assert "x-release-please-version" in VERSION_MODULE.read_text(encoding="utf-8")
 
 
 def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
