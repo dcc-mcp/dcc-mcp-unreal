@@ -453,6 +453,7 @@ def test_server_instantiation():
     server = UnrealMcpServer(port=9999)
     assert server._config is not None
     assert server._server is not None
+    assert server._main_thread_dispatcher._http_dispatcher is not None
     assert server.is_running is False
     assert server.mcp_url is None
 
@@ -513,6 +514,17 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     dispatcher = UnrealMainThreadDispatcher(timeout_secs=1.0)
     assert len(callbacks) == 1
 
+    native_ticks = []
+    native_shutdown = []
+    native_dispatcher = types.SimpleNamespace(
+        pending=lambda: 1 if not native_ticks else 0,
+        tick=lambda max_jobs: (
+            native_ticks.append((threading.get_ident(), max_jobs)) or types.SimpleNamespace(jobs_executed=1)
+        ),
+        shutdown=lambda: native_shutdown.append(True),
+    )
+    dispatcher.attach_http_dispatcher(native_dispatcher)
+
     result = {}
 
     def run_worker():
@@ -531,9 +543,11 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     assert not worker.is_alive()
     assert result["thread_id"] == main_thread_id
     assert len(callbacks) == 1
+    assert native_ticks == [(main_thread_id, 16)]
 
     dispatcher.close()
     assert unregistered == ["tick-handle"]
+    assert native_shutdown == [True]
 
 
 def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkeypatch):

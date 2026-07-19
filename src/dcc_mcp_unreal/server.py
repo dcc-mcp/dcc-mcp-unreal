@@ -43,6 +43,7 @@ class UnrealMainThreadDispatcher:
         self._pending = queue.Queue()
         self._tick_handle: Any = None
         self._unregister_tick: Optional[Callable[[Any], Any]] = None
+        self._http_dispatcher: Any = None
         self._inside_unreal = False
 
         try:
@@ -56,6 +57,17 @@ class UnrealMainThreadDispatcher:
         if callable(register_tick) and callable(unregister_tick):
             self._unregister_tick = unregister_tick
             self._tick_handle = register_tick(self._on_tick)
+
+    def attach_http_dispatcher(self, dispatcher: Any) -> None:
+        """Attach core's native queue to the same Unreal Slate tick."""
+        if not callable(getattr(dispatcher, "tick", None)) or not callable(getattr(dispatcher, "pending", None)):
+            raise TypeError("HTTP dispatcher must expose tick() and pending()")
+        if self._http_dispatcher is not None and self._http_dispatcher is not dispatcher:
+            raise RuntimeError("an HTTP dispatcher is already attached")
+        self._http_dispatcher = dispatcher
+
+    def is_host_thread(self) -> bool:
+        return threading.get_ident() == self.main_thread_id
 
     def dispatch_callable(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run ``func`` inline or on the next Unreal Slate tick."""
@@ -98,6 +110,10 @@ class UnrealMainThreadDispatcher:
         return task.get("value")
 
     def _on_tick(self, _delta: float) -> None:
+        http_dispatcher = self._http_dispatcher
+        if http_dispatcher is not None and http_dispatcher.pending() > 0:
+            http_dispatcher.tick(16)
+
         while True:
             try:
                 task = self._pending.get_nowait()
@@ -114,6 +130,7 @@ class UnrealMainThreadDispatcher:
 
     def close(self) -> None:
         if self._tick_handle is None:
+            self._unregister_tick_callback()
             return
         if threading.get_ident() == self.main_thread_id:
             self._unregister_tick_callback()
@@ -132,6 +149,11 @@ class UnrealMainThreadDispatcher:
         self._tick_handle = None
         if handle is not None and self._unregister_tick is not None:
             self._unregister_tick(handle)
+        http_dispatcher = self._http_dispatcher
+        self._http_dispatcher = None
+        shutdown = getattr(http_dispatcher, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
 
 
 def _make_execution_bridge(timeout_secs: float) -> Any:

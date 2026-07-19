@@ -37,6 +37,19 @@ bool FDccMcpUnrealNativeSmokeTest::RunTest(const FString& Parameters)
         AddError(TEXT("Native automation bridge did not discover DCC MCP tests."));
         return false;
     }
+
+    TSharedPtr<FJsonObject> FabStatus;
+    const TSharedRef<TJsonReader<>> FabReader =
+        TJsonReaderFactory<>::Create(UDccMcpAutomationLibrary::GetFabSessionStatusJson());
+    bool bFabAvailable = false;
+    bool bFabAuthenticated = false;
+    if (!FJsonSerializer::Deserialize(FabReader, FabStatus) || !FabStatus.IsValid()
+        || !FabStatus->TryGetBoolField(TEXT("plugin_available"), bFabAvailable)
+        || !FabStatus->TryGetBoolField(TEXT("authenticated"), bFabAuthenticated))
+    {
+        AddError(TEXT("Fab session bridge returned invalid or unsafe status JSON."));
+        return false;
+    }
     return true;
 }
 
