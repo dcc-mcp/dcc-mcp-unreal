@@ -11,7 +11,7 @@ allowed-tools: Read Bash
 metadata:
   dcc-mcp:
     dcc: unreal
-    version: "0.1.0"
+    version: "0.2.0"
     layer: domain
     stage: interchange
     depends: ["app-ui", "unreal-assets"]
@@ -30,8 +30,11 @@ client.
 ## Workflow
 
 1. Inventory the live Unreal instance and load `app-ui` plus `unreal-assets`.
-2. Start with `app_ui__snapshot` scoped to the exact Unreal process ID or
-   window handle. Open **Window > Fab** semantically when possible.
+2. Call `inspect_fab_session`. It reports only a boolean authentication state;
+   access and refresh tokens never leave the Unreal process. Opening an
+   approved listing triggers Fab's persistent Epic login. If it still requires
+   login, call `request_fab_login`, let the user complete Epic's account portal,
+   then inspect again. Never request credentials from the user.
 3. Turn the user's art direction into an explicit visual gate before search:
    required and rejected silhouette, material, palette, era, and animation
    traits. Filter to **Free**, Unreal Engine format, and a version compatible
@@ -42,7 +45,9 @@ client.
    license, supported engine version, and expected destination. Do not accept
    a new EULA, acquire a listing, or add it to the project without task-scoped
    user approval.
-5. Use the Fab integration's **Add to My Library** and **Add to Project** flow.
+5. Call `open_fab_listing` with the approved listing UUID, then use the Fab
+   integration's **Add to My Library** and **Add to Project** flow through
+   scoped `app-ui`.
    Never enter credentials, solve a CAPTCHA, bypass region/account policy, or
    automate paid content. Stop on authentication or confirmation boundaries.
 6. Take a fresh snapshot after every UI action. When the download finishes,
@@ -61,3 +66,6 @@ license. Do not redistribute downloaded source assets as a standalone bundle.
 ## Scripts
 
 - `prepare_free_asset_acquisition`
+- `inspect_fab_session`
+- `request_fab_login`
+- `open_fab_listing`
