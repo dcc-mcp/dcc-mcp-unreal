@@ -781,5 +781,12 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "affinity: main" in tools
     assert "MaterialExpressionTextureCoordinate" in script
     assert "MP_BASE_COLOR" in script
+    assert "MP_NORMAL" in script
     assert "MP_ROUGHNESS" in script
+    assert "MP_AMBIENT_OCCLUSION" in script
+    assert "MP_METALLIC" in script
     assert "MP_SPECULAR" in script
+    assert "normal_texture_path:" in tools
+    assert "roughness_texture_path:" in tools
+    assert "ambient_occlusion_texture_path:" in tools
+    assert "metallic_texture_path:" in tools

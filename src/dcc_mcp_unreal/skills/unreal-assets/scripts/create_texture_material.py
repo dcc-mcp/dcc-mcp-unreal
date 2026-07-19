@@ -1,4 +1,4 @@
-"""Create a simple tiled Unreal material from a Content Browser texture."""
+"""Create a tiled Unreal PBR material from Content Browser textures."""
 
 from __future__ import annotations
 
@@ -26,6 +26,10 @@ def _build_material_graph(
     material,
     texture,
     *,
+    normal_texture=None,
+    roughness_texture=None,
+    ambient_occlusion_texture=None,
+    metallic_texture=None,
     uv_scale: float,
     roughness: float,
     specular: float,
@@ -60,13 +64,42 @@ def _build_material_graph(
         unreal.MaterialProperty.MP_BASE_COLOR,
     )
 
-    roughness_expression = _constant_expression(unreal, material, roughness, -250, 220)
-    unreal.MaterialEditingLibrary.connect_material_property(
-        roughness_expression,
-        "",
-        unreal.MaterialProperty.MP_ROUGHNESS,
+    texture_properties = (
+        (normal_texture, unreal.MaterialProperty.MP_NORMAL, "RGB", 120),
+        (roughness_texture, unreal.MaterialProperty.MP_ROUGHNESS, "R", 240),
+        (ambient_occlusion_texture, unreal.MaterialProperty.MP_AMBIENT_OCCLUSION, "R", 360),
+        (metallic_texture, unreal.MaterialProperty.MP_METALLIC, "R", 480),
     )
-    specular_expression = _constant_expression(unreal, material, specular, -250, 330)
+    for pbr_texture, material_property, output_name, y in texture_properties:
+        if pbr_texture is None:
+            continue
+        pbr_sample = unreal.MaterialEditingLibrary.create_material_expression(
+            material,
+            unreal.MaterialExpressionTextureSample,
+            -430,
+            y,
+        )
+        pbr_sample.set_editor_property("texture", pbr_texture)
+        unreal.MaterialEditingLibrary.connect_material_expressions(
+            coordinates,
+            "",
+            pbr_sample,
+            "UVs",
+        )
+        unreal.MaterialEditingLibrary.connect_material_property(
+            pbr_sample,
+            output_name,
+            material_property,
+        )
+
+    if roughness_texture is None:
+        roughness_expression = _constant_expression(unreal, material, roughness, -250, 240)
+        unreal.MaterialEditingLibrary.connect_material_property(
+            roughness_expression,
+            "",
+            unreal.MaterialProperty.MP_ROUGHNESS,
+        )
+    specular_expression = _constant_expression(unreal, material, specular, -250, 600)
     unreal.MaterialEditingLibrary.connect_material_property(
         specular_expression,
         "",
@@ -79,6 +112,10 @@ def _build_material_graph(
 @skill_entry
 def create_texture_material(
     texture_path: str = "",
+    normal_texture_path: str = "",
+    roughness_texture_path: str = "",
+    ambient_occlusion_texture_path: str = "",
+    metallic_texture_path: str = "",
     destination_path: str = "/Game/GeneratedMaterials",
     material_name: str = "",
     uv_scale: float = 1.0,
@@ -87,7 +124,7 @@ def create_texture_material(
     replace_existing: bool = False,
     **kwargs,
 ) -> dict:
-    """Create a tiled opaque material with texture-driven base color."""
+    """Create a tiled opaque PBR material from imported textures."""
     import unreal  # noqa: PLC0415
 
     if not texture_path:
@@ -115,6 +152,22 @@ def create_texture_material(
             "EditorAssetLibrary could not load a Texture at the requested path",
             possible_solutions=["Import the source image with unreal_assets__import_asset first"],
         )
+
+    optional_texture_paths = {
+        "normal_texture": normal_texture_path,
+        "roughness_texture": roughness_texture_path,
+        "ambient_occlusion_texture": ambient_occlusion_texture_path,
+        "metallic_texture": metallic_texture_path,
+    }
+    optional_textures = {}
+    for name, path in optional_texture_paths.items():
+        optional_textures[name] = unreal.EditorAssetLibrary.load_asset(path) if path else None
+        if path and not isinstance(optional_textures[name], unreal.Texture):
+            return skill_error(
+                f"Texture asset not found: {path}",
+                f"'{name}_path' must identify an imported Texture asset",
+                possible_solutions=["Import the source image with unreal_assets__import_asset first"],
+            )
 
     destination_path = destination_path.rstrip("/") or "/Game/GeneratedMaterials"
     object_path = _material_object_path(destination_path, material_name)
@@ -148,6 +201,7 @@ def create_texture_material(
         unreal,
         material,
         texture,
+        **optional_textures,
         uv_scale=float(uv_scale),
         roughness=float(roughness),
         specular=float(specular),
@@ -163,6 +217,10 @@ def create_texture_material(
         prompt=f"Use get_asset_info to inspect '{object_path}'.",
         object_path=object_path,
         texture_path=texture_path,
+        normal_texture_path=normal_texture_path,
+        roughness_texture_path=roughness_texture_path,
+        ambient_occlusion_texture_path=ambient_occlusion_texture_path,
+        metallic_texture_path=metallic_texture_path,
         uv_scale=float(uv_scale),
         roughness=float(roughness),
         specular=float(specular),

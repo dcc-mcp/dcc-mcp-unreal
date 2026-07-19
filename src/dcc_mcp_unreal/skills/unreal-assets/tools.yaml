@@ -83,7 +83,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: create_texture_material
-    description: Create or rebuild a material whose base color comes from a texture asset.
+    description: Create or rebuild a tiled PBR material from imported texture assets.
     source_file: scripts/create_texture_material.py
     execution: sync
     affinity: main
@@ -100,6 +100,22 @@ tools:
           type: string
           minLength: 1
           description: Content Browser object or package path for the base-color texture.
+        normal_texture_path:
+          type: string
+          description: Optional Content Browser path for a tangent-space normal texture.
+          default: ""
+        roughness_texture_path:
+          type: string
+          description: Optional Content Browser path for a roughness texture; overrides roughness.
+          default: ""
+        ambient_occlusion_texture_path:
+          type: string
+          description: Optional Content Browser path for an ambient-occlusion texture.
+          default: ""
+        metallic_texture_path:
+          type: string
+          description: Optional Content Browser path for a metallic texture.
+          default: ""
         destination_path:
           type: string
           description: Content Browser folder for the material.
@@ -117,7 +133,7 @@ tools:
           type: number
           minimum: 0
           maximum: 1
-          description: Constant surface roughness.
+          description: Constant surface roughness used when roughness_texture_path is empty.
           default: 0.85
         specular:
           type: number
