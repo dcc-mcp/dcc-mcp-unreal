@@ -1,0 +1,49 @@
+tools:
+  - name: prepare_free_asset_acquisition
+    description: Prepare a safe, reproducible Fab search and verification plan for a free Unreal asset.
+    source_file: scripts/prepare_free_asset_acquisition.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Art-directed Fab search phrase, such as dark gothic ruins.
+        engine_version:
+          type: string
+          default: "5.8"
+          description: Running Unreal Engine major.minor version.
+        destination_path:
+          type: string
+          default: /Game/Fab
+          description: Expected Content Browser folder for verification after Add to Project.
+    output_schema:
+      type: object
+      properties:
+        query: {type: string}
+        engine_version: {type: string}
+        destination_path: {type: string}
+        required_listing_fields:
+          type: array
+          items: {type: string}
+        next_tool: {type: string}
+        verification_tools:
+          type: array
+          items: {type: string}
+    call_examples:
+      - arguments:
+          query: dark gothic ruins realistic monster
+          engine_version: "5.8"
+          destination_path: /Game/Fab/Dreadland
+        note: Prepare the free dark-fantasy asset search used by the survivor demo.
+    next-tools:
+      on-success: [app_ui__snapshot]
