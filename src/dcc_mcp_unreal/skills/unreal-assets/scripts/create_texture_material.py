@@ -31,6 +31,7 @@ def _build_material_graph(
     ambient_occlusion_texture=None,
     metallic_texture=None,
     uv_scale: float,
+    base_color_scale: float,
     roughness: float,
     specular: float,
 ) -> None:
@@ -58,9 +59,26 @@ def _build_material_graph(
         sample,
         "UVs",
     )
+    base_color_expression = sample
+    base_color_output = "RGB"
+    if base_color_scale != 1.0:
+        base_color_expression = unreal.MaterialEditingLibrary.create_material_expression(
+            material,
+            unreal.MaterialExpressionMultiply,
+            -180,
+            0,
+        )
+        base_color_expression.set_editor_property("const_b", base_color_scale)
+        unreal.MaterialEditingLibrary.connect_material_expressions(
+            sample,
+            "RGB",
+            base_color_expression,
+            "A",
+        )
+        base_color_output = ""
     unreal.MaterialEditingLibrary.connect_material_property(
-        sample,
-        "RGB",
+        base_color_expression,
+        base_color_output,
         unreal.MaterialProperty.MP_BASE_COLOR,
     )
 
@@ -119,6 +137,7 @@ def create_texture_material(
     destination_path: str = "/Game/GeneratedMaterials",
     material_name: str = "",
     uv_scale: float = 1.0,
+    base_color_scale: float = 1.0,
     roughness: float = 0.85,
     specular: float = 0.15,
     replace_existing: bool = False,
@@ -139,6 +158,11 @@ def create_texture_material(
         )
     if uv_scale <= 0:
         return skill_error("uv_scale must be greater than zero", f"Received {uv_scale}")
+    if not 0.01 <= base_color_scale <= 4.0:
+        return skill_error(
+            "base_color_scale must be between 0.01 and 4",
+            f"Received {base_color_scale}",
+        )
     if not 0 <= roughness <= 1 or not 0 <= specular <= 1:
         return skill_error(
             "roughness and specular must be between 0 and 1",
@@ -203,6 +227,7 @@ def create_texture_material(
         texture,
         **optional_textures,
         uv_scale=float(uv_scale),
+        base_color_scale=float(base_color_scale),
         roughness=float(roughness),
         specular=float(specular),
     )
@@ -222,6 +247,7 @@ def create_texture_material(
         ambient_occlusion_texture_path=ambient_occlusion_texture_path,
         metallic_texture_path=metallic_texture_path,
         uv_scale=float(uv_scale),
+        base_color_scale=float(base_color_scale),
         roughness=float(roughness),
         specular=float(specular),
     )
