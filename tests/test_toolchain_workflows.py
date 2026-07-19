@@ -96,6 +96,19 @@ def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> No
     assert "needs.build-unreal-plugin.result == 'success'" in jobs["attach-release-assets"]["if"]
 
 
+def test_release_please_runs_on_main_without_publishing_ordinary_pushes() -> None:
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    jobs = workflow["jobs"]
+    tag_push = "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
+
+    assert "branches: [main]" in text
+    assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in jobs["release-please"]["if"]
+    for job_name in ("build", "build-unreal-plugin", "publish", "attach-release-assets"):
+        assert tag_push in jobs[job_name]["if"]
+        assert "github.event_name == 'push' ||" not in jobs[job_name]["if"]
+
+
 def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
     release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     plugin_job = release["jobs"]["build-unreal-plugin"]
@@ -129,8 +142,9 @@ def test_manual_tag_recovery_publishes_and_attaches_to_requested_release() -> No
     jobs = workflow["jobs"]
     manual_tag = "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != ''"
 
-    assert jobs["release-please"]["if"] == (
+    assert (
         "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == ''"
+        in (jobs["release-please"]["if"])
     )
     assert manual_tag in jobs["publish"]["if"]
     assert manual_tag in jobs["attach-release-assets"]["if"]

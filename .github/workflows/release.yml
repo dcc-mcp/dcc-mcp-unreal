@@ -2,6 +2,7 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   release:
     types: [published]
@@ -29,7 +30,9 @@ jobs:
   # ── Release Please — creates/updates the release PR ────────────────────────
   release-please:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == ''
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == '')
     outputs:
       release_created: ${{ steps.decide.outputs.release_created }}
       tag_name: ${{ steps.decide.outputs.tag_name }}
@@ -63,7 +66,7 @@ jobs:
       (
         needs.release-please.outputs.release_created == 'true' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-        github.event_name == 'push' ||
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
         github.event_name == 'release'
       )
     runs-on: ubuntu-latest
@@ -100,7 +103,7 @@ jobs:
       (
         needs.release-please.outputs.release_created == 'true' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-        github.event_name == 'push' ||
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
         github.event_name == 'release'
       )
     uses: ./.github/workflows/build-uplugin.yml
@@ -117,7 +120,7 @@ jobs:
       (
         needs.release-please.outputs.release_created == 'true' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-        github.event_name == 'push' ||
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
         github.event_name == 'release'
       )
     runs-on: ubuntu-latest
@@ -153,7 +156,7 @@ jobs:
       (
         needs.release-please.outputs.release_created == 'true' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-        github.event_name == 'push' ||
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
         github.event_name == 'release'
       )
     runs-on: ubuntu-latest
