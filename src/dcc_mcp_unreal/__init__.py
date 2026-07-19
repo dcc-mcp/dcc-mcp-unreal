@@ -1,7 +1,8 @@
 """dcc-mcp-unreal — Unreal Engine plugin for the DCC Model Context Protocol ecosystem.
 
 Embeds a standards-compliant MCP Streamable HTTP server inside Unreal Engine
-using dcc-mcp-core. Leverages Unreal Engine's built-in Python plugin (5.0+).
+using dcc-mcp-core. The native baseline supports Unreal Engine 4.18+; Python
+skills activate when the engine's Python Editor Script Plugin is available.
 
 Quickstart (inside Unreal Engine's Python interpreter)::
 
@@ -20,7 +21,8 @@ Skill authoring helpers::
     )
 
 Requirements:
-    - Unreal Engine 5.0+ with Python Editor Script Plugin enabled
+    - Unreal Engine 4.18+ for the native baseline
+    - Python Editor Script Plugin for Python-backed skills
     - dcc-mcp-core >= 0.19.45
 """
 
@@ -49,6 +51,7 @@ from dcc_mcp_unreal.api import (
     with_unreal,
 )
 from dcc_mcp_unreal.capabilities import UNREAL_CAPABILITIES_DICT, unreal_capabilities
+from dcc_mcp_unreal.compatibility import unreal_compatibility
 from dcc_mcp_unreal.server import UnrealMcpServer, start_server, stop_server
 
 __all__ = [
@@ -85,4 +88,5 @@ __all__ = [
     # Capabilities
     "unreal_capabilities",
     "UNREAL_CAPABILITIES_DICT",
+    "unreal_compatibility",
 ]
