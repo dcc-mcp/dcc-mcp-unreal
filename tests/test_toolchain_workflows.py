@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_WORKFLOW = ROOT / ".github" / "workflows" / "build-uplugin.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
-BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -66,13 +65,13 @@ def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
     assert "Force MSVC 14.36 toolchain via BuildConfiguration.xml" not in text
 
 
-def test_ue52_workflows_keep_the_supported_cli_toolchain_override() -> None:
-    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
-    assert 'vctoolchain_version: "14.36"' in text
-    assert "VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}" in text
+def test_build_workflow_targets_available_unreal_versions() -> None:
+    workflow = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+    matrix = workflow["jobs"]["build-uplugin"]["strategy"]["matrix"]["include"]
 
-    packaging = BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
-    assert 'ubtargs.append("-VCToolchainVersion={}"' in packaging
+    assert [entry["ue_version"] for entry in matrix] == ["5.7", "5.8", "4.18"]
+    assert matrix[1]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
+    assert all("vctoolchain_version" not in entry for entry in matrix)
 
 
 def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
