@@ -45,10 +45,12 @@ def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
     assert release["jobs"]["build-unreal-plugin"]["uses"] == ("./.github/workflows/build-uplugin.yml")
 
 
-def test_toolchain_script_selects_latest_valid_compiler_for_ue57(
+@pytest.mark.parametrize("ue_version", ["5.7", "5.8"])
+def test_toolchain_script_selects_latest_valid_compiler_for_modern_ue(
     tmp_path: Path,
+    ue_version: str,
 ) -> None:
-    environment = _configure_toolchain("5.7", tmp_path)
+    environment = _configure_toolchain(ue_version, tmp_path)
 
     assert environment == (
         "UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest\n"

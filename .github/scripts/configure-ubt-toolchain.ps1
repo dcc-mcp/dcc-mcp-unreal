@@ -12,12 +12,12 @@ if ([string]::IsNullOrWhiteSpace($EnvironmentFile)) {
     throw "GITHUB_ENV or -EnvironmentFile is required"
 }
 
-if ($UEVersion -ne "5.7") {
+if ($UEVersion -notin @("5.7", "5.8")) {
     Write-Host "No job-scoped UnrealBuildTool compiler override configured for UE $UEVersion"
     return
 }
 
-# UE 5.7 loads UnrealBuildTool_* environment settings after user XML files.
+# UE 5.7+ loads UnrealBuildTool_* environment settings after user XML files.
 # The final overrides prevent stale compiler pins and keep peak memory bounded
 # on shared self-hosted runners.
 $compilerVersion = "Latest"
