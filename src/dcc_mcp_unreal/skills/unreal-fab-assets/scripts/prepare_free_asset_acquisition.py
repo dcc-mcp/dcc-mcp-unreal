@@ -10,6 +10,8 @@ def prepare_free_asset_acquisition(
     query: str = "",
     engine_version: str = "5.8",
     destination_path: str = "/Game/Fab",
+    required_traits=None,
+    rejected_traits=None,
     **kwargs,
 ) -> dict:
     query = query.strip()
@@ -21,6 +23,9 @@ def prepare_free_asset_acquisition(
             "Invalid destination_path",
             "destination_path must be a Content Browser path under /Game",
         )
+
+    required_traits = [str(value).strip() for value in (required_traits or []) if str(value).strip()]
+    rejected_traits = [str(value).strip() for value in (rejected_traits or []) if str(value).strip()]
 
     return skill_success(
         "Prepared the official Fab acquisition and verification workflow.",
@@ -41,6 +46,10 @@ def prepare_free_asset_acquisition(
             "unreal_assets__list_assets",
             "unreal_assets__get_asset_info",
         ],
+        visual_gate={
+            "required_traits": required_traits,
+            "rejected_traits": rejected_traits,
+        },
     )
 
 

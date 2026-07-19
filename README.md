@@ -232,7 +232,7 @@ Use `dcc-mcp-cli list` when a direct instance URL is needed.
 | `unreal_automation__mcp_self_check` | Validate the active MCP server without restarting it |
 | `unreal_automation__list_automation_tests` | List native Unreal Automation tests |
 | `unreal_automation__queue_automation_tests` | Queue native Unreal Automation tests from MCP |
-| `unreal_fab_assets__prepare_asset_acquisition` | Prepare a license-aware Fab acquisition plan for the official UI workflow |
+| `unreal_fab_assets__prepare_free_asset_acquisition` | Prepare a license- and visual-gated Fab acquisition plan for the official UI workflow |
 | `unreal_official_mcp__official_mcp` | Discover and call an installed UE 5.8+ Epic MCP endpoint without redistributing it |
 
 ---

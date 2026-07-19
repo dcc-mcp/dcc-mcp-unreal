@@ -26,6 +26,22 @@ tools:
           type: string
           default: /Game/Fab
           description: Expected Content Browser folder for verification after Add to Project.
+        required_traits:
+          type: array
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+          description: Visual or production traits every accepted listing must satisfy.
+        rejected_traits:
+          type: array
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+          description: Traits that disqualify a listing even when it is free and engine-compatible.
     output_schema:
       type: object
       properties:
@@ -39,11 +55,22 @@ tools:
         verification_tools:
           type: array
           items: {type: string}
+        visual_gate:
+          type: object
+          properties:
+            required_traits:
+              type: array
+              items: {type: string}
+            rejected_traits:
+              type: array
+              items: {type: string}
     call_examples:
       - arguments:
           query: dark gothic ruins realistic monster
           engine_version: "5.8"
           destination_path: /Game/Fab/Dreadland
-        note: Prepare the free dark-fantasy asset search used by the survivor demo.
+          required_traits: [realistic PBR, dark gothic medieval, rigged, combat animations]
+          rejected_traits: [cartoon, stylized, low-poly, modern vehicles, bright fantasy palette]
+        note: Prepare a concept-gated dark-fantasy search for the survivor demo.
     next-tools:
       on-success: [app_ui__snapshot]
