@@ -1,0 +1,118 @@
+tools:
+  - name: build_plugin_package
+    description: >-
+      Build an installable DccMcpUnreal plugin ZIP from a source checkout.
+      When to use: package this adapter for an Unreal version.
+      How to use: provide repository_root and ue_root, then poll the async job.
+    source_file: scripts/build_plugin_package.py
+    execution: async
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 7200
+    read_only: false
+    destructive: false
+    idempotent: true
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: true
+    input_schema:
+      type: object
+      required: [repository_root, ue_root]
+      properties:
+        repository_root:
+          type: string
+          minLength: 1
+          description: Source checkout containing packaging/build_distributable.py.
+        ue_root:
+          type: string
+          minLength: 1
+          description: Unreal Engine installation root containing Engine/.
+        mode:
+          type: string
+          enum: [native, source, python-only]
+          default: native
+        python_executable:
+          type: string
+          default: ""
+          description: External Python executable; defaults to Unreal's bundled Python.
+        core_wheel:
+          type: string
+          default: ""
+          description: Optional local dcc-mcp-core wheel to vendor instead of downloading one.
+        core_spec:
+          type: string
+          default: "dcc-mcp-core>=0.19.45,<1.0.0"
+        vctoolchain_version:
+          type: string
+          default: ""
+          description: Optional MSVC toolchain version passed to UnrealBuildTool.
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          repository_root: "G:/PycharmProjects/github/dcc-mcp-unreal"
+          ue_root: "C:/Program Files/Epic Games/UE_5.8"
+          mode: native
+        note: Build the native UE 5.8 plugin archive.
+    next-tools:
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: package_project_executable
+    description: >-
+      Compile, cook, stage, and archive a saved Unreal project as a Windows executable.
+      When to use: create a local playable Win64 build.
+      How to use: provide the .uproject and archive directory, then poll the async job.
+    source_file: scripts/package_project_executable.py
+    execution: async
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10800
+    read_only: false
+    destructive: false
+    idempotent: true
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: false
+    input_schema:
+      type: object
+      required: [project_path, output_directory]
+      properties:
+        project_path:
+          type: string
+          minLength: 1
+          description: Absolute path to a saved .uproject file.
+        output_directory:
+          type: string
+          minLength: 1
+          description: Directory that receives the archived Windows build.
+        ue_root:
+          type: string
+          default: ""
+          description: Unreal Engine root; inferred from the live editor when omitted.
+        configuration:
+          type: string
+          enum: [Development, Shipping]
+          default: Shipping
+        target_platform:
+          type: string
+          enum: [Win64]
+          default: Win64
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          project_path: "D:/UnrealProjects/MyGame/MyGame.uproject"
+          output_directory: "D:/Builds/MyGame-Win64"
+          configuration: Shipping
+        note: Produce a local Shipping executable using the live editor's engine.
+    next-tools:
+      on-failure: [dcc_diagnostics__audit_log]
+
