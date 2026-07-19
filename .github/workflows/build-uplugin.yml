@@ -48,11 +48,10 @@ jobs:
             ue_root: C:\Program Files\Epic Games\UE_5.7
             package_mode: native
             artifact_suffix: win64
-          - ue_version: "5.2"
-            ue_root: C:\Program Files\Epic Games\UE_5.2
+          - ue_version: "5.8"
+            ue_root: C:\Program Files\Epic Games\UE_5.8
             package_mode: native
             artifact_suffix: win64
-            vctoolchain_version: "14.36"
           - ue_version: "4.18"
             ue_root: C:\Program Files\Epic Games\UE_4.18
             package_mode: python-only
@@ -61,8 +60,6 @@ jobs:
       UE_VERSION: ${{ matrix.ue_version }}
       UE_ROOT: ${{ matrix.ue_root }}
       DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
-      VCTOOLCHAIN_VERSION: ${{ matrix.vctoolchain_version || '' }}
-      MSVC_14_36_COMPONENT: Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
       CORE_REPO: loonghao/dcc-mcp-core
       CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}
 
@@ -147,176 +144,6 @@ jobs:
           if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded from GitHub Release or PyPI" }
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
-
-
-      - name: Ensure MSVC 14.36 toolchain (UE 5.2)
-        if: matrix.vctoolchain_version != ''
-        shell: pwsh
-        run: |
-          $msvcVersion = "14.36"
-          $vsToolsRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
-          $vsToolchainRoot = "$vsToolsRoot\VC\Tools\MSVC"
-          $msvcTargetDir = "C:\msvc-kit\$msvcVersion"
-          $msvcKitExe = "C:\msvc-kit\bin\msvc-kit.exe"
-
-          # Step 1: Check if MSVC 14.36 is registered with VS (UBT-discoverable)
-          $registered = $false
-          if (Test-Path $vsToolchainRoot) {
-            $existing = Get-ChildItem $vsToolchainRoot -Directory |
-              Where-Object { $_.Name -like "$msvcVersion.*" }
-            if ($existing) {
-              Write-Host "MSVC $msvcVersion toolchain already registered with VS: $($existing.FullName)"
-              $registered = $true
-            }
-          }
-
-          # Step 2: Install via VS installer if not registered
-          if (-not $registered) {
-            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-            if (Test-Path $vsInstaller) {
-              Write-Host "Installing MSVC $msvcVersion component via VS installer..."
-              & $vsInstaller modify --installPath "$vsToolsRoot" `
-                --add "Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64" `
-                --passive --norestart --wait
-              $vsExitCode = $LASTEXITCODE
-              if ($vsExitCode -eq 0 -or $vsExitCode -eq 3010) {
-                Write-Host "MSVC $msvcVersion component installed (exit code $vsExitCode)"
-                if (Test-Path $vsToolchainRoot) {
-                  $existing = Get-ChildItem $vsToolchainRoot -Directory |
-                    Where-Object { $_.Name -like "$msvcVersion.*" }
-                  if ($existing) {
-                    Write-Host "Confirmed: MSVC $msvcVersion registered at $($existing.FullName)"
-                    $registered = $true
-                  }
-                }
-              } else {
-                Write-Host "VS installer exited with code $vsExitCode; msvc-kit fallback"
-              }
-            } else {
-              Write-Host "VS installer not found; using msvc-kit"
-            }
-          }
-
-          # Step 3: Fallback -- msvc-kit download + VS junction registration
-          if (-not $registered) {
-            if ((Test-Path "$msvcTargetDir\VC\Tools\MSVC") -and
-                (Get-ChildItem "$msvcTargetDir\VC\Tools\MSVC" -Directory |
-                  Where-Object { $_.Name -like "$msvcVersion.*" })) {
-              Write-Host "MSVC $msvcVersion toolchain already present at $msvcTargetDir"
-            } else {
-              $msvcKitVersion = "v0.2.13"
-              $needDownload = $false
-              if (Test-Path $msvcKitExe) {
-                try {
-                  $currentVersion = & $msvcKitExe --version 2>$null
-                  if ($LASTEXITCODE -eq 0 -and $currentVersion -match $msvcKitVersion) {
-                    Write-Host "msvc-kit $msvcKitVersion already present at $msvcKitExe"
-                    $needDownload = $false
-                  } else {
-                    Write-Host "msvc-kit version mismatch; re-downloading $msvcKitVersion..."
-                    $needDownload = $true
-                  }
-                } catch {
-                  Write-Host "Failed to check msvc-kit version; re-downloading..."
-                  $needDownload = $true
-                }
-              } else {
-                $needDownload = $true
-              }
-              if ($needDownload) {
-                Remove-Item $msvcKitExe -Force -ErrorAction SilentlyContinue
-                Write-Host "Downloading msvc-kit $msvcKitVersion..."
-                New-Item -ItemType Directory -Force -Path "C:\msvc-kit\bin" | Out-Null
-                $exeUrl = "https://github.com/loonghao/msvc-kit/releases/download/$msvcKitVersion/msvc-kit-x86_64-windows.exe"
-                Invoke-WebRequest -Uri $exeUrl -OutFile $msvcKitExe -UseBasicParsing
-                Write-Host "msvc-kit $msvcKitVersion installed at $msvcKitExe"
-              }
-              Write-Host "Downloading MSVC $msvcVersion toolchain via msvc-kit..."
-              & $msvcKitExe download --msvc-version $msvcVersion --no-sdk --dir $msvcTargetDir --arch x64
-              if ($LASTEXITCODE -ne 0) { throw "msvc-kit download failed (exit code $LASTEXITCODE)" }
-              Write-Host "MSVC $msvcVersion toolchain downloaded to $msvcTargetDir"
-            }
-
-            # Register msvc-kit toolchain with VS via directory junction or copy
-            $kitToolchainRoot = "$msvcTargetDir\VC\Tools\MSVC"
-            if ((Test-Path $kitToolchainRoot) -and (Test-Path $vsToolchainRoot)) {
-              Get-ChildItem $kitToolchainRoot | ForEach-Object {
-                $target = Join-Path $vsToolchainRoot $_.Name
-                if (-not (Test-Path $target)) {
-                  $reg = $false
-                  try {
-                    New-Item -ItemType Junction -Path $target -Target $_.FullName -Force -ErrorAction Stop | Out-Null
-                    Write-Host "Registered $($_.Name) with VS via junction (UBT-discoverable)"
-                    $reg = $true
-                  } catch {
-                    Write-Host "Junction failed ($_); trying copy fallback..."
-                  }
-                  if (-not $reg) {
-                    try {
-                      Copy-Item -Path $_.FullName -Destination $target -Recurse -Force -ErrorAction Stop
-                      Write-Host "Registered $($_.Name) with VS via copy (UBT-discoverable)"
-                    } catch {
-                      Write-Host "Copy also failed ($_); toolchain not UBT-discoverable via filesystem"
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          # Step 4: Apply environment variables (PATH, INCLUDE, LIB) for this job
-          Write-Host "Activating MSVC $msvcVersion environment (job-scoped)..."
-          if (Test-Path $msvcKitExe) {
-            $envScript = & $msvcKitExe setup --script --shell powershell --dir $msvcTargetDir
-            if ($LASTEXITCODE -ne 0) { throw "msvc-kit setup failed (exit code $LASTEXITCODE)" }
-            Invoke-Expression ($envScript -join "`n")
-            Write-Host "MSVC $msvcVersion environment activated"
-          } else {
-            Write-Host "msvc-kit not found; loading VS-native environment..."
-            & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
-          }
-
-      - name: Prepare force-include header and set _CL_ for MSVC __has_feature compat (UE 5.2)
-        if: matrix.ue_version == '5.2'
-        shell: pwsh
-        run: |
-          # Write suppress_msvc_has_feature.h and set _CL_=/FI to force-include
-          # it in EVERY cl.exe invocation (including Shared PCH generation).
-          # UBT's -AdditionalCompilerArguments does not reach PCH compilation,
-          # but _CL_ is read by cl.exe directly and affects all compilations.
-          $patchedDir = "$env:RUNNER_TEMP\patched_ue5_headers"
-          Remove-Item $patchedDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $patchedDir | Out-Null
-
-          $fiHeader = "$patchedDir\suppress_msvc_has_feature.h"
-          @'
-          // Generated by CI workflow
-          // Suppress __has_feature for MSVC (UE 5.2 compat)
-          #if defined(_MSC_VER) && !defined(__has_feature)
-          #define __has_feature(x) 0
-          #endif
-          '@ | Set-Content $fiHeader -Encoding utf8
-
-          # _CL_ is read by cl.exe on every invocation, including PCH generation.
-          # /FI forces inclusion of the header before any other includes.
-          # /wd4668 suppresses the C4668 warning as a belt-and-suspenders measure.
-          # Persist via GITHUB_ENV so build_distributable.py subprocesses inherit it.
-          "_CL_=/FI`"$fiHeader`" /wd4668" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "_CL_=/FI`"$fiHeader`" /wd4668"
-
-          "PATCHED_HEADERS_DIR=$patchedDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "PATCHED_HEADERS_DIR=$patchedDir"
-
-      - name: Runner context diagnostic (UE 5.2)
-        if: matrix.ue_version == '5.2'
-        shell: pwsh
-        run: |
-          Write-Host "WhoAmI: $(whoami)"
-          $isAdmin = ([Security.Principal.WindowsPrincipal]::new(
-            [Security.Principal.WindowsIdentity]::GetCurrent()
-          )).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-          Write-Host "IsAdmin: $isAdmin"
-
       - name: Configure job-scoped UnrealBuildTool toolchain
         shell: pwsh
         run: |
@@ -328,8 +155,7 @@ jobs:
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
-            --core-wheel "${{ steps.core.outputs.wheel }}" `
-            --patched-headers-dir "${env:PATCHED_HEADERS_DIR}"
+            --core-wheel "${{ steps.core.outputs.wheel }}"
 
       - name: Upload uplugin artifact
         uses: actions/upload-artifact@v4
