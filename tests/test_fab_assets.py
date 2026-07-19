@@ -5,14 +5,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = (
-    Path(__file__).resolve().parents[1]
-    / "src"
-    / "dcc_mcp_unreal"
-    / "skills"
-    / "unreal-fab-assets"
-    / "scripts"
-)
+SCRIPTS = Path(__file__).resolve().parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-fab-assets" / "scripts"
 
 
 def load_helper():
@@ -32,8 +25,7 @@ class FakeLibrary:
     def get_fab_session_status_json(self):
         return (
             '{"plugin_available":true,"authenticated":%s,'
-            '"engine_version":"5.8","plugin_version":"0.0.13"}'
-            % str(self.authenticated).lower()
+            '"engine_version":"5.8","plugin_version":"0.0.13"}' % str(self.authenticated).lower()
         )
 
     def request_fab_login(self):

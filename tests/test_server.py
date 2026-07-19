@@ -518,8 +518,9 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     native_shutdown = []
     native_dispatcher = types.SimpleNamespace(
         pending=lambda: 1 if not native_ticks else 0,
-        tick=lambda max_jobs: native_ticks.append((threading.get_ident(), max_jobs))
-        or types.SimpleNamespace(jobs_executed=1),
+        tick=lambda max_jobs: (
+            native_ticks.append((threading.get_ident(), max_jobs)) or types.SimpleNamespace(jobs_executed=1)
+        ),
         shutdown=lambda: native_shutdown.append(True),
     )
     dispatcher.attach_http_dispatcher(native_dispatcher)
