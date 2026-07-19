@@ -32,8 +32,12 @@ client.
 1. Inventory the live Unreal instance and load `app-ui` plus `unreal-assets`.
 2. Start with `app_ui__snapshot` scoped to the exact Unreal process ID or
    window handle. Open **Window > Fab** semantically when possible.
-3. Search using the user's art direction. Filter to **Free**, Unreal Engine
-   format, and a version compatible with the running engine.
+3. Turn the user's art direction into an explicit visual gate before search:
+   required and rejected silhouette, material, palette, era, and animation
+   traits. Filter to **Free**, Unreal Engine format, and a version compatible
+   with the running engine. Reject a technically compatible listing when it
+   fails the visual gate; do not use low-poly or stylized stand-ins for a
+   realistic brief.
 4. Before acquisition, report the listing title, publisher, source URL,
    license, supported engine version, and expected destination. Do not accept
    a new EULA, acquire a listing, or add it to the project without task-scoped
@@ -43,7 +47,9 @@ client.
    automate paid content. Stop on authentication or confirmation boundaries.
 6. Take a fresh snapshot after every UI action. When the download finishes,
    verify the new package with `unreal_assets__list_assets` and
-   `unreal_assets__get_asset_info`.
+   `unreal_assets__get_asset_info`. For characters and creatures, also verify
+   skeletal mesh, skeleton, idle/move/attack/hit/death animation coverage, and
+   material instances before replacing a prototype asset.
 7. Record a compact manifest containing the listing metadata, license, source
    URL, acquisition time, Content Browser paths, and verification result.
 8. Always finish with `app_ui__stop_computer_use`, including failure and user
