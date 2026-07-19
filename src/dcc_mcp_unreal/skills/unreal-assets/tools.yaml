@@ -129,6 +129,12 @@ tools:
           exclusiveMinimum: 0
           description: Uniform texture-coordinate tiling multiplier.
           default: 1.0
+        base_color_scale:
+          type: number
+          minimum: 0.01
+          maximum: 4.0
+          description: Multiplier applied to the base-color texture; values below 1 darken it.
+          default: 1.0
         roughness:
           type: number
           minimum: 0
