@@ -146,11 +146,7 @@ def prepare_official_mcp(
     if include_niagara_toolsets:
         plugin_names.append("NiagaraToolsets")
 
-    missing = [
-        name
-        for name in plugin_names
-        if not (engine_plugins_dir / _PLUGIN_RELATIVE_PATHS[name]).is_file()
-    ]
+    missing = [name for name in plugin_names if not (engine_plugins_dir / _PLUGIN_RELATIVE_PATHS[name]).is_file()]
     if missing:
         return skill_error(
             "Epic Unreal MCP plugins are not installed in this engine",
