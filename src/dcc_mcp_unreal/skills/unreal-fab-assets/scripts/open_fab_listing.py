@@ -32,13 +32,3 @@ def open_fab_listing(listing_id: str = "", **kwargs) -> dict:
         return skill_error("Invalid Fab listing id", str(exc), listing_id=listing_id)
     except Exception as exc:
         return skill_exception(exc, message="Failed to open the Fab listing")
-
-
-def main(**kwargs) -> dict:
-    return open_fab_listing(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

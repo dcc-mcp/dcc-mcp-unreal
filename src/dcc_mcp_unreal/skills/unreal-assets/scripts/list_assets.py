@@ -73,13 +73,3 @@ def list_assets(
         class_filter=asset_class_filter or None,
         assets=assets,
     )
-
-
-def main(**kwargs) -> dict:
-    return list_assets(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

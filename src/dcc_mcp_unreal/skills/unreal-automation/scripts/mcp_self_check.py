@@ -93,13 +93,3 @@ def mcp_self_check(check_http: bool = True, **kwargs) -> dict:
         )
     except Exception as exc:
         return unreal_from_exception(exc, "MCP server self-check failed")
-
-
-def main(**kwargs) -> dict:
-    return mcp_self_check(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

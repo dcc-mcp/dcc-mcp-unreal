@@ -51,14 +51,3 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
         rotation=[float(rot.pitch), float(rot.yaw), float(rot.roll)],
         scale=[float(scale.x), float(scale.y), float(scale.z)],
     )
-
-
-def main(**kwargs) -> dict:
-    """Entry point; delegates to get_actor_transform."""
-    return get_actor_transform(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

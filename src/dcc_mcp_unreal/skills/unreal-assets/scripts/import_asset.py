@@ -122,13 +122,3 @@ def import_asset(
         source_path=source_path,
         imported_object_paths=imported_paths,
     )
-
-
-def main(**kwargs) -> dict:
-    return import_asset(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

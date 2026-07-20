@@ -159,9 +159,12 @@ class UnrealMainThreadDispatcher:
 def _make_execution_bridge(timeout_secs: float) -> Any:
     from dcc_mcp_core import HostExecutionBridge  # noqa: PLC0415
 
+    from dcc_mcp_unreal.skill_runner import run_skill_script as _unreal_run_skill_script
+
     dispatcher = UnrealMainThreadDispatcher(timeout_secs=timeout_secs)
     bridge = HostExecutionBridge(
         dispatcher=dispatcher,
+        runner=_unreal_run_skill_script,
         default_thread_affinity="main",
         default_execution="sync",
         default_timeout_hint_secs=int(timeout_secs),

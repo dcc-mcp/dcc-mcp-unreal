@@ -33,14 +33,3 @@ def list_actors(actor_class_filter: str = "", **kwargs) -> dict:
         actors=actor_names,
         filter_applied=actor_class_filter or None,
     )
-
-
-def main(**kwargs) -> dict:
-    """Entry point; delegates to list_actors."""
-    return list_actors(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

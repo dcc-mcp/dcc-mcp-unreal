@@ -72,13 +72,3 @@ def save_level(
         saved_packages=saved_packages,
         saved_dirty_packages=save_all_dirty,
     )
-
-
-def main(**kwargs) -> dict:
-    return save_level(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

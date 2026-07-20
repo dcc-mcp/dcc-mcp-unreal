@@ -99,13 +99,3 @@ def delete_asset(
         deleted_count=deleted_count,
         deleted_paths=deleted_paths,
     )
-
-
-def main(**kwargs) -> dict:
-    return delete_asset(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)
