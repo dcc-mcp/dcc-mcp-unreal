@@ -1,9 +1,9 @@
 # MSVC-Kit Guide for dcc-mcp-unreal CI
 
 [msvc-kit](https://github.com/loonghao/msvc-kit) is a portable MSVC Build Tools
-installer and manager for Windows. In the `dcc-mcp-unreal` CI pipeline
-(`build-uplugin.yml`), it provides the MSVC 14.36 toolchain required by
-UE 5.2's Unreal Build Tool (UBT) for native C++ plugin compilation.
+installer and manager for Windows. Use it to audit and provision the compiler
+versions required by Unreal Build Tool (UBT). The tested combinations include
+MSVC 14.16 for UE 4.18 and MSVC 14.36 for UE 5.2.
 
 ---
 
@@ -91,9 +91,7 @@ msvc-kit list              # Installed versions
 msvc-kit list --available  # Available from Microsoft
 ```
 
-### `install-into-vs` — Register toolchain with Visual Studio (future)
-
-> **Status: planned feature.** Currently under development in msvc-kit.
+### `install-into-vs` — Audit or register a toolchain with Visual Studio
 
 ```powershell
 # Check VS-registered MSVC versions
@@ -106,13 +104,55 @@ msvc-kit install-into-vs --dir C:\msvc-kit\14.36
 msvc-kit install-into-vs --auto
 ```
 
-This is the definitive solution for UBT discovery: the command copies the
+This makes downloaded toolchains visible to UBT: the command copies the
 msvc-kit-downloaded toolchain into `%VS_PATH%\VC\Tools\MSVC\<version>\`,
 making it visible to UBT through the VS Setup API. Requires administrator
 privileges (one-time only).
 
-Until this feature ships, the CI workflow uses one of the fallback strategies
-described below.
+## Unreal Engine 4.18
+
+UE 4.18 can build with Visual Studio 2017 Build Tools and MSVC 14.16. Audit the
+machine first:
+
+```powershell
+msvc-kit install-into-vs --check
+```
+
+Expected output includes a Visual Studio 2017 installation and a `14.16.*`
+toolchain. If it is missing, install the Microsoft Visual Studio 2017 Build
+Tools C++ workload, then run the check again. Microsoft no longer publishes
+MSVC 14.0 in the manifest consumed by `msvc-kit`, so this command is not a
+working installation path:
+
+```powershell
+# Expected to fail: Microsoft no longer lists this package.
+msvc-kit download --msvc-version 14.0 --no-sdk
+```
+
+Some installed UE 4.18 builds still default to Visual Studio 2015. Select
+Visual Studio 2017 in the engine-local UBT configuration:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">
+  <WindowsPlatform>
+    <Compiler>VisualStudio2017</Compiler>
+  </WindowsPlatform>
+</Configuration>
+```
+
+Save this as
+`<UE_4.18>\Engine\Saved\UnrealBuildTool\BuildConfiguration.xml`, then validate
+the complete native build:
+
+```powershell
+& "<UE_4.18>\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin `
+  -Plugin="<repo>\unreal\plugin\DccMcpUnreal.uplugin" `
+  -Package="<repo>\dist\DccMcpUnreal-ue4.18" `
+  -Rocket -TargetPlatforms=Win64
+```
+
+Last verified: 2026-07.
 
 ---
 
@@ -225,7 +265,8 @@ strategy:
         artifact_suffix: win64
         vctoolchain_version: "14.36"
 
-      # UE 4.18: python-only — no C++ compilation needed
+      # CI currently publishes the UE 4.18 Python-only artifact.
+      # Use the native-build procedure above for local bridge development.
       - ue_version: "4.18"
         ue_root: C:\Program Files\Epic Games\UE_4.18
         package_mode: python-only

@@ -13,7 +13,10 @@ public class DccMcpUnreal : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "Json",
+                "Networking",
                 "Projects",
+                "Sockets",
+                "UnrealEd",
             }
         );
     }

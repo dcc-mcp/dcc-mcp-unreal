@@ -27,6 +27,7 @@ be enabled for packaged game targets.
    engine available to the project, the latest stable 5.x engine, and 5.8's
    optional official-MCP composition path.
 
-The local UE 4.18 audit successfully passed plugin discovery and UnrealHeaderTool
-after the optional-Python change. Native binary compilation still requires the
-legacy Visual Studio 2015 toolchain expected by the installed UE 4.18 build.
+The local UE 4.18 audit successfully built the native plugin with Visual Studio
+2017 Build Tools and MSVC 14.16. Use `msvc-kit install-into-vs --check` to audit
+the registered toolchains before building. See the
+[MSVC-Kit guide](msvc-kit-guide.md#unreal-engine-418) for the tested setup.

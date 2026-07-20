@@ -12,6 +12,8 @@ RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CONFIG = ROOT / "release-please-config.json"
 VERSION_MODULE = ROOT / "src" / "dcc_mcp_unreal" / "__version__.py"
 CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
+PLUGIN_MODULE = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpUnrealModule.cpp"
+PLUGIN_RULES = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -77,6 +79,18 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
     assert [entry["ue_version"] for entry in matrix] == ["5.7", "5.8", "4.18"]
     assert matrix[1]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
     assert all("vctoolchain_version" not in entry for entry in matrix)
+
+
+def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
+    module = PLUGIN_MODULE.read_text(encoding="utf-8")
+    rules = PLUGIN_RULES.read_text(encoding="utf-8")
+
+    assert "qtserver://127.0.0.1:" in module
+    assert "dcc-mcp-server.exe" in module
+    for action in ("list_actors", "spawn_actor", "delete_actor", "get_actor_transform", "set_actor_transform"):
+        assert f"unreal_actors__{action}" in module
+    assert "unreal_level__get_level_info" in module
+    assert all(dependency in rules for dependency in ('"Json"', '"Networking"', '"Sockets"', '"UnrealEd"'))
 
 
 def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
