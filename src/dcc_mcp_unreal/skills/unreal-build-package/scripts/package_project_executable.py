@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from _build_package import package_project_executable_impl
-from dcc_mcp_core.skills_helper import run_main, skill_entry
+from dcc_mcp_core.skill import skill_entry
 
 
 @skill_entry
@@ -22,11 +22,3 @@ def package_project_executable(
         configuration=configuration,
         target_platform=target_platform,
     )
-
-
-def main(**kwargs) -> dict:
-    return package_project_executable(**kwargs)
-
-
-if __name__ == "__main__":
-    run_main(main)

@@ -51,13 +51,3 @@ def prepare_free_asset_acquisition(
             "rejected_traits": rejected_traits,
         },
     )
-
-
-def main(**kwargs) -> dict:
-    return prepare_free_asset_acquisition(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

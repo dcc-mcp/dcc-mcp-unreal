@@ -37,13 +37,3 @@ def list_automation_tests(filter: str = "", **kwargs) -> dict:
         )
     except Exception as exc:
         return unreal_from_exception(exc, "Failed to list Unreal Automation tests")
-
-
-def main(**kwargs) -> dict:
-    return list_automation_tests(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

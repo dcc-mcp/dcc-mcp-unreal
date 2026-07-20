@@ -251,13 +251,3 @@ def create_texture_material(
         roughness=float(roughness),
         specular=float(specular),
     )
-
-
-def main(**kwargs) -> dict:
-    return create_texture_material(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

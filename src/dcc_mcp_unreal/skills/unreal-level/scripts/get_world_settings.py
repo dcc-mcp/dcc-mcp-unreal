@@ -78,13 +78,3 @@ def get_world_settings(**kwargs) -> dict:
         level_name=level_name,
         **settings,
     )
-
-
-def main(**kwargs) -> dict:
-    return get_world_settings(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

@@ -107,13 +107,3 @@ def export_asset(
         export_path=export_path,
         file_size_bytes=file_size,
     )
-
-
-def main(**kwargs) -> dict:
-    return export_asset(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

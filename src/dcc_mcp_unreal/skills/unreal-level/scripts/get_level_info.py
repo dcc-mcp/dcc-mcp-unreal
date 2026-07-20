@@ -72,13 +72,3 @@ def get_level_info(**kwargs) -> dict:
         streaming_level_count=len(streaming_levels),
         streaming_levels=streaming_levels,
     )
-
-
-def main(**kwargs) -> dict:
-    return get_level_info(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

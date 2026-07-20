@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from _build_package import build_plugin_package_impl
-from dcc_mcp_core.skills_helper import run_main, skill_entry
+from dcc_mcp_core.skill import skill_entry
 
 
 @skill_entry
@@ -26,11 +26,3 @@ def build_plugin_package(
         core_spec=core_spec,
         vctoolchain_version=vctoolchain_version,
     )
-
-
-def main(**kwargs) -> dict:
-    return build_plugin_package(**kwargs)
-
-
-if __name__ == "__main__":
-    run_main(main)

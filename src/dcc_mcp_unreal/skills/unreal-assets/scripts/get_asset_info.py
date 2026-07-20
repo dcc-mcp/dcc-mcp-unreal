@@ -99,13 +99,3 @@ def get_asset_info(
         prompt="Use export_asset to export this asset, or delete_asset to remove it.",
         **info,
     )
-
-
-def main(**kwargs) -> dict:
-    return get_asset_info(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

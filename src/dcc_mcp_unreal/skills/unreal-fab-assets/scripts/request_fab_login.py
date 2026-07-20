@@ -18,13 +18,3 @@ def request_fab_login(**kwargs) -> dict:
         )
     except Exception as exc:
         return skill_exception(exc, message="Failed to open the official Fab login flow")
-
-
-def main(**kwargs) -> dict:
-    return request_fab_login(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

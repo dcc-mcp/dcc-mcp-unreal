@@ -71,13 +71,3 @@ def load_level(
         level_name=new_level_name,
         previous_level_saved=save_current,
     )
-
-
-def main(**kwargs) -> dict:
-    return load_level(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

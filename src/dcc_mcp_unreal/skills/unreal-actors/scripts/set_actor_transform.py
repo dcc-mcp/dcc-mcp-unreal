@@ -97,14 +97,3 @@ def set_actor_transform(
         rotation=[float(new_rot.pitch), float(new_rot.yaw), float(new_rot.roll)],
         scale=[float(new_scale.x), float(new_scale.y), float(new_scale.z)],
     )
-
-
-def main(**kwargs) -> dict:
-    """Entry point; delegates to set_actor_transform."""
-    return set_actor_transform(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

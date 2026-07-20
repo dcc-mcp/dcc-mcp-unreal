@@ -59,14 +59,3 @@ def spawn_actor(
         actor_class=actor_class,
         location=[location_x, location_y, location_z],
     )
-
-
-def main(**kwargs) -> dict:
-    """Entry point; delegates to spawn_actor."""
-    return spawn_actor(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)

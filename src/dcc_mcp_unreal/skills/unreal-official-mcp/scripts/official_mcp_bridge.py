@@ -49,13 +49,3 @@ def official_mcp_bridge(
             ],
         )
     return skill_success("Epic Unreal MCP bridge request completed.", operation=operation, result=result)
-
-
-def main(**kwargs) -> dict:
-    return official_mcp_bridge(**kwargs)
-
-
-if __name__ == "__main__":
-    from dcc_mcp_core.skill import run_main
-
-    run_main(main)
