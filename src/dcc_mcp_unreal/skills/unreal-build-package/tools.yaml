@@ -61,6 +61,72 @@ tools:
     next-tools:
       on-failure: [dcc_diagnostics__audit_log]
 
+  - name: package_prebuilt_windows_installer
+    description: >-
+      Wrap an existing complete Win64 game directory in a Windows Setup executable.
+      When to use: the game is already built and no .uproject is available.
+      How to use: provide the source directory, relative game executable, and a separate output directory.
+    source_file: scripts/package_prebuilt_windows_installer.py
+    execution: async
+    affinity: any
+    enforce_thread_affinity: true
+    timeout_hint_secs: 3600
+    read_only: false
+    destructive: false
+    idempotent: true
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: false
+    input_schema:
+      type: object
+      required: [source_directory, executable_relative_path, output_directory]
+      properties:
+        source_directory:
+          type: string
+          minLength: 1
+          description: Existing complete Windows game directory.
+        executable_relative_path:
+          type: string
+          minLength: 1
+          description: Main game executable path relative to source_directory.
+        output_directory:
+          type: string
+          minLength: 1
+          description: Separate directory that receives Installer/.
+        product_name:
+          type: string
+          default: ""
+        product_version:
+          type: string
+          default: "1.0.0"
+        publisher:
+          type: string
+          default: ""
+        installer_compiler_path:
+          type: string
+          default: ""
+          description: Optional Inno Setup 6 ISCC.exe path; auto-detected when omitted.
+        vc_redist_path:
+          type: string
+          default: ""
+          description: Optional Microsoft VC++ x64 redistributable bundled and run by Setup.
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          source_directory: "D:/Builds/MyGame-Win64"
+          executable_relative_path: "MyGame.exe"
+          output_directory: "D:/Releases/MyGame-Installer"
+          product_name: My Game
+          product_version: 1.0.0
+        note: Wrap an existing game folder without rebuilding it.
+    next-tools:
+      on-failure: [dcc_diagnostics__audit_log]
+
   - name: package_project_executable
     description: >-
       Compile, cook, stage, and prepare a saved Unreal project as a Windows archive,

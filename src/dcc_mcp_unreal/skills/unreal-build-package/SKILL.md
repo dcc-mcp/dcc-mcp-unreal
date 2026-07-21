@@ -3,7 +3,8 @@ name: unreal-build-package
 description: >-
   Build installable DCC MCP Unreal plugin archives and package Unreal projects
   as Windows archives, Setup executables, SteamPipe builds, or WeGame submission
-  folders. Use for long-running compilation, cooking, staging, and packaging.
+  folders. It can also wrap an existing Win64 game directory in a Setup
+  executable. Use for long-running compilation, cooking, staging, and packaging.
   Do not use for platform account registration or store publication.
 license: MIT
 compatibility: Windows, Unreal Engine 4.18+, Python 3.7+
@@ -31,7 +32,9 @@ cancellation while waiting for the external build process.
    `DccMcpUnreal` ZIP. Pass a source checkout and an Unreal Engine root.
 2. Use `package_project_executable` for a saved `.uproject`. Choose `archive`,
    `installer`, `steam`, or `wegame` with `release_profile`.
-3. Poll the returned DCC MCP job until it completes, then inspect `artifacts`
+3. Use `package_prebuilt_windows_installer` when a complete Windows game folder
+   already exists and no `.uproject` is available.
+4. Poll the returned DCC MCP job until it completes, then inspect `artifacts`
    and `log_path`. A queued job is not proof that an executable was produced.
 
 The project packaging tool targets Windows `Win64` and uses Unreal's
@@ -48,4 +51,5 @@ publication remain operator-owned steps.
 
 - `build_plugin_package`
 - `package_project_executable`
+- `package_prebuilt_windows_installer`
 

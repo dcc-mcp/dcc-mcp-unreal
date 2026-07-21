@@ -192,6 +192,19 @@ def _windows_file_version(value: str) -> str:
     return ".".join(parts + ["0"] * (4 - len(parts)))
 
 
+def _release_metadata(product_name: str, product_version: str, publisher: str, default_name: str) -> tuple:
+    resolved_name = product_name.strip() or default_name
+    resolved_publisher = publisher.strip() or resolved_name
+    for field_name, value in (
+        ("product_name", resolved_name),
+        ("product_version", product_version),
+        ("publisher", resolved_publisher),
+    ):
+        if not value.strip() or any(character in value for character in "\r\n\0"):
+            raise ValueError("{} must be a non-empty single line".format(field_name))
+    return resolved_name, resolved_publisher
+
+
 def _build_installer(
     output: Path,
     stage_root: Path,
@@ -200,6 +213,7 @@ def _build_installer(
     product_version: str,
     publisher: str,
     compiler: Path,
+    vc_redist: Path = None,
 ) -> tuple:
     installer_dir = output / "Installer"
     installer_dir.mkdir(parents=True, exist_ok=True)
@@ -212,6 +226,16 @@ def _build_installer(
     ).strip("-.")
     base_name = "{}-Setup-{}".format(file_product_name or "Game", file_product_version or "1.0.0")
     app_id = uuid.uuid5(uuid.NAMESPACE_URL, "dcc-mcp-unreal:{}:{}".format(publisher, product_name))
+    external_prerequisite_file = ""
+    external_prerequisite_run = ""
+    if vc_redist is not None:
+        external_prerequisite_file = (
+            'Source: "{}"; DestDir: "{{tmp}}"; DestName: "vc_redist.x64.exe"; Flags: ignoreversion deleteafterinstall'
+        ).format(_inno_value(str(vc_redist)))
+        external_prerequisite_run = (
+            'Filename: "{{tmp}}\\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; '
+            "Flags: runhidden waituntilterminated"
+        )
     script = installer_dir / "game-installer.iss"
     script.write_text(
         """[Setup]
@@ -239,6 +263,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{source}\\*"; DestDir: "{{app}}"; Excludes: "Installer\\*,*.pdb,vc_redist.arm64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+{external_prerequisite_file}
 
 [Icons]
 Name: "{{autoprograms}}\\{product_name}"; Filename: "{{app}}\\{executable}"
@@ -249,6 +274,7 @@ Filename: "{{app}}\\Engine\\Extras\\Redist\\en-us\\UEPrereqSetup_x64.exe"; Param
 Filename: "{{app}}\\Engine\\Extras\\Redist\\en-us\\UE4PrereqSetup_x64.exe"; Parameters: "/quiet /norestart"; Flags: runhidden waituntilterminated; Check: FileExists(ExpandConstant('{{app}}\\Engine\\Extras\\Redist\\en-us\\UE4PrereqSetup_x64.exe'))
 Filename: "{{app}}\\Engine\\Extras\\Redist\\en-us\\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden waituntilterminated; Check: FileExists(ExpandConstant('{{app}}\\Engine\\Extras\\Redist\\en-us\\vc_redist.x64.exe'))
 Filename: "{{sys}}\\msiexec.exe"; Parameters: "/i ""{{app}}\\Engine\\Extras\\Redist\\en-us\\GameInputRedist.msi"" /quiet /norestart"; Flags: runhidden waituntilterminated; Check: FileExists(ExpandConstant('{{app}}\\Engine\\Extras\\Redist\\en-us\\GameInputRedist.msi'))
+{external_prerequisite_run}
 Filename: "{{app}}\\{executable}"; Description: "Launch {product_name}"; Flags: nowait postinstall skipifsilent
 """.format(
             app_id=app_id,
@@ -260,6 +286,8 @@ Filename: "{{app}}\\{executable}"; Description: "Launch {product_name}"; Flags: 
             base_name=_inno_value(base_name),
             source=_inno_value(str(stage_root)),
             executable=_inno_value(str(relative_executable)),
+            external_prerequisite_file=external_prerequisite_file,
+            external_prerequisite_run=external_prerequisite_run,
         ),
         encoding="utf-8-sig",
     )
@@ -489,15 +517,9 @@ def package_project_executable_impl(
             raise ValueError("target_platform must be Win64")
         if release_profile not in _RELEASE_PROFILES:
             raise ValueError("release_profile must be one of: {}".format(", ".join(sorted(_RELEASE_PROFILES))))
-        resolved_product_name = product_name.strip() or project.stem
-        resolved_publisher = publisher.strip() or resolved_product_name
-        for field_name, value in (
-            ("product_name", resolved_product_name),
-            ("product_version", product_version),
-            ("publisher", resolved_publisher),
-        ):
-            if not value.strip() or any(character in value for character in "\r\n\0"):
-                raise ValueError("{} must be a non-empty single line".format(field_name))
+        resolved_product_name, resolved_publisher = _release_metadata(
+            product_name, product_version, publisher, project.stem
+        )
         engine_root = _resolve_engine_root(ue_root)
         uat = _resolve_uat(engine_root)
         installer_compiler = _resolve_iscc(installer_compiler_path) if release_profile == "installer" else None
@@ -609,4 +631,66 @@ def package_project_executable_impl(
         configuration=configuration,
         target_platform=target_platform,
         release_profile=release_profile,
+    )
+
+
+def package_prebuilt_windows_installer_impl(
+    source_directory: str,
+    executable_relative_path: str,
+    output_directory: str,
+    product_name: str = "",
+    product_version: str = "1.0.0",
+    publisher: str = "",
+    installer_compiler_path: str = "",
+    vc_redist_path: str = "",
+) -> dict:
+    try:
+        source = Path(source_directory).expanduser().resolve()
+        if not source.is_dir():
+            raise FileNotFoundError("Prebuilt game directory not found: {}".format(source))
+        relative_executable = Path(executable_relative_path)
+        if relative_executable.is_absolute() or ".." in relative_executable.parts:
+            raise ValueError("executable_relative_path must stay inside source_directory")
+        executable = (source / relative_executable).resolve()
+        if source not in executable.parents or executable.suffix.lower() != ".exe" or not executable.is_file():
+            raise FileNotFoundError("Windows game executable not found under source_directory")
+        output = Path(output_directory).expanduser().resolve()
+        try:
+            output.relative_to(source)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("output_directory must be outside source_directory")
+        resolved_product_name, resolved_publisher = _release_metadata(
+            product_name, product_version, publisher, executable.stem
+        )
+        compiler = _resolve_iscc(installer_compiler_path)
+        vc_redist = Path(vc_redist_path).expanduser().resolve() if vc_redist_path else None
+        if vc_redist is not None and not vc_redist.is_file():
+            raise FileNotFoundError("VC++ redistributable not found: {}".format(vc_redist))
+    except (OSError, ValueError) as exc:
+        return skill_error("Prebuilt installer inputs are invalid", str(exc))
+
+    try:
+        installer, script, log_path = _build_installer(
+            output,
+            source,
+            executable,
+            resolved_product_name,
+            product_version,
+            resolved_publisher,
+            compiler,
+            vc_redist=vc_redist,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return skill_error("Prebuilt Windows installer failed", str(exc))
+    return skill_success(
+        "Prebuilt Windows game installer created successfully",
+        prompt="Install and smoke-test the returned Setup executable on a clean Windows machine.",
+        artifacts=[str(installer), str(script)],
+        installer_path=str(installer),
+        installer_script_path=str(script),
+        installer_log_path=str(log_path),
+        source_directory=str(source),
+        game_executable_path=str(executable),
     )

@@ -189,6 +189,45 @@ def test_wegame_profile_writes_preflight_manifest(tmp_path, monkeypatch):
     assert manifest["executable"] == "Game.exe"
 
 
+def test_package_prebuilt_windows_installer(tmp_path, monkeypatch):
+    module = _load_build_package_module()
+    source = tmp_path / "ExistingBuild"
+    executable = source / "Game.exe"
+    executable.parent.mkdir()
+    executable.write_bytes(b"game")
+    redist = tmp_path / "vc_redist.x64.exe"
+    redist.write_bytes(b"redist")
+    compiler = tmp_path / "ISCC.exe"
+    compiler.write_bytes(b"compiler")
+    output = tmp_path / "Release"
+
+    def fake_run(command, cwd, log_path):
+        installer = output / "Installer" / "Existing-Game-Setup-1.2.3.exe"
+        installer.parent.mkdir(parents=True, exist_ok=True)
+        installer.write_bytes(b"setup")
+        return 0
+
+    monkeypatch.setattr(module, "_run_logged", fake_run)
+    result = module.package_prebuilt_windows_installer_impl(
+        str(source),
+        "Game.exe",
+        str(output),
+        product_name="Existing Game",
+        product_version="1.2.3",
+        installer_compiler_path=str(compiler),
+        vc_redist_path=str(redist),
+    )
+
+    script = (output / "Installer" / "game-installer.iss").read_text(encoding="utf-8-sig")
+    assert result["success"] is True
+    assert 'DestDir: "{tmp}"' in script
+    assert str(redist) in script
+    rejected = module.package_prebuilt_windows_installer_impl(
+        str(source), "Game.exe", str(source / "Installer"), installer_compiler_path=str(compiler)
+    )
+    assert rejected["success"] is False
+
+
 def test_package_project_executable_rejects_missing_project(tmp_path):
     module = _load_build_package_module()
 
