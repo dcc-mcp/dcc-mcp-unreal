@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import Mapping
-from unittest import mock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,6 +48,7 @@ def test_has_explicit_main_false_when_no_main():
 
 def test_discover_skill_entry_finds_decorated_function():
     from dcc_mcp_core.skill import skill_entry
+
     from dcc_mcp_unreal.skill_runner import _discover_skill_entry
 
     @skill_entry
@@ -68,6 +65,7 @@ def test_discover_skill_entry_finds_decorated_function():
 
 def test_discover_skill_entry_skips_private_names():
     from dcc_mcp_core.skill import skill_entry
+
     from dcc_mcp_unreal.skill_runner import _discover_skill_entry
 
     @skill_entry
@@ -212,6 +210,7 @@ def test_run_script_delegates_to_core_when_neither_main_nor_entry():
 def test_host_execution_bridge_accepts_custom_runner():
     """The custom runner can be wired into HostExecutionBridge."""
     from dcc_mcp_core import HostExecutionBridge
+
     from dcc_mcp_unreal.skill_runner import run_skill_script as custom_runner
 
     bridge = HostExecutionBridge(runner=custom_runner)
@@ -224,6 +223,7 @@ def test_host_execution_bridge_accepts_custom_runner():
 def test_inprocess_executor_uses_custom_runner_for_script_without_main():
     """End-to-end: bridge executor → custom runner → auto-discover main."""
     from dcc_mcp_core import HostExecutionBridge
+
     from dcc_mcp_unreal.skill_runner import run_skill_script as custom_runner
 
     bridge = HostExecutionBridge(runner=custom_runner)

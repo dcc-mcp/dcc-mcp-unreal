@@ -5,6 +5,11 @@
 **Author**: DCC-MCP Team  
 **Last Updated**: 2026-04-11
 
+> 📖 **Looking for setup instructions?** See the [Installation Guide](installation.md)
+> for pip install, uplugin deployment, UE version matrix, and agent-oriented
+> quick-start paths. Also see [Unreal Version Compatibility](unreal-version-compatibility.md)
+> and [MSVC-Kit Guide](msvc-kit-guide.md).
+
 ---
 
 ## 1. Executive Summary

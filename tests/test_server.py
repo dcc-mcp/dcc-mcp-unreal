@@ -806,3 +806,15 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "ambient_occlusion_texture_path:" in tools
     assert "metallic_texture_path:" in tools
     assert "base_color_scale:" in tools
+
+
+def test_blueprint_creation_skill_is_registered():
+    skill_root = Path(__file__).parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-assets"
+    tools = (skill_root / "tools.yaml").read_text(encoding="utf-8")
+    script = (skill_root / "scripts" / "create_blueprint.py").read_text(encoding="utf-8")
+
+    assert "name: create_blueprint" in tools
+    assert "parent_class_path:" in tools
+    assert "unreal.BlueprintFactory()" in script
+    assert 'factory.set_editor_property("parent_class", parent_class)' in script
+    assert "save_loaded_asset" in script

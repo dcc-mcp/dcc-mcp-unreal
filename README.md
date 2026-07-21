@@ -50,10 +50,10 @@ attach a stable session id with `--meta-json`, query `dcc-mcp-cli stats --range 
 > **Status**: Pre-Alpha — placeholder / scaffold. Core skill authoring API is
 > functional; full Unreal Engine integration requires iterative testing inside UE5.
 
-<!-- Badges (fill in once CI is configured) -->
-<!-- ![PyPI](https://img.shields.io/pypi/v/dcc-mcp-unreal) -->
-<!-- ![Python](https://img.shields.io/pypi/pyversions/dcc-mcp-unreal) -->
-<!-- ![License](https://img.shields.io/github/license/dcc-mcp/dcc-mcp-unreal) -->
+<!-- Badges -->
+[![PyPI](https://img.shields.io/pypi/v/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
+[![Python](https://img.shields.io/pypi/pyversions/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
+[![License](https://img.shields.io/github/license/dcc-mcp/dcc-mcp-unreal)](LICENSE)
 
 Unreal Engine plugin for the **DCC Model Context Protocol (MCP)** ecosystem.
 Embeds a standards-compliant MCP Streamable HTTP server (2025-03-26 spec)
@@ -126,19 +126,35 @@ for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
 
 ## Installation
 
-### Inside Unreal Engine (recommended)
+📖 **[Full installation guide](docs/installation.md)** — covers pip install,
+uplugin deployment, GitHub Releases, UE 4.18–5.8+ matrix, agent-oriented
+paths, environment variables, and troubleshooting.
 
-Copy or install `dcc-mcp-unreal` into Unreal's Python site-packages:
+### Quick Install
+
+Pick the one-liner for your engine version:
 
 ```bash
-# Using pip with Unreal's bundled Python
-"C:/Program Files/Epic Games/UE_5.4/Engine/Binaries/ThirdParty/Python3/Win64/python.exe" \
-    -m pip install dcc-mcp-unreal
+# UE 5.5 / 5.4 / 5.3 (Python 3.11)
+"C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
+
+# UE 5.2 / 5.1 (Python 3.9)
+"C:\Program Files\Epic Games\UE_5.2\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
+
+# UE 5.0 / 4.27 (Python 3.9 / 3.7)
+"C:\Program Files\Epic Games\UE_5.0\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
+
+# UE 4.18 (external sidecar)
+pip install dcc-mcp-unreal
 ```
 
-Or add it to the project's `Plugins/PythonScriptPlugin/Content/Python/` folder.
+Enable the **Python Editor Script Plugin** in Unreal Editor (**Edit → Plugins → "Python"**), restart, and you're ready.
 
-### Development install
+### Uplugin (from GitHub Releases)
+
+Download `DccMcpUnreal-0.2.0-ue5.7.zip` from [Releases](https://github.com/dcc-mcp/dcc-mcp-unreal/releases), extract into `<project>/Plugins/DccMcpUnreal/`, enable in Editor.
+
+### Development Install
 
 ```bash
 git clone https://github.com/dcc-mcp/dcc-mcp-unreal
@@ -146,60 +162,16 @@ cd dcc-mcp-unreal
 pip install -e ".[dev]"
 ```
 
-### Build a deployable UE 5.2 plugin package
-
-The repo includes `vx just` recipes. By default they use
-`C:\Program Files\Epic Games\UE_5.2` and install `dcc-mcp-core` from a
-prebuilt wheel, which keeps CI/release packaging deterministic.
-
-```bash
-vx just package
-```
-
-Outputs use the standard Unreal project-plugin layout:
-
-- `dist/DccMcpUnreal/DccMcpUnreal.uplugin`
-- `dist/DccMcpUnreal/Content/Python/init_unreal.py`
-- `dist/DccMcpUnreal/python/` — vendored Python package dependencies
-- `dist/DccMcpUnreal-<version>-ue5.2.zip` — zipped plugin package
-
-Deploy directly into a project:
-
-```bash
-vx just deploy "C:\Path\To\MyUnrealProject"
-```
-
-Run the packaged plugin inside a local UE project with `UnrealEditor-Cmd.exe`:
-
-```bash
-vx just ue-smoke "C:\Path\To\MyUnrealProject"
-```
-
-The smoke test runs the native Unreal Automation Test
-`DccMcp.Smoke.ServerStarts`, verifies HTTP readiness, and confirms the built-in
-Unreal tools are registered. It writes UE Automation reports under
-`Saved/Automation/Reports`.
-
-For direct Python-script debugging, bypass the native Automation layer:
-
-```bash
-vx just ue-smoke-python "C:\Path\To\MyUnrealProject"
-```
-
-Override paths when needed:
+### Build Plugin Package
 
 ```bash
 set UE_ROOT=C:\Program Files\Epic Games\UE_5.7
-vx just package
+vx just package          # Output: dist/DccMcpUnreal/
+vx just deploy "C:\Path\To\MyUnrealProject"
 ```
 
-To test an unpublished local core checkout, use the source-build path
-explicitly:
-
-```bash
-set DCC_MCP_CORE_ROOT=G:\PycharmProjects\github\dcc-mcp-core
-vx just package-local-core
-```
+See the [installation guide](docs/installation.md) for build-from-source,
+UE version matrix, and agent-oriented automation paths.
 
 ---
 
