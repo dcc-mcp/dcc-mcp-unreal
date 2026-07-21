@@ -66,19 +66,23 @@ def find_nodes(
         pins = []
         for pin in node.get_all_pins():
             pin_direction = "output" if pin.get_direction() == unreal.EdGraphPinDirection.EGPD_Output else "input"
-            pins.append({
-                "name": pin.get_name(),
-                "direction": pin_direction,
-                "type": str(pin.get_pin_type()),
-            })
+            pins.append(
+                {
+                    "name": pin.get_name(),
+                    "direction": pin_direction,
+                    "type": str(pin.get_pin_type()),
+                }
+            )
 
-        nodes.append({
-            "node_id": node_guid,
-            "title": node_title,
-            "type": node_class_name,
-            "position": [node.get_editor_property("node_pos_x"), node.get_editor_property("node_pos_y")],
-            "pins": pins,
-        })
+        nodes.append(
+            {
+                "node_id": node_guid,
+                "title": node_title,
+                "type": node_class_name,
+                "position": [node.get_editor_property("node_pos_x"), node.get_editor_property("node_pos_y")],
+                "pins": pins,
+            }
+        )
 
     return skill_success(
         f"Found {len(nodes)} node(s) in '{blueprint_name}'",

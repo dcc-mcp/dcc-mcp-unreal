@@ -71,7 +71,11 @@ def connect_nodes(
     target_pin_obj = _find_pin_by_name(target_node, target_pin, is_output=False)
 
     if source_pin_obj is None:
-        available = [p.get_name() for p in source_node.get_all_pins() if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Output]
+        available = [
+            p.get_name()
+            for p in source_node.get_all_pins()
+            if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Output
+        ]
         return skill_error(
             f"Source pin '{source_pin}' not found on node {source_node_id}",
             f"Available output pins: {', '.join(available) if available else 'none'}",
@@ -79,7 +83,11 @@ def connect_nodes(
         )
 
     if target_pin_obj is None:
-        available = [p.get_name() for p in target_node.get_all_pins() if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Input]
+        available = [
+            p.get_name()
+            for p in target_node.get_all_pins()
+            if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Input
+        ]
         return skill_error(
             f"Target pin '{target_pin}' not found on node {target_node_id}",
             f"Available input pins: {', '.join(available) if available else 'none'}",

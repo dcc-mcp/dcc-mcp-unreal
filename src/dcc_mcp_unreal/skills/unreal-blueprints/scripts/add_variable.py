@@ -55,9 +55,7 @@ def add_variable(
         "class": ("class", None),
     }
 
-    pin_category, pin_subcategory = type_map.get(
-        variable_type.lower(), ("object", variable_type)
-    )
+    pin_category, pin_subcategory = type_map.get(variable_type.lower(), ("object", variable_type))
 
     # Add the variable
     try:
@@ -80,9 +78,7 @@ def add_variable(
     # Set exposure if requested
     if is_exposed:
         try:
-            unreal.BlueprintEditorLibrary.set_blueprint_variable_expose(
-                blueprint, variable_name, True
-            )
+            unreal.BlueprintEditorLibrary.set_blueprint_variable_expose(blueprint, variable_name, True)
         except Exception:
             pass  # Best effort for older UE versions
 

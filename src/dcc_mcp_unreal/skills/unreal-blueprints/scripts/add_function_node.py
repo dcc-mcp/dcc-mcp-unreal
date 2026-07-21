@@ -65,9 +65,7 @@ def add_function_node(
         parent_class = blueprint.get_editor_property("parent_class")
         if parent_class is not None:
             try:
-                func_ref = unreal.EdGraphSchema_K2.find_function_by_name(
-                    parent_class, function_name
-                )
+                func_ref = unreal.EdGraphSchema_K2.find_function_by_name(parent_class, function_name)
                 if func_ref is not None:
                     function_node.set_editor_property("function_reference", func_ref)
             except Exception:
