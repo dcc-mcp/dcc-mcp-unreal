@@ -52,7 +52,7 @@ def compile_blueprint(
 
     return skill_success(
         f"Compiled Blueprint '{blueprint_name}' successfully",
-        prompt=f"The Blueprint is ready to use. Spawn it with unreal_actors__spawn_actor.",
+        prompt="The Blueprint is ready to use. Spawn it with unreal_actors__spawn_actor.",
         blueprint_name=blueprint_name,
         blueprint_path=blueprint_path,
     )

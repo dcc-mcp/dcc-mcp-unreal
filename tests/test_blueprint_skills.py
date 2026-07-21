@@ -6,8 +6,8 @@ They mock the unreal module since we're not inside Unreal Engine.
 
 from __future__ import annotations
 
-import sys
 import importlib.util
+import sys
 from unittest.mock import MagicMock, patch
 
 

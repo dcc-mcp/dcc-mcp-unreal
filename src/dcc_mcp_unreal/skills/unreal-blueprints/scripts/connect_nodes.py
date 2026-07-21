@@ -107,9 +107,8 @@ def connect_nodes(
     )
 
 
-def _find_node_by_id(graph: "unreal.EdGraph", node_id: str) -> "unreal.EdGraphNode":
+def _find_node_by_id(graph: "unreal.EdGraph", node_id: str) -> "unreal.EdGraphNode":  # noqa: F821
     """Find a node in the graph by its GUID string."""
-    import unreal  # noqa: PLC0415
 
     for node in graph.get_all_nodes():
         if str(node.get_node_guid()) == node_id:
@@ -118,10 +117,10 @@ def _find_node_by_id(graph: "unreal.EdGraph", node_id: str) -> "unreal.EdGraphNo
 
 
 def _find_pin_by_name(
-    node: "unreal.EdGraphNode",
+    node: "unreal.EdGraphNode",  # noqa: F821
     pin_name: str,
     is_output: bool = False,
-) -> "unreal.EdGraphPin":
+) -> "unreal.EdGraphPin":  # noqa: F821
     """Find a pin on a node by name and direction."""
     import unreal  # noqa: PLC0415
 

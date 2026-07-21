@@ -61,7 +61,7 @@ def add_variable(
 
     # Add the variable
     try:
-        result = unreal.BlueprintEditorLibrary.add_member_variable(
+        unreal.BlueprintEditorLibrary.add_member_variable(
             blueprint=blueprint,
             new_variable_name=variable_name,
             new_variable_type=pin_category,

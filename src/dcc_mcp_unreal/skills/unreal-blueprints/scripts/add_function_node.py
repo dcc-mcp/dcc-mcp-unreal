@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import List, Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 

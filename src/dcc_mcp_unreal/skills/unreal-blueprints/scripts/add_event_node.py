@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import List, Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
@@ -78,10 +78,10 @@ def add_event_node(
 
 
 def _create_event_node_by_name(
-    event_graph: "unreal.EdGraph",
+    event_graph: "unreal.EdGraph",  # noqa: F821
     event_name: str,
     node_position: List[float],
-) -> "unreal.EdGraphNode":
+) -> "unreal.EdGraphNode":  # noqa: F821
     """Create an event node by name in the given graph."""
     import unreal  # noqa: PLC0415
 
