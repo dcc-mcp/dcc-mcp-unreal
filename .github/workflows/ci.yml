@@ -18,16 +18,9 @@ jobs:
       fail-fast: false
       max-parallel: 5
       matrix:
-        # Main matrix: modern OS + Python 3.8-3.12
+        # Supported runtime matrix: Python 3.10+
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-        include:
-          # Python 3.7 requires Ubuntu 22.04 (ubuntu-latest is 24.04 which dropped 3.7)
-          - os: ubuntu-22.04
-            python-version: "3.7"
-          # Python 3.7 on Windows is still available
-          - os: windows-latest
-            python-version: "3.7"
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -88,10 +81,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.9
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.10"
 
       - name: Build plugin layout without vendored deps
         shell: pwsh

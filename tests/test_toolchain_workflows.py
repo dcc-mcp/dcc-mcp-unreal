@@ -8,6 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_WORKFLOW = ROOT / ".github" / "workflows" / "build-uplugin.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CONFIG = ROOT / "release-please-config.json"
 VERSION_MODULE = ROOT / "src" / "dcc_mcp_unreal" / "__version__.py"
@@ -193,8 +194,17 @@ def test_release_builds_pythonless_standalone_sidecars() -> None:
 
     assert [entry["asset_suffix"] for entry in matrix] == ["linux-X64", "windows-X64", "macOS-Universal2"]
     assert all(entry["core_asset"].startswith("dcc-mcp-server-") for entry in matrix)
-    assert "python tools/build_binary.py --server" in "\n".join(str(step.get("run", "")) for step in standalone["steps"])
+    assert "python tools/build_binary.py --server" in "\n".join(
+        str(step.get("run", "")) for step in standalone["steps"]
+    )
     assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
+
+
+def test_ci_supports_python_310_and_newer() -> None:
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    versions = workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+
+    assert versions == ["3.10", "3.11", "3.12"]
 
 
 def test_pythonless_installer_is_fixed_to_official_assets_and_verifies_hashes() -> None:

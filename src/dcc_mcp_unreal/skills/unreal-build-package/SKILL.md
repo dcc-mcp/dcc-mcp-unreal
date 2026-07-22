@@ -6,7 +6,7 @@ description: >-
   folders. Use for long-running compilation, cooking, staging, and packaging.
   Do not use for platform account registration or store publication.
 license: MIT
-compatibility: Windows, Unreal Engine 4.18+, Python 3.7+
+compatibility: Windows, Unreal Engine 4.18+, Python 3.10+
 allowed-tools: Read Bash Write
 metadata:
   dcc-mcp:

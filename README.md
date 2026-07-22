@@ -144,14 +144,8 @@ For Python-enabled engines, pick the one-liner for your engine version:
 # UE 5.5 / 5.4 / 5.3 (Python 3.11)
 "C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
 
-# UE 5.2 / 5.1 (Python 3.9)
-"C:\Program Files\Epic Games\UE_5.2\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
-
-# UE 5.0 / 4.27 (Python 3.9 / 3.7)
-"C:\Program Files\Epic Games\UE_5.0\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
-
-# UE 4.18 (external sidecar)
-pip install dcc-mcp-unreal
+# UE versions whose embedded Python is older than 3.10 use the standalone
+# sidecar command above instead of pip installation.
 ```
 
 Enable the **Python Editor Script Plugin** in Unreal Editor (**Edit → Plugins → "Python"**), restart, and you're ready.

@@ -6,7 +6,7 @@ description: >-
   the Unreal Editor. Not for actor placement or transforms - use unreal-actors
   for that.
 license: MIT
-compatibility: Unreal Engine 5.0+, Python 3.9+
+compatibility: Unreal Engine 5.0+, Python 3.10+
 allowed-tools: Bash Read Write
 metadata:
   dcc-mcp:
