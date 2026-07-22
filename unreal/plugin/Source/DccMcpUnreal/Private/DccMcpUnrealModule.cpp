@@ -19,6 +19,22 @@ class FDccMcpUnrealModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
+		const FString RuntimeMode = GetEnvironmentVariable(TEXT("DCC_MCP_UNREAL_RUNTIME"));
+#if ENGINE_MAJOR_VERSION >= 5
+		const bool bAutoPythonSupported = true;
+#else
+		const bool bAutoPythonSupported = false;
+#endif
+		const bool bPythonRuntime = RuntimeMode.Equals(TEXT("python"), ESearchCase::IgnoreCase) ||
+			(bAutoPythonSupported &&
+			 (RuntimeMode.IsEmpty() || RuntimeMode.Equals(TEXT("auto"), ESearchCase::IgnoreCase)) &&
+			 FModuleManager::Get().IsModuleLoaded(FName(TEXT("PythonScriptPlugin"))));
+		if (bPythonRuntime)
+		{
+			UE_LOG(LogDccMcpUnreal, Display, TEXT("PythonScriptPlugin is active; skipping the standalone sidecar"));
+			return;
+		}
+
 		Listener = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("DccMcpUnreal"), false);
 		TSharedRef<FInternetAddr> Address = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
 		bool bValid = false;
@@ -48,17 +64,20 @@ public:
 	}
 
 private:
-	void StartSidecar(int32 BoundPort)
+	FString GetEnvironmentVariable(const TCHAR* Name) const
 	{
 #if ENGINE_MAJOR_VERSION >= 5
-		// UE 5.0+: FString-returning GetEnvironmentVariable (buffer form deprecated in 5.7)
-		FString Executable = FPlatformMisc::GetEnvironmentVariable(TEXT("DCC_MCP_SERVER_EXECUTABLE"));
+		return FPlatformMisc::GetEnvironmentVariable(Name);
 #else
-		// UE 4.18: buffer-based form only
-		TCHAR ExecutableBuffer[1024] = { 0 };
-		FPlatformMisc::GetEnvironmentVariable(TEXT("DCC_MCP_SERVER_EXECUTABLE"), ExecutableBuffer, 1024);
-		FString Executable(ExecutableBuffer);
+		TCHAR Buffer[1024] = { 0 };
+		FPlatformMisc::GetEnvironmentVariable(Name, Buffer, 1024);
+		return FString(Buffer);
 #endif
+	}
+
+	void StartSidecar(int32 BoundPort)
+	{
+		FString Executable = GetEnvironmentVariable(TEXT("DCC_MCP_SERVER_EXECUTABLE"));
 		if (Executable.IsEmpty()) Executable = TEXT("dcc-mcp-server.exe");
 		const FString Args = FString::Printf(
 			TEXT("sidecar --dcc unreal --host-rpc qtserver://127.0.0.1:%d --watch-pid %u --display-name UnrealEditor --adapter-version 0.2.0 --no-ensure-gateway"),

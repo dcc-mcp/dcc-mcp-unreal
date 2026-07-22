@@ -10,7 +10,7 @@ Choose the path that matches your Unreal Engine version and workflow.
 ```
 
 The plugin auto-detects the running engine and activates the correct capability
-tier. Engines whose bundled Python is older than 3.10 use the self-contained
+tier. Engines whose bundled Python is older than 3.9 use the self-contained
 standalone sidecar below.
 
 ---
@@ -19,9 +19,11 @@ standalone sidecar below.
 
 | UE Version | Install Mode | Required Python | Notes |
 |---|---|---|---|
-| **4.18 – 5.2** | C++ plugin + standalone sidecar | No system Python required | Use the self-contained PyOxidizer installer |
-| **5.3 – 5.7** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.10+ | Full DCC MCP skill catalog |
-| **5.8+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.11+ | DCC MCP tools + bridge to Epic's `ModelContextProtocol` plugin |
+| **4.18 – 4.26** | C++ plugin + standalone sidecar | No system Python required | Internal Python 3.9+ builds may select embedded mode |
+| **4.27** | C++ plugin + standalone sidecar | No system Python required | Stock Python 3.7 is unsupported; internal Python 3.9+ builds may select embedded mode |
+| **5.0 – 5.2** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.9 | Full DCC MCP skill catalog |
+| **5.3 – 5.6** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.11 | Full DCC MCP skill catalog |
+| **5.7+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.12 | DCC MCP tools + optional Epic MCP bridge where available |
 
 ### Per-Tier Detail
 
@@ -31,7 +33,7 @@ Python skills use the self-contained standalone sidecar outside the editor. See 
 [MSVC-Kit guide](msvc-kit-guide.md#unreal-engine-418) for the tested
 toolchain.
 
-**UE 5.3 – 5.7 (Python-enabled)**
+**UE 5.0+ (Python-enabled)**
 Full DCC MCP server inside the editor. Install `dcc-mcp-unreal` into the
 engine's bundled Python, enable `PythonScriptPlugin`, and the server runs
 in-process. The C++ plugin handles subprocess lifecycle and main-thread
@@ -67,10 +69,18 @@ first enable the **Python Editor Script Plugin** (Edit → Plugins → search
     "C:\Path\To\YourProject.uproject" -run=pythonscript -script="path\to\install.py" -stdout -unattended -nosplash
 ```
 
-### UE 5.2 and older
+### UE 5.2 / 5.1 / 5.0 (Python 3.9)
 
-Use the standalone sidecar installer below. Python versions older than 3.10
-are no longer supported by the Python package.
+```bash
+"C:\Program Files\Epic Games\UE_5.2\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
+```
+
+### UE 4.x
+
+Stock Python 2.7/3.7 builds use the standalone sidecar installer below.
+Internal engine builds with Python 3.9 or newer may install the Python package
+and set `DCC_MCP_UNREAL_RUNTIME=python` to use embedded mode. UE4 defaults to
+sidecar even when an older `PythonScriptPlugin` is loaded.
 
 ### Development Install
 
@@ -269,6 +279,7 @@ Requires: dcc-mcp-core>=0.19.45,<1.0.0
 | `DCC_MCP_UNREAL_PORT` | OS-assigned (`0`) | Override the MCP instance port |
 | `DCC_MCP_UNREAL_SERVER_NAME` | `unreal-mcp` | Server display name |
 | `DCC_MCP_SERVER_EXECUTABLE` | auto-discovered | Override path to `dcc-mcp-server` binary |
+| `DCC_MCP_UNREAL_RUNTIME` | `auto` | Select `auto`, `python`, or `sidecar`; auto prefers an active `PythonScriptPlugin` |
 | `DCC_MCP_UNREAL_PYTHON_PLUGIN` | `PythonScriptPlugin` | Python plugin dependency name in `.uplugin` |
 | `UE_ROOT` | `C:\Program Files\Epic Games\UE_5.2` | Engine root (for `vx just package`) |
 | `DCC_MCP_CORE_SPEC` | `dcc-mcp-core>=0.18.7,<1.0.0` | Core version spec (for plugin builds) |

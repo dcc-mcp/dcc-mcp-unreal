@@ -6,7 +6,7 @@ description: >-
   Unreal Editor level. Not for Content Browser asset import/export - use
   unreal-assets for that.
 license: MIT
-compatibility: Unreal Engine 5.0+, Python 3.10+
+compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read
 metadata:
   dcc-mcp:

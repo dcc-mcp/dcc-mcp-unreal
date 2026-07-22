@@ -6,7 +6,7 @@ description: >-
   level operations. Not for individual actor transform edits - use
   unreal-actors for that.
 license: MIT
-compatibility: Unreal Engine 5.0+, Python 3.10+
+compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:
   dcc-mcp:
