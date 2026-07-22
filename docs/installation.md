@@ -176,6 +176,30 @@ the Python plugin is absent.
 
 ## Verification
 
+### Standalone sidecar (no system Python)
+
+For Windows machines without Python, an agent should run the repository's
+PowerShell installer. It downloads only from the official GitHub repository,
+verifies every file listed in `SHA256SUMS`, smoke-tests the bundled interpreter,
+and persists `DCC_MCP_SERVER_EXECUTABLE` for the current user:
+
+```powershell
+irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 | iex
+```
+
+Install a specific release by downloading the script first:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 -OutFile install-standalone.ps1
+.\install-standalone.ps1 -Version v0.2.0
+```
+
+The default install directory is
+`%LOCALAPPDATA%\dcc-mcp-unreal\standalone`. Restart Unreal after installation
+so it inherits the persisted environment variable. The archive contains its
+own PyOxidizer interpreter and native `dcc-mcp-server`; neither `python` nor
+`pip` is required on the target machine.
+
 ### Smoke Test (Quick)
 
 Open Unreal Editor's **Output Log → Python** console and run:

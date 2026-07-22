@@ -14,6 +14,7 @@ VERSION_MODULE = ROOT / "src" / "dcc_mcp_unreal" / "__version__.py"
 CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
 PLUGIN_MODULE = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpUnrealModule.cpp"
 PLUGIN_RULES = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs"
+STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -105,7 +106,7 @@ def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> No
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
 
-    for job_name in ("build", "build-unreal-plugin", "publish", "attach-release-assets"):
+    for job_name in ("build", "build-unreal-plugin", "standalone", "publish", "attach-release-assets"):
         assert "always()" in jobs[job_name]["if"]
 
     assert "needs.build.result == 'success'" in jobs["publish"]["if"]
@@ -121,7 +122,7 @@ def test_release_please_runs_on_main_without_publishing_ordinary_pushes() -> Non
 
     assert "branches: [main]" in text
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in jobs["release-please"]["if"]
-    for job_name in ("build", "build-unreal-plugin", "publish", "attach-release-assets"):
+    for job_name in ("build", "build-unreal-plugin", "standalone", "publish", "attach-release-assets"):
         assert tag_push in jobs[job_name]["if"]
         assert "github.event_name == 'push' ||" not in jobs[job_name]["if"]
 
@@ -183,3 +184,24 @@ def test_manual_tag_recovery_publishes_and_attaches_to_requested_release() -> No
         step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Download Unreal plugin package"
     )
     assert download_step["with"]["pattern"] == "DccMcpUnreal-*"
+
+
+def test_release_builds_pythonless_standalone_sidecars() -> None:
+    jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    standalone = jobs["standalone"]
+    matrix = standalone["strategy"]["matrix"]["include"]
+
+    assert [entry["asset_suffix"] for entry in matrix] == ["linux-X64", "windows-X64", "macOS-Universal2"]
+    assert all(entry["core_asset"].startswith("dcc-mcp-server-") for entry in matrix)
+    assert "python tools/build_binary.py --server" in "\n".join(str(step.get("run", "")) for step in standalone["steps"])
+    assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
+
+
+def test_pythonless_installer_is_fixed_to_official_assets_and_verifies_hashes() -> None:
+    installer = STANDALONE_INSTALLER.read_text(encoding="utf-8")
+
+    assert '$repo = "dcc-mcp/dcc-mcp-unreal"' in installer
+    assert "Get-FileHash" in installer
+    assert "DCC_MCP_SERVER_EXECUTABLE" in installer
+    assert "python " not in installer.lower()
+    assert "pip " not in installer.lower()
