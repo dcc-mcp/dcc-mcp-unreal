@@ -24,6 +24,9 @@ Configuration (environment variables)
 ``DCC_MCP_UNREAL_SERVER_NAME``
     Name advertised in the MCP ``initialize`` response.  Default: ``"unreal-mcp"``.
 
+``DCC_MCP_UNREAL_RUNTIME``
+    Runtime selection: ``auto`` (default), ``python``, or ``sidecar``.
+
 ``DCC_MCP_APP_UI_BACKEND``
     UI automation backend.  Defaults to ``"windows-uia"`` on Windows while
     preserving an explicit user override.
@@ -337,6 +340,9 @@ def _show_url_dialog() -> None:
 def _initialize() -> None:
     """Plugin initialisation: start server and register menus."""
     global _tick_handle
+    if os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower() == "sidecar":
+        logger.info("[dcc-mcp-unreal] Standalone sidecar selected; skipping the embedded server")
+        return
     try:
         _start()
     except Exception as exc:

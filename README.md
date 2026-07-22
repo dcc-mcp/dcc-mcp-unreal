@@ -144,7 +144,7 @@ For Python-enabled engines, pick the one-liner for your engine version:
 # UE 5.5 / 5.4 / 5.3 (Python 3.11)
 "C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
 
-# UE versions whose embedded Python is older than 3.10 use the standalone
+# UE versions whose embedded Python is older than 3.9 use the standalone
 # sidecar command above instead of pip installation.
 ```
 

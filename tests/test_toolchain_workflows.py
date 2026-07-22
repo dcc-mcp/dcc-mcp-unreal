@@ -89,6 +89,9 @@ def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
 
     assert "qtserver://127.0.0.1:" in module
     assert "dcc-mcp-server.exe" in module
+    assert "DCC_MCP_UNREAL_RUNTIME" in module
+    assert "bAutoPythonSupported = false" in module
+    assert "PythonScriptPlugin is active; skipping the standalone sidecar" in module
     for action in ("list_actors", "spawn_actor", "delete_actor", "get_actor_transform", "set_actor_transform"):
         assert f"unreal_actors__{action}" in module
     assert "unreal_level__get_level_info" in module
@@ -200,11 +203,11 @@ def test_release_builds_pythonless_standalone_sidecars() -> None:
     assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
 
 
-def test_ci_supports_python_310_and_newer() -> None:
+def test_ci_supports_python_39_and_newer() -> None:
     workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
     versions = workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"]
 
-    assert versions == ["3.10", "3.11", "3.12"]
+    assert versions == ["3.9", "3.10", "3.11", "3.12"]
 
 
 def test_pythonless_installer_is_fixed_to_official_assets_and_verifies_hashes() -> None:
