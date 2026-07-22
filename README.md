@@ -132,7 +132,13 @@ paths, environment variables, and troubleshooting.
 
 ### Quick Install
 
-Pick the one-liner for your engine version:
+No system Python (Windows native sidecar):
+
+```powershell
+irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 | iex
+```
+
+For Python-enabled engines, pick the one-liner for your engine version:
 
 ```bash
 # UE 5.5 / 5.4 / 5.3 (Python 3.11)

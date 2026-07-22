@@ -111,6 +111,61 @@ jobs:
       core_version: ${{ github.event.inputs.core_version || 'latest' }}
     secrets: inherit
 
+  standalone:
+    needs: [release-please]
+    if: |
+      always() &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+        github.event_name == 'release'
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, core_asset: dcc-mcp-server-linux-x86_64, server_name: dcc-mcp-server, asset_suffix: linux-X64}
+          - {os: windows-latest, core_asset: dcc-mcp-server-windows-x86_64.exe, server_name: dcc-mcp-server.exe, asset_suffix: windows-X64}
+          - {os: macos-latest, core_asset: dcc-mcp-server-macos-universal2, server_name: dcc-mcp-server, asset_suffix: macOS-Universal2}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install pyoxidizer==0.24.0
+      - name: Download native core sidecar
+        env:
+          GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
+        shell: bash
+        run: |
+          args=(--repo dcc-mcp/dcc-mcp-core --pattern '${{ matrix.core_asset }}' --dir core-bin)
+          if [ "$CORE_VERSION" != latest ]; then args=("$CORE_VERSION" "${args[@]}"); fi
+          gh release download "${args[@]}"
+          mv 'core-bin/${{ matrix.core_asset }}' 'core-bin/${{ matrix.server_name }}'
+          chmod +x 'core-bin/${{ matrix.server_name }}' || true
+      - name: Build standalone sidecar
+        run: python tools/build_binary.py --server "core-bin/${{ matrix.server_name }}"
+      - name: Archive standalone
+        shell: bash
+        run: |
+          tag='${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || github.event.inputs.tag_name || github.ref_name }}'
+          base="dcc-mcp-unreal-${tag}-${{ matrix.asset_suffix }}"
+          if [ '${{ runner.os }}' = Windows ]; then
+            powershell -NoProfile -Command "Compress-Archive -Path 'dist/standalone/*' -DestinationPath '${base}.zip'"
+            echo "ASSET=${base}.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "${base}.tar.gz" -C dist/standalone .
+            echo "ASSET=${base}.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.asset_suffix }}
+          path: ${{ env.ASSET }}
+
   # ── Publish to PyPI ─────────────────────────────────────────────────────────
   publish:
     needs: [release-please, build]
@@ -148,11 +203,12 @@ jobs:
 
   # ── Attach wheels to GitHub Release ─────────────────────────────────────────
   attach-release-assets:
-    needs: [release-please, publish, build-unreal-plugin]
+    needs: [release-please, publish, build-unreal-plugin, standalone]
     if: |
       always() &&
       needs.publish.result == 'success' &&
       needs.build-unreal-plugin.result == 'success' &&
+      needs.standalone.result == 'success' &&
       (
         needs.release-please.outputs.release_created == 'true' ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
@@ -177,6 +233,13 @@ jobs:
           path: unreal-plugin/
           merge-multiple: true
 
+      - name: Download standalone sidecars
+        uses: actions/download-artifact@v4
+        with:
+          pattern: standalone-*
+          path: standalone/
+          merge-multiple: true
+
       - name: Attach wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -184,3 +247,5 @@ jobs:
           files: |
             dist/*
             unreal-plugin/*.zip
+            standalone/*
+            scripts/install-standalone.ps1
