@@ -5,7 +5,7 @@ description: >-
   Use to list UE Automation tests, queue native test runs, and run a safe
   self-check against the active MCP server.
 license: MIT
-compatibility: Unreal Engine 5.0+, Python 3.9+
+compatibility: Unreal Engine 5.0+, Python 3.10+
 allowed-tools: Bash Read Write
 metadata:
   dcc-mcp:

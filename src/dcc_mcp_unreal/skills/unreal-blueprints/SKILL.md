@@ -6,7 +6,7 @@ description: >-
   Use when building or modifying Blueprint logic in the Unreal Editor.
   Not for level actor placement - use unreal-actors for that.
 license: MIT
-compatibility: Unreal Engine 5.0+, Python 3.9+
+compatibility: Unreal Engine 5.0+, Python 3.10+
 allowed-tools: Bash Read
 metadata:
   dcc-mcp:
