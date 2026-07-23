@@ -160,8 +160,16 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
     uat = resolve_uat(args.ue_root)
     cmd = [str(uat)]
-    if read_engine_tag(args.ue_root).startswith("ue4."):
+    is_ue4 = read_engine_tag(args.ue_root).startswith("ue4.")
+    if is_ue4:
         cmd.append("-nocompile")
+        # Installed UE4 builds default to an AutomationTool log directory under
+        # the engine installation. A service account may not own stale logs
+        # created there by another user, so keep all UAT writes job-scoped.
+        uat_log_dir = uat_dir.parent / "uat-logs"
+        uat_log_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["uebp_LogFolder"] = str(uat_log_dir)
+        print("[build-uplugin] UE4 UAT log folder: {}".format(uat_log_dir))
     cmd += [
         "BuildPlugin",
         "-Plugin={}".format(PLUGIN_SOURCE),

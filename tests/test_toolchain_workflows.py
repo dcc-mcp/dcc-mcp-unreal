@@ -123,6 +123,7 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
 
     assert 'read_engine_tag(args.ue_root).startswith("ue4.")' in builder
     assert 'cmd.append("-nocompile")' in builder
+    assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
