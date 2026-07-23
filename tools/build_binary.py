@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 OUTPUT = ROOT / "dist" / "standalone"
+README = ROOT / "packaging" / "standalone-README.md"
 NAME = "dcc-mcp-unreal" + (".exe" if sys.platform == "win32" else "")
 
 
@@ -25,7 +26,9 @@ def _find_binary() -> Path:
 def _write_manifest(directory: Path) -> None:
     lines = []
     for path in sorted(p for p in directory.rglob("*") if p.is_file() and p.name != "SHA256SUMS"):
-        lines.append("{}  {}".format(hashlib.sha256(path.read_bytes()).hexdigest(), path.relative_to(directory).as_posix()))
+        lines.append(
+            "{}  {}".format(hashlib.sha256(path.read_bytes()).hexdigest(), path.relative_to(directory).as_posix())
+        )
     (directory / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -37,13 +40,16 @@ def main() -> None:
     if not args.server.is_file():
         parser.error("server binary does not exist: {}".format(args.server))
 
-    subprocess.run(["pyoxidizer", "build", "--path", str(ROOT), *(["--verbose"] if args.verbose else [])], cwd=ROOT, check=True)
+    subprocess.run(
+        ["pyoxidizer", "build", "--path", str(ROOT), *(["--verbose"] if args.verbose else [])], cwd=ROOT, check=True
+    )
     if OUTPUT.exists():
         shutil.rmtree(OUTPUT)
     OUTPUT.mkdir(parents=True)
     binary = _find_binary()
     shutil.copy2(binary, OUTPUT / binary.name)
     shutil.copy2(args.server, OUTPUT / args.server.name)
+    shutil.copy2(README, OUTPUT / "README.md")
     runtime = binary.parent / "lib"
     if runtime.is_dir():
         shutil.copytree(runtime, OUTPUT / "lib", dirs_exist_ok=True)

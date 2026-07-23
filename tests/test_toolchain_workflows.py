@@ -16,6 +16,8 @@ CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
 PLUGIN_MODULE = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpUnrealModule.cpp"
 PLUGIN_RULES = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs"
 STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
+STANDALONE_BUILDER = ROOT / "tools" / "build_binary.py"
+STANDALONE_README = ROOT / "packaging" / "standalone-README.md"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -80,6 +82,8 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
 
     assert [entry["ue_version"] for entry in matrix] == ["5.7", "5.8", "4.18"]
     assert matrix[1]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
+    assert matrix[2]["package_mode"] == "native"
+    assert matrix[2]["artifact_suffix"] == "win64"
     assert all("vctoolchain_version" not in entry for entry in matrix)
 
 
@@ -94,8 +98,15 @@ def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
     assert "PythonScriptPlugin is active; skipping the standalone sidecar" in module
     for action in ("list_actors", "spawn_actor", "delete_actor", "get_actor_transform", "set_actor_transform"):
         assert f"unreal_actors__{action}" in module
-    assert "unreal_level__get_level_info" in module
-    assert all(dependency in rules for dependency in ('"Json"', '"Networking"', '"Sockets"', '"UnrealEd"'))
+    for action in ("get_level_info", "save_level"):
+        assert f"unreal_level__{action}" in module
+    for action in ("list_assets", "create_blueprint"):
+        assert f"unreal_assets__{action}" in module
+    for action in ("create_blueprint_class", "add_component_to_blueprint", "compile_blueprint"):
+        assert f"unreal_blueprints__{action}" in module
+    assert all(
+        dependency in rules for dependency in ('"AssetRegistry"', '"Json"', '"Networking"', '"Sockets"', '"UnrealEd"')
+    )
 
 
 def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
@@ -201,6 +212,16 @@ def test_release_builds_pythonless_standalone_sidecars() -> None:
         str(step.get("run", "")) for step in standalone["steps"]
     )
     assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
+
+
+def test_standalone_archive_contains_installation_readme() -> None:
+    builder = STANDALONE_BUILDER.read_text(encoding="utf-8")
+    readme = STANDALONE_README.read_text(encoding="utf-8")
+
+    assert 'shutil.copy2(README, OUTPUT / "README.md")' in builder
+    assert "system\nPython installation is not required" in readme
+    assert "DCC_MCP_SERVER_EXECUTABLE" in readme
+    assert "SHA256SUMS" in readme
 
 
 def test_ci_supports_python_39_and_newer() -> None:

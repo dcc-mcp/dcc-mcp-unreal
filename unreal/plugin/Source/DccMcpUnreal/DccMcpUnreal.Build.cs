@@ -12,6 +12,7 @@ public class DccMcpUnreal : ModuleRules
                 "Core",
                 "CoreUObject",
                 "Engine",
+                "AssetRegistry",
                 "Json",
                 "Networking",
                 "Projects",
