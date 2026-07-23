@@ -37,6 +37,8 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
             ue_version,
             "-EnvironmentFile",
             str(environment_file),
+            "-RunnerTemp",
+            str(tmp_path),
         ],
         check=True,
         text=True,
@@ -75,6 +77,13 @@ def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
     assert '".github/scripts/configure-ubt-toolchain.ps1"' in text
     assert '"$env:APPDATA\\Unreal Engine\\UnrealBuildTool"' not in text
     assert "Force MSVC 14.36 toolchain via BuildConfiguration.xml" not in text
+
+
+def test_toolchain_script_isolates_ue418_from_shared_user_configuration(tmp_path: Path) -> None:
+    environment = _configure_toolchain("4.18", tmp_path)
+
+    assert environment == "APPDATA={}\n".format(tmp_path / "ue418-appdata")
+    assert (tmp_path / "ue418-appdata").is_dir()
 
 
 def test_build_workflow_targets_available_unreal_versions() -> None:
