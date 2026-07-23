@@ -15,6 +15,7 @@ This script creates a package suitable for users to drop into a project's
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -85,6 +86,37 @@ def resolve_uat(ue_root: Path) -> Path:
     raise FileNotFoundError("RunUAT not found under {}".format(ue_root))
 
 
+@contextlib.contextmanager
+def temporarily_clear_ue4_user_config(work_dir: Path):
+    """Hide cross-version UBT settings while an old engine is running."""
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        yield
+        return
+
+    config_path = Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    if not config_path.is_file():
+        yield
+        return
+
+    backup_path = work_dir / "ue4-user-BuildConfiguration.xml.backup"
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(config_path), str(backup_path))
+    config_path.write_text(
+        '<?xml version="1.0" encoding="utf-8" ?>\n'
+        '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">\n'
+        "</Configuration>\n",
+        encoding="utf-8",
+    )
+    print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
+    try:
+        yield
+    finally:
+        shutil.copy2(str(backup_path), str(config_path))
+        backup_path.unlink()
+        print("[build-uplugin] Restored UBT config: {}".format(config_path))
+
+
 def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
     core_wheel = args.core_wheel
     if not core_wheel and args.core_wheel_url:
@@ -114,7 +146,11 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
         cmd += ["--use-local-core", "--core-root", str(args.core_root)]
     else:
         cmd += ["--core-spec", str(args.core_spec)]
-    run(cmd)
+    if is_ue4:
+        with temporarily_clear_ue4_user_config(uat_dir.parent):
+            run(cmd)
+    else:
+        run(cmd)
 
 
 def _msvc_toolchain_roots() -> List[Path]:
