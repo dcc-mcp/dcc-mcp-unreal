@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.2](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.1...v0.2.2) (2026-07-23)
+
+
+### Bug Fixes
+
+* isolate UE4 automation logs ([#85](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/85)) ([607bd58](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/607bd58a1c5f42f48723766c7eb0d52b6f274141))
+* package UE4 with build Python ([#82](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/82)) ([b97c2eb](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b97c2ebf4356bc6f7a13142c9857ae9dac252efc))
+* restore Unreal release packaging ([#80](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/80)) ([108be63](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/108be63103444e94e4ce6bfede192cee2bdf7c30))
+* reuse UE4 automation tool binaries ([#83](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/83)) ([0416fb9](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0416fb9e71f9b63ac4dcdd3e028ae27825151d20))
+* select compatible core release assets ([#84](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/84)) ([b8393b6](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b8393b63a430c0bc04a5ce94f6b223dcf8bcb4ad))
+
 ## [0.2.1](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.0...v0.2.1) (2026-07-23)
 
 
