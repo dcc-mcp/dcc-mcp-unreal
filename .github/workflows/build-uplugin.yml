@@ -54,8 +54,8 @@ jobs:
             artifact_suffix: win64
           - ue_version: "4.18"
             ue_root: C:\Program Files\Epic Games\UE_4.18
-            package_mode: python-only
-            artifact_suffix: python-only
+            package_mode: native
+            artifact_suffix: win64
     env:
       UE_VERSION: ${{ matrix.ue_version }}
       UE_ROOT: ${{ matrix.ue_root }}
