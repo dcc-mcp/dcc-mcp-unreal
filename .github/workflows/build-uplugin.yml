@@ -154,6 +154,7 @@ jobs:
         run: |
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
+            --python "$env:PYTHON_HOME\python.exe" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
             --core-wheel "${{ steps.core.outputs.wheel }}"
 

@@ -173,6 +173,7 @@ def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
     assert '& "$env:PYTHON_HOME\\python.exe" -m pip install -e ".[dev]"' in run_text
     assert '& "$env:PYTHON_HOME\\python.exe" -m pytest' in run_text
     assert '& "$env:PYTHON_HOME\\python.exe" packaging/build_distributable.py' in run_text
+    assert '--python "$env:PYTHON_HOME\\python.exe"' in run_text
 
     build_text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_call:" in build_text
