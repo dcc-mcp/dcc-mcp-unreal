@@ -22,6 +22,15 @@ def _load_build_package_module():
     return module
 
 
+def _load_build_distributable_module():
+    script = Path(__file__).parents[1] / "packaging" / "build_distributable.py"
+    spec = importlib.util.spec_from_file_location("_test_build_distributable", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _make_engine(tmp_path: Path) -> Path:
     engine = tmp_path / "UE_5.8"
     (engine / "Engine" / "Build" / "BatchFiles").mkdir(parents=True)
@@ -62,6 +71,26 @@ def test_build_plugin_package_reuses_repository_build_script(tmp_path, monkeypat
     assert observed["command"][1] == str(script.resolve())
     assert "--mode" in observed["command"]
     assert result["context"]["archive_path"].endswith("ue5.8-win64.zip")
+
+
+def test_ue4_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    appdata = tmp_path / "appdata"
+    config = appdata / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    config.parent.mkdir(parents=True)
+    original = b"<Configuration><WindowsPlatform><CompilerVersion>14.36</CompilerVersion></WindowsPlatform></Configuration>"
+    config.write_bytes(original)
+    monkeypatch.setenv("APPDATA", str(appdata))
+
+    try:
+        with module.temporarily_clear_ue4_user_config(tmp_path / "work"):
+            assert b"CompilerVersion" not in config.read_bytes()
+            raise RuntimeError("simulated UAT failure")
+    except RuntimeError:
+        pass
+
+    assert config.read_bytes() == original
+    assert not (tmp_path / "work" / "ue4-user-BuildConfiguration.xml.backup").exists()
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):

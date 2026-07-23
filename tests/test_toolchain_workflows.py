@@ -37,8 +37,6 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
             ue_version,
             "-EnvironmentFile",
             str(environment_file),
-            "-RunnerTemp",
-            str(tmp_path),
         ],
         check=True,
         text=True,
@@ -77,13 +75,6 @@ def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
     assert '".github/scripts/configure-ubt-toolchain.ps1"' in text
     assert '"$env:APPDATA\\Unreal Engine\\UnrealBuildTool"' not in text
     assert "Force MSVC 14.36 toolchain via BuildConfiguration.xml" not in text
-
-
-def test_toolchain_script_isolates_ue418_from_shared_user_configuration(tmp_path: Path) -> None:
-    environment = _configure_toolchain("4.18", tmp_path)
-
-    assert environment == "APPDATA={}\n".format(tmp_path / "ue418-appdata")
-    assert (tmp_path / "ue418-appdata").is_dir()
 
 
 def test_build_workflow_targets_available_unreal_versions() -> None:
@@ -133,6 +124,7 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
     assert 'read_engine_tag(args.ue_root).startswith("ue4.")' in builder
     assert 'cmd.append("-nocompile")' in builder
     assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
+    assert "with temporarily_clear_ue4_user_config(uat_dir.parent):" in builder
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
