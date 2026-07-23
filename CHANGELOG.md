@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.2.1](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.0...v0.2.1) (2026-07-23)
+
+
+### Features
+
+* add game distribution profiles ([5e342f4](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5e342f44f4dd3cd191e32fd65680a13dc81024f6))
+* add pythonless standalone installer ([41a4bea](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/41a4beaf292db67a74fa053171fe3d005c3d1bfe))
+* add Unreal build and package automation ([95877f6](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/95877f6200010e4e9a7f1ce7941e871cdc77dab5))
+* add Unreal Fab asset workflow ([32561c9](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/32561c95235ea0a3ec39a4a6e2f7eaa9532712cc))
+* add unreal-blueprints skill with auto-main injection ([f82211b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f82211b30f28f2d912248ad1772d3843854a8b06))
+* add unreal-blueprints skill with auto-main injection ([602038a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/602038a25e1ee4debedcd3aa6e4b0d716bd62bb9))
+* add unreal-blueprints skill with auto-main injection ([#76](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/76)) ([f82211b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f82211b30f28f2d912248ad1772d3843854a8b06))
+* automate authenticated Fab sessions ([#68](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/68)) ([bcee28d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/bcee28d3b395ebdadabaae2812eb57350a893181))
+* bridge Unreal official MCP capabilities ([6823bf8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6823bf8ad3c5f174e304f951e8aedd61ce1a9646))
+* control Unreal material base color ([b2704ad](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b2704adfb560c89906171432a070d74fb8c73c5e))
+* create Unreal PBR texture materials ([2780941](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/27809412a435f201658ece2cc3828c074dec334f))
+* extend native Unreal sidecar support ([7d8a0b0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7d8a0b0b4a19e755b777235dc0c86c059ac3220e))
+* gate Fab assets by visual direction ([68a3201](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/68a3201c3f9dc43ed46934a78141b3a5bd452cb6))
+* improve Unreal asset authoring ([49f6df1](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/49f6df1f5c8c76799c33644ef05a51fad8369709))
+* prepare Unreal 5.8 official MCP and CI ([d0e4225](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d0e422537a226c296119249f81d9e3a656a3ba0e))
+* support skeletal FBX asset workflows ([88ac42e](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/88ac42e07b90d3b2afb754be300981c28f6b74c1))
+* UE 4.18 native bridge with cross-version C++ compatibility ([6b7b43b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6b7b43b0da560e7cf4260d85ae0af2c77940861d))
+
+
+### Bug Fixes
+
+* **ci:** reuse verified Unreal plugin builds for releases ([#63](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/63)) ([be9ed25](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/be9ed25ee58ce6a6d3b781f37e59e46f212347bd))
+* keep runtime release version in sync ([979e9d0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/979e9d03b8db25e0521daaf23e6661f3c5a4bb90))
+* make app-ui test platform-aware ([5e5228f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5e5228f58ef315248c4db699de14dff83ad481b5))
+* require Python 3.10 or newer ([1f6057c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1f6057cb0407c3ac92a5f18586ce6ce23f1596ab))
+* resolve ruff lint errors (F821, F841, F541, I001) ([5b52b6c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5b52b6c86a6445a41ef32575e07401d72f131e99))
+* resolve ruff lint errors in test_skill_runner.py (I001, F401) ([cfce43d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/cfce43d3129b0971e3868f3f955a039a458765ee))
+* ruff format compliance for blueprint and automotive-rain-film scripts ([38614f0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/38614f09e8c3a83f0ad838404ecba6452a53b230))
+* select Unreal runtime without conflicts ([a84252b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a84252b0a6ab4a23aa098d5feed3eb82101c6b71))
+* select valid compiler for Unreal 5.8 ([43566af](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/43566af6b5b29312463722ae650654826068d2ec))
+* stabilize Unreal editor integration ([7068c46](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7068c46fd2a77cdf6a9f33b636a3176df4ebed8c))
+* support Unreal 5.8 asset data paths ([807c133](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/807c1331d0d941b6c014b05ebed43c84f45b0e29))
+
+
+### Code Refactoring
+
+* auto-discover [@skill](https://github.com/skill)_entry scripts, remove boilerplate from 27 tools ([2c8d1e5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2c8d1e5a60b59086c12aaf789204ecaa41c8cf3a))
+
+
+### Documentation
+
+* align agent workflow and branding ([4844da8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4844da84c4e24402a64f6a96c6906f5706850b3f))
+* document CLI install and updates ([099cd54](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/099cd54a19cdda7547d4de44823098f57faecd72))
+
 ## [0.2.0](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.1.0...v0.2.0) (2026-06-07)
 
 
