@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 
@@ -93,6 +94,13 @@ def test_ue4_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
 
     assert config.read_bytes() == original
     assert not (tmp_path / "work" / "ue4-user-BuildConfiguration.xml.backup").exists()
+
+
+def test_ue4_config_guard_wraps_only_the_uat_subprocess():
+    module = _load_build_distributable_module()
+
+    assert "temporarily_clear_ue4_user_config" in inspect.getsource(module.build_precompiled_plugin)
+    assert "temporarily_clear_ue4_user_config" not in inspect.getsource(module.build_python_payload)
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):
