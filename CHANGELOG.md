@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.4...v0.2.5) (2026-07-23)
+
+
+### Bug Fixes
+
+* guard only UE4 automation config ([#90](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/90)) ([2824ba5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2824ba5b6280fa2c12ffb110e34d9047736b635b))
+
 ## [0.2.4](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.3...v0.2.4) (2026-07-23)
 
 
