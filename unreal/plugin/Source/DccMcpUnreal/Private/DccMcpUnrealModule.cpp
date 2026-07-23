@@ -1,5 +1,10 @@
 #include "Editor.h"
+#include "Runtime/Launch/Resources/Version.h"
+#if ENGINE_MAJOR_VERSION >= 5
+#include "AssetRegistry/AssetRegistryModule.h"
+#else
 #include "AssetRegistryModule.h"
+#endif
 #include "Components/ActorComponent.h"
 #include "Engine/Blueprint.h"
 #include "Engine/SCS_Node.h"
@@ -12,7 +17,6 @@
 #include "Json.h"
 #include "Modules/ModuleManager.h"
 #include "Misc/PackageName.h"
-#include "Runtime/Launch/Resources/Version.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "ScopedTransaction.h"
@@ -56,7 +60,11 @@ public:
 				Listener->SetNonBlocking(true);
 				Listener->Listen(1);
 				StartSidecar(Port);
+#if ENGINE_MAJOR_VERSION >= 5
+				TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FDccMcpUnrealModule::Tick));
+#else
 				TickHandle = FTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FDccMcpUnrealModule::Tick));
+#endif
 				UE_LOG(LogDccMcpUnreal, Display, TEXT("UE native bridge listening on qtserver://127.0.0.1:%d"), Port);
 				return;
 			}
@@ -66,7 +74,14 @@ public:
 
 	virtual void ShutdownModule() override
 	{
-		if (TickHandle.IsValid()) FTicker::GetCoreTicker().RemoveTicker(TickHandle);
+		if (TickHandle.IsValid())
+		{
+#if ENGINE_MAJOR_VERSION >= 5
+			FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
+#else
+			FTicker::GetCoreTicker().RemoveTicker(TickHandle);
+#endif
+		}
 		CloseSocket(Client);
 		CloseSocket(Listener);
 		if (Sidecar.IsValid()) FPlatformProcess::TerminateProc(Sidecar, true);
@@ -471,7 +486,11 @@ private:
 	FSocket* Client = nullptr;
 	TArray<uint8> ReceiveBuffer;
 	FProcHandle Sidecar;
+#if ENGINE_MAJOR_VERSION >= 5
+	FTSTicker::FDelegateHandle TickHandle;
+#else
 	FDelegateHandle TickHandle;
+#endif
 	int32 Port = 0;
 };
 

@@ -137,9 +137,11 @@ def test_release_please_runs_on_main_without_publishing_ordinary_pushes() -> Non
 
     assert "branches: [main]" in text
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in jobs["release-please"]["if"]
-    for job_name in ("build", "build-unreal-plugin", "standalone", "publish", "attach-release-assets"):
+    for job_name in ("build", "build-unreal-plugin", "standalone", "attach-release-assets"):
         assert tag_push in jobs[job_name]["if"]
         assert "github.event_name == 'push' ||" not in jobs[job_name]["if"]
+    assert tag_push not in jobs["publish"]["if"]
+    assert "needs.release-please.outputs.release_created == 'true'" in jobs["publish"]["if"]
 
 
 def test_release_please_can_update_the_runtime_version_module() -> None:
@@ -177,7 +179,7 @@ def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
     assert "CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}" in build_text
 
 
-def test_manual_tag_recovery_publishes_and_attaches_to_requested_release() -> None:
+def test_manual_tag_recovery_rebuilds_assets_without_republishing_pypi() -> None:
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
     manual_tag = "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != ''"
@@ -186,8 +188,9 @@ def test_manual_tag_recovery_publishes_and_attaches_to_requested_release() -> No
         "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == ''"
         in (jobs["release-please"]["if"])
     )
-    assert manual_tag in jobs["publish"]["if"]
+    assert manual_tag not in jobs["publish"]["if"]
     assert manual_tag in jobs["attach-release-assets"]["if"]
+    assert "needs.publish.result == 'skipped'" in jobs["attach-release-assets"]["if"]
 
     attach_step = next(
         step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Attach wheels to GitHub Release"
