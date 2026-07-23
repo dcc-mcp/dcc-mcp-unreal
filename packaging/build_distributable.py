@@ -146,11 +146,7 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
         cmd += ["--use-local-core", "--core-root", str(args.core_root)]
     else:
         cmd += ["--core-spec", str(args.core_spec)]
-    if is_ue4:
-        with temporarily_clear_ue4_user_config(uat_dir.parent):
-            run(cmd)
-    else:
-        run(cmd)
+    run(cmd)
 
 
 def _msvc_toolchain_roots() -> List[Path]:
@@ -252,7 +248,11 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
             os.environ["_CL_"] = "/wd4668"
     else:
         os.environ["_CL_"] = "/wd4668"
-    run(cmd)
+    if is_ue4:
+        with temporarily_clear_ue4_user_config(uat_dir.parent):
+            run(cmd)
+    else:
+        run(cmd)
 
 
 def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> None:
