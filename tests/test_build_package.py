@@ -78,7 +78,9 @@ def test_ue4_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
     appdata = tmp_path / "appdata"
     config = appdata / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
     config.parent.mkdir(parents=True)
-    original = b"<Configuration><WindowsPlatform><CompilerVersion>14.36</CompilerVersion></WindowsPlatform></Configuration>"
+    original = (
+        b"<Configuration><WindowsPlatform><CompilerVersion>14.36</CompilerVersion></WindowsPlatform></Configuration>"
+    )
     config.write_bytes(original)
     monkeypatch.setenv("APPDATA", str(appdata))
 
