@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.2...v0.2.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* isolate UE4 build configuration ([#86](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/86)) ([2777fa3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2777fa3f92a4c2d70dafd2e500c7583c6d7fe5aa))
+
 ## [0.2.2](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.1...v0.2.2) (2026-07-23)
 
 
