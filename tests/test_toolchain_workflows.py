@@ -18,6 +18,7 @@ PLUGIN_RULES = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpU
 STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
 STANDALONE_BUILDER = ROOT / "tools" / "build_binary.py"
 STANDALONE_README = ROOT / "packaging" / "standalone-README.md"
+BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -115,6 +116,13 @@ def test_latest_core_fallback_uses_the_newest_available_pypi_wheel() -> None:
     assert '$requirement = "dcc-mcp-core-semantic==$pipVersion"' in text
     assert "pip download $requirement" in text
     assert "$latestTag = gh release view" not in text
+
+
+def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> None:
+    builder = BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
+
+    assert 'read_engine_tag(args.ue_root).startswith("ue4.")' in builder
+    assert 'cmd.append("-nocompile")' in builder
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
