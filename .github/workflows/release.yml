@@ -143,8 +143,22 @@ jobs:
         shell: bash
         run: |
           args=(--repo dcc-mcp/dcc-mcp-core --pattern '${{ matrix.core_asset }}' --dir core-bin)
-          if [ "$CORE_VERSION" != latest ]; then args=("$CORE_VERSION" "${args[@]}"); fi
-          gh release download "${args[@]}"
+          if [ "$CORE_VERSION" = latest ]; then
+            found=false
+            while read -r tag; do
+              if gh release download "$tag" "${args[@]}" 2>/dev/null; then
+                found=true
+                echo "Using dcc-mcp-core $tag"
+                break
+              fi
+            done < <(gh release list --repo dcc-mcp/dcc-mcp-core --limit 20 --json tagName --jq '.[].tagName')
+            if [ "$found" != true ]; then
+              echo "::error::No recent dcc-mcp-core release contains ${{ matrix.core_asset }}"
+              exit 1
+            fi
+          else
+            gh release download "$CORE_VERSION" "${args[@]}"
+          fi
           mv 'core-bin/${{ matrix.core_asset }}' 'core-bin/${{ matrix.server_name }}'
           chmod +x 'core-bin/${{ matrix.server_name }}' || true
       - name: Build standalone sidecar
