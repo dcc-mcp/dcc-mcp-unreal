@@ -223,6 +223,9 @@ def test_release_builds_pythonless_standalone_sidecars() -> None:
     assert "python tools/build_binary.py --server" in "\n".join(
         str(step.get("run", "")) for step in standalone["steps"]
     )
+    download = next(step for step in standalone["steps"] if step.get("name") == "Download native core sidecar")
+    assert "gh release list --repo dcc-mcp/dcc-mcp-core" in download["run"]
+    assert "No recent dcc-mcp-core release contains" in download["run"]
     assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
 
 
