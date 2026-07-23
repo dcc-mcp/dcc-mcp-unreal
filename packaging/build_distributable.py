@@ -159,8 +159,10 @@ def _check_msvc_toolchain(version: str) -> None:
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
     uat = resolve_uat(args.ue_root)
-    cmd = [
-        str(uat),
+    cmd = [str(uat)]
+    if read_engine_tag(args.ue_root).startswith("ue4."):
+        cmd.append("-nocompile")
+    cmd += [
         "BuildPlugin",
         "-Plugin={}".format(PLUGIN_SOURCE),
         "-Package={}".format(uat_dir),
@@ -219,7 +221,9 @@ def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> N
         python_dst = final_plugin_dir / "python"
         if python_dst.exists():
             shutil.rmtree(str(python_dst))
-        shutil.copytree(str(python_src), str(python_dst), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        shutil.copytree(
+            str(python_src), str(python_dst), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        )
 
     build_info = payload_dir / "BUILD_INFO.txt"
     if build_info.exists():
@@ -230,7 +234,9 @@ def zip_final(final_plugin_dir: Path, ue_root: Path, mode: str) -> Path:
     version = read_plugin_version(final_plugin_dir)
     suffix = "win64" if mode == "native" else mode
     archive_base = REPO_ROOT / "dist" / "DccMcpUnreal-{}-{}-{}".format(version, read_engine_tag(ue_root), suffix)
-    archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=str(final_plugin_dir.parent), base_dir="DccMcpUnreal"))
+    archive_path = Path(
+        shutil.make_archive(str(archive_base), "zip", root_dir=str(final_plugin_dir.parent), base_dir="DccMcpUnreal")
+    )
     return archive_path
 
 
@@ -265,13 +271,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ue-root", default=str(DEFAULT_UE_ROOT), type=Path, help="Unreal Engine root")
     parser.add_argument("--python", default=None, type=Path, help="Python executable for vendoring dependencies")
-    parser.add_argument("--core-wheel", default=DEFAULT_CORE_WHEEL, type=Path, help="Local dcc-mcp-core wheel to vendor")
+    parser.add_argument(
+        "--core-wheel", default=DEFAULT_CORE_WHEEL, type=Path, help="Local dcc-mcp-core wheel to vendor"
+    )
     parser.add_argument("--core-wheel-url", default=DEFAULT_CORE_WHEEL_URL, help="URL to a dcc-mcp-core wheel artifact")
     parser.add_argument("--core-spec", default=DEFAULT_CORE_SPEC, help="dcc-mcp-core spec when no wheel is provided")
     parser.add_argument("--core-root", default=str(REPO_ROOT.parent / "dcc-mcp-core"), type=Path)
-    parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
+    parser.add_argument(
+        "--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel"
+    )
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
-    parser.add_argument("--vctoolchain-version", default=os.environ.get("VCTOOLCHAIN_VERSION", ""), help="MSVC toolchain version passed to UBT via -VCToolchainVersion=")
+    parser.add_argument(
+        "--vctoolchain-version",
+        default=os.environ.get("VCTOOLCHAIN_VERSION", ""),
+        help="MSVC toolchain version passed to UBT via -VCToolchainVersion=",
+    )
     parser.add_argument(
         "--patched-headers-dir",
         default=os.environ.get("PATCHED_HEADERS_DIR", ""),
@@ -322,7 +336,9 @@ def main() -> None:
     else:
         remove_tree(final_plugin_dir)
         final_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(str(payload_dir), str(final_plugin_dir), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        shutil.copytree(
+            str(payload_dir), str(final_plugin_dir), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        )
     rewrite_distribution_build_info(final_plugin_dir, args.mode)
     verify(final_plugin_dir)
     archive = zip_final(final_plugin_dir, args.ue_root, args.mode)
