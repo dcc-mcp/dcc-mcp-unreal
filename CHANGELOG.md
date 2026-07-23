@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.3...v0.2.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* preserve shared UE build settings ([#88](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/88)) ([2316d8d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2316d8d6de42e63d7304a62d239ebd7a3fee5765))
+
 ## [0.2.3](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.2...v0.2.3) (2026-07-23)
 
 
