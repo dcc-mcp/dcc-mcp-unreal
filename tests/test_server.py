@@ -659,9 +659,12 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         }
     ]
     assert entries == [
+        ("DccMcpInstance", "DccMcp.CopyInstanceId"),
+        ("DccMcpInstance", "DccMcp.ServerInfo"),
         ("DccMcpServer", "DccMcp.ShowUrl"),
-        ("DccMcpServer", "DccMcp.Restart"),
-        ("DccMcpServer", "DccMcp.Stop"),
+        ("DccMcpControl", "DccMcp.Restart"),
+        ("DccMcpControl", "DccMcp.Stop"),
+        ("DccMcpAbout", "DccMcp.About"),
     ]
     assert unregistered == ["tick-handle"]
 
