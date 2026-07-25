@@ -730,7 +730,7 @@ def create_graph_node(
         node = node_cls()
         if not _add_node_to_graph(graph, node):
             return unreal_error(
-                f"Cannot add node to graph (engine does not expose graph editing API)",
+                "Cannot add node to graph (engine does not expose graph editing API)",
                 error=f"EdGraph.add_node unavailable for '{node_class}'",
                 error_code=ERROR_GRAPH_NOT_FOUND,
                 blueprint_name=bp.get_name(),

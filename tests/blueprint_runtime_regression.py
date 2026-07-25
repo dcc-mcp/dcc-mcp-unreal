@@ -14,7 +14,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # Ensure dcc-mcp-unreal is importable inside UE
 _script_dir = Path(__file__).resolve().parent
@@ -204,11 +204,9 @@ def run_regression() -> dict:
         record("get_blueprint_info", False, str(exc))
 
     # 1c. open_blueprint
-    bp_handle = None
     try:
         result = open_blueprint(asset_path)
         if result.get("success"):
-            bp_handle = result
             record("open_blueprint", True, f"graphs={result.get('graphs', [])}")
         else:
             record("open_blueprint", False, str(result)[:200])

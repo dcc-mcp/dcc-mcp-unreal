@@ -287,7 +287,7 @@ def test_ue_compat_helpers_tolerate_missing_unreal():
         # Each helper imports 'unreal' internally; outside UE that raises.
         # The helpers should handle this gracefully.
         try:
-            result = helper(blueprint=None)
+            helper(blueprint=None)
         except ImportError:
             # Expected outside Unreal Engine — the import guard failed.
             # Let's verify the import is inside the function.
