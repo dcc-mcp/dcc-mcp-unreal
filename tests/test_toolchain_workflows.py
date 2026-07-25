@@ -113,9 +113,9 @@ def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
 def test_build_workflow_vendors_the_base_core_wheel() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     assert '$requirement = "dcc-mcp-core"' in text
-    assert 'dcc-mcp-core==$($tag -replace' in text
-    assert 'dcc_mcp_core-*.whl' in text
-    assert 'dcc_mcp_core_semantic-' not in text
+    assert "dcc-mcp-core==$($tag -replace" in text
+    assert "dcc_mcp_core-*.whl" in text
+    assert "dcc_mcp_core_semantic-" not in text
 
 
 def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> None:
