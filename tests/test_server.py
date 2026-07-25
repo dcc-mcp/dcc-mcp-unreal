@@ -634,18 +634,18 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         unregister_slate_post_tick_callback=lambda handle: unregistered.append(handle),
     )
     monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
-    monkeypatch.delenv("DCC_MCP_APP_UI_BACKEND", raising=False)
-    monkeypatch.delenv("DCC_MCP_APP_UI_UIA_PROCESS_ID", raising=False)
+    monkeypatch.delenv("DCC_MCP_UI_CONTROL_BACKEND", raising=False)
+    monkeypatch.delenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", raising=False)
 
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
     assert len(callbacks) == 1
     if sys.platform == "win32":
-        assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
-        assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+        assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+        assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
     else:
-        assert "DCC_MCP_APP_UI_BACKEND" not in os.environ
-        assert "DCC_MCP_APP_UI_UIA_PROCESS_ID" not in os.environ
+        assert "DCC_MCP_UI_CONTROL_BACKEND" not in os.environ
+        assert "DCC_MCP_UI_CONTROL_UIA_PROCESS_ID" not in os.environ
 
     callbacks[0](0.0)
 

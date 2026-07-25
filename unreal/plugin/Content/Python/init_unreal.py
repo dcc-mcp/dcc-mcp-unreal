@@ -27,7 +27,7 @@ Configuration (environment variables)
 ``DCC_MCP_UNREAL_RUNTIME``
     Runtime selection: ``auto`` (default), ``python``, or ``sidecar``.
 
-``DCC_MCP_APP_UI_BACKEND``
+``DCC_MCP_UI_CONTROL_BACKEND``
     UI automation backend.  Defaults to ``"windows-uia"`` on Windows while
     preserving an explicit user override.
 """
@@ -38,6 +38,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ logger = logging.getLogger(__name__)
 def _configure_app_ui() -> None:
     """Make the bundled app-ui skill target this Unreal Editor process."""
     if sys.platform == "win32":
-        os.environ.setdefault("DCC_MCP_APP_UI_BACKEND", "windows-uia")
-        os.environ.setdefault("DCC_MCP_APP_UI_UIA_PROCESS_ID", str(os.getpid()))
+        os.environ.setdefault("DCC_MCP_UI_CONTROL_BACKEND", "windows-uia")
+        os.environ.setdefault("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", str(os.getpid()))
 
 
 _configure_app_ui()

@@ -20,5 +20,13 @@ public class DccMcpUnreal : ModuleRules
                 "UnrealEd",
             }
         );
+
+        // UE 4.18 has neither Chaos nor GeometryCollectionEngine.
+        var versionProperty = Target.GetType().GetProperty("Version");
+        if (versionProperty != null &&
+            (int)versionProperty.PropertyType.GetProperty("MajorVersion").GetValue(versionProperty.GetValue(Target, null), null) >= 5)
+        {
+            PrivateDependencyModuleNames.AddRange(new string[] { "GeometryCollectionEngine", "Chaos" });
+        }
     }
 }
