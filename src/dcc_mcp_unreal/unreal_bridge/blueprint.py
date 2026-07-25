@@ -104,6 +104,45 @@ ERROR_UNREAL_UNAVAILABLE = "UNREAL_UNAVAILABLE"
 _DEFAULT_BLUEPRINT_BASE_PATH = "/Game/Blueprints"
 
 
+def _get_graph_nodes(edgraph: Any) -> List[Any]:
+    """Get all nodes from an EdGraph across UE 5.3–5.8.
+
+    UE 5.5+ provides ``EdGraph.get_all_nodes()``.  UE 5.3 EdGraph
+    does **not** expose nodes through the Python API — the property is
+    C++-only and protected.  Returns an empty list on older engines
+    so callers can degrade gracefully.
+    """
+    if edgraph is None:
+        return []
+    if hasattr(edgraph, "get_all_nodes"):
+        try:
+            raw = edgraph.get_all_nodes()
+            return list(raw) if raw is not None else []
+        except Exception:
+            return []
+    # UE 5.3: Nodes property is protected; no Python-accessible node enumeration.
+    logger.debug("EdGraph.get_all_nodes unavailable — engine does not expose graph nodes to Python")
+    return []
+
+
+def _add_node_to_graph(edgraph: Any, node: Any) -> bool:
+    """Add a node instance to an EdGraph.  Returns True on success.
+
+    UE 5.5+ provides ``EdGraph.add_node()``.  UE 5.3 does not expose
+    this method to Python.
+    """
+    if edgraph is None:
+        return False
+    if hasattr(edgraph, "add_node"):
+        try:
+            edgraph.add_node(node)
+            return True
+        except Exception:
+            return False
+    logger.debug("EdGraph.add_node unavailable — node-level graph authoring requires UE 5.5+")
+    return False
+
+
 def _resolve_blueprint_path(asset_path: str) -> str:
     """Normalize an asset path; if it lacks a leading /, prefix /Game/Blueprints/."""
     if asset_path.startswith("/"):
@@ -233,7 +272,7 @@ def _pin_to_dict(pin: Any) -> Dict[str, Any]:
 
 def _find_node_by_guid(graph: Any, node_guid: str) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
     """Locate a node in a graph by its node GUID string."""
-    for node in graph.get_all_nodes():
+    for node in _get_graph_nodes(graph):
         if str(node.get_node_guid()) == node_guid:
             return node, None
     return None, unreal_error(
@@ -288,20 +327,37 @@ def _get_blueprint_graphs(blueprint: Any) -> Any:
     graphs: List[Any] = []
 
     def _is_edgraph(obj: Any) -> bool:
-        """Return True if *obj* looks like a UEdGraph (has get_all_nodes)."""
-        return obj is not None and hasattr(obj, "get_all_nodes")
+        """Return True if *obj* looks like a UEdGraph.
+
+        UE 5.5+ EdGraph has ``get_all_nodes``, but UE 5.3 does not.
+        Checking the class name is reliable across all UE versions.
+        """
+        if obj is None:
+            return False
+        try:
+            return obj.get_class().get_name() == "EdGraph"
+        except Exception:
+            return False
 
     def _collect(pages: Any) -> None:
-        """Collect unique EdGraph-capable items from an iterable or scalar."""
+        """Collect unique EdGraph items from an iterable or scalar.
+
+        EdGraph is checked **first** to avoid false-positive ``__iter__``
+        on UE 5.3 EdGraph objects that expose the attribute but don't
+        actually support iteration.
+        """
         if pages is None:
             return
+        # Single EdGraph — add directly, skip iteration
+        if _is_edgraph(pages):
+            if pages not in graphs:
+                graphs.append(pages)
+            return
+        # Iterable collection of potential graphs
         if hasattr(pages, "__iter__") and not isinstance(pages, str):
             for page in pages:
                 if _is_edgraph(page) and page not in graphs:
                     graphs.append(page)
-        elif _is_edgraph(pages):
-            if pages not in graphs:
-                graphs.append(pages)
 
     # 1. Try find_event_graph via BlueprintEditorLibrary (exists in some 5.3 builds)
     if lib is not None and hasattr(lib, "find_event_graph"):
@@ -325,15 +381,18 @@ def _get_blueprint_graphs(blueprint: Any) -> Any:
             pass
 
     # 4. Last resort: iterate Blueprint properties looking for graph arrays
-    #    (UE 5.3 may only expose graphs through reflection)
+    #    (UE 5.3 may only expose graphs through reflection; get_properties()
+    #     may not exist on older UE class objects, so guard it.)
     if not graphs:
         try:
             bp_class = blueprint.get_class()
-            for prop in bp_class.get_properties():
-                try:
-                    _collect(blueprint.get_editor_property(prop.get_name()))
-                except Exception:
-                    pass
+            props = getattr(bp_class, "get_properties", None)
+            if callable(props):
+                for prop in props():
+                    try:
+                        _collect(blueprint.get_editor_property(prop.get_name()))
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -499,7 +558,7 @@ def get_blueprint_graph(blueprint: Any = None, asset_path: str = "", graph_name:
         return err
 
     try:
-        all_nodes = graph.get_all_nodes()
+        all_nodes = _get_graph_nodes(graph)
         nodes_list = [_node_to_dict(n) for n in all_nodes]
 
         return unreal_success(
@@ -586,7 +645,7 @@ def get_blueprint_info(asset_path: str) -> Dict[str, Any]:
         total_nodes = 0
         graph_names = []
         for g in graphs:
-            total_nodes += len(g.get_all_nodes())
+            total_nodes += len(_get_graph_nodes(g))
             graph_names.append(g.get_name())
 
         is_data_only = getattr(bp, "b_is_data_only", False) if hasattr(bp, "b_is_data_only") else False
@@ -669,7 +728,17 @@ def create_graph_node(
 
     try:
         node = node_cls()
-        graph.add_node(node)
+        if not _add_node_to_graph(graph, node):
+            return unreal_error(
+                f"Cannot add node to graph (engine does not expose graph editing API)",
+                error=f"EdGraph.add_node unavailable for '{node_class}'",
+                error_code=ERROR_GRAPH_NOT_FOUND,
+                blueprint_name=bp.get_name(),
+                possible_solutions=[
+                    "Blueprint node-level authoring requires UE 5.5+ Python API.",
+                    "Use the Blueprint Editor UI for manual graph editing on UE 5.3.",
+                ],
+            )
 
         node.set_editor_property("node_pos_x", int(position[0]))
         node.set_editor_property("node_pos_y", int(position[1]))
@@ -800,7 +869,7 @@ def find_graph_nodes(
     event_name_filter = filters.get("event_name", "")
 
     for graph in target_graphs:
-        for node in graph.get_all_nodes():
+        for node in _get_graph_nodes(graph):
             node_dict = _node_to_dict(node)
 
             if node_class_filter and node_class_filter not in node_dict["node_class"].lower():
@@ -1453,7 +1522,7 @@ def auto_layout_nodes(
         return err
 
     try:
-        nodes = graph.get_all_nodes()
+        nodes = _get_graph_nodes(graph)
         node_count = len(nodes)
 
         if strategy == "straighten":
@@ -1752,12 +1821,12 @@ def refresh_blueprint_graph(blueprint: Any) -> Dict[str, Any]:
     try:
         _refresh_blueprint_nodes(bp)
         return unreal_success(
-            f"Refreshed Blueprint graph for '{blueprint.get_name()}'",
+            f"Refreshed Blueprint graph for '{bp.get_name()}'",
             refreshed=True,
             blueprint_name=bp.get_name(),
         )
     except Exception as exc:
-        return unreal_from_exception(exc, f"Failed to refresh graph for '{blueprint.get_name()}'")
+        return unreal_from_exception(exc, f"Failed to refresh graph for '{bp.get_name()}'")
 
 
 # ---------------------------------------------------------------------------
