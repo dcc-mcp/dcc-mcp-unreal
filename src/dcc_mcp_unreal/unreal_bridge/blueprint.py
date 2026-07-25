@@ -273,41 +273,71 @@ def _get_blueprint_graphs(blueprint: Any) -> Any:
     """Return all editable graphs for a Blueprint across UE 5.3–5.8.
 
     UE 5.5+ provides ``BlueprintEditorLibrary.get_blueprint_event_graphs()``.
-    UE 5.3 exposes ``find_event_graph(bp)`` and the ``UberGraphPages`` /
-    ``FunctionGraphs`` attributes directly on the Blueprint object.
+    UE 5.3 exposes graph arrays via ``UbergraphPages`` / ``FunctionGraphs`` on
+    the Blueprint object.  ``ImplementedInterfaces`` is deliberately excluded
+    because it contains ``FBPInterfaceDescription`` entries, not ``UEdGraph``.
     """
     import unreal  # noqa: PLC0415
 
-    lib = unreal.BlueprintEditorLibrary
-    if hasattr(lib, "get_blueprint_event_graphs"):
+    # --- UE 5.5+ path ---
+    lib = getattr(unreal, "BlueprintEditorLibrary", None)
+    if lib is not None and hasattr(lib, "get_blueprint_event_graphs"):
         return lib.get_blueprint_event_graphs(blueprint)
 
     # --- UE 5.3 fallback ---
     graphs: List[Any] = []
 
-    # Primary EventGraph
-    if hasattr(lib, "find_event_graph"):
+    def _is_edgraph(obj: Any) -> bool:
+        """Return True if *obj* looks like a UEdGraph (has get_all_nodes)."""
+        return obj is not None and hasattr(obj, "get_all_nodes")
+
+    def _collect(pages: Any) -> None:
+        """Collect unique EdGraph-capable items from an iterable or scalar."""
+        if pages is None:
+            return
+        if hasattr(pages, "__iter__") and not isinstance(pages, str):
+            for page in pages:
+                if _is_edgraph(page) and page not in graphs:
+                    graphs.append(page)
+        elif _is_edgraph(pages):
+            if pages not in graphs:
+                graphs.append(pages)
+
+    # 1. Try find_event_graph via BlueprintEditorLibrary (exists in some 5.3 builds)
+    if lib is not None and hasattr(lib, "find_event_graph"):
         try:
-            event_graph = lib.find_event_graph(blueprint)
-            if event_graph is not None:
-                graphs.append(event_graph)
+            _collect(lib.find_event_graph(blueprint))
         except Exception:
             pass
 
-    # UberGraphPages (inherited from UBlueprint)
-    for attr in ("UberGraphPages", "FunctionGraphs", "ImplementedInterfaces"):
+    # 2. get_editor_property is the most reliable accessor across UE versions
+    for prop_name in ("UbergraphPages", "UberGraphPages"):
         try:
-            pages = getattr(blueprint, attr, None)
-            if pages is not None:
-                for page in pages:
-                    if page is not None and page not in graphs:
-                        graphs.append(page)
+            _collect(blueprint.get_editor_property(prop_name))
+        except Exception:
+            pass
+
+    # 3. Direct attribute access for FunctionGraphs and other graph arrays
+    for attr_name in ("FunctionGraphs", "MacroGraphs", "DelegateSignatureGraphs"):
+        try:
+            _collect(getattr(blueprint, attr_name, None))
+        except Exception:
+            pass
+
+    # 4. Last resort: iterate Blueprint properties looking for graph arrays
+    #    (UE 5.3 may only expose graphs through reflection)
+    if not graphs:
+        try:
+            bp_class = blueprint.get_class()
+            for prop in bp_class.get_properties():
+                try:
+                    _collect(blueprint.get_editor_property(prop.get_name()))
+                except Exception:
+                    pass
         except Exception:
             pass
 
     return graphs
-
-
 def _refresh_blueprint_nodes(blueprint: Any) -> None:
     """Refresh the Blueprint editor after graph mutations across UE 5.3–5.8.
 
@@ -328,28 +358,49 @@ def _refresh_blueprint_nodes(blueprint: Any) -> None:
     logger.debug("BlueprintEditorLibrary refresh not available; skipping visual refresh")
 
 
-def _get_compilation_messages(blueprint: Any) -> Any:
+def _get_compilation_messages(blueprint: Any, compile_result: Any = None) -> Any:
     """Return compilation messages for a Blueprint across UE 5.3–5.8.
 
     UE 5.5+ provides ``BlueprintEditorLibrary.get_compilation_messages()``.
-    UE 5.3 returns structured messages embedded in the ``CompileResults``
-    object from ``KismetEditorUtilities.compile_blueprint()``.
+    UE 5.3 stores structured messages inside the ``CompileResults`` object
+    returned by ``KismetEditorUtilities.compile_blueprint()``.  Pass
+    *compile_result* to avoid an expensive recompilation.
+
+    Args:
+        blueprint: The loaded Blueprint object.
+        compile_result: The object returned by
+            ``KismetEditorUtilities.compile_blueprint()`` (UE 5.5+) or
+            ``True`` / ``False`` (UE 5.3).  When omitted the function
+            falls back to the message-log subsystem.
     """
     import unreal  # noqa: PLC0415
 
-    lib = unreal.BlueprintEditorLibrary
-    if hasattr(lib, "get_compilation_messages"):
+    # --- UE 5.5+ path ---
+    lib = getattr(unreal, "BlueprintEditorLibrary", None)
+    if lib is not None and hasattr(lib, "get_compilation_messages"):
         return lib.get_compilation_messages(blueprint)
 
-    # --- UE 5.3 fallback: extract from compile result ---
-    try:
-        # compile_blueprint returns a CompileResults object in UE 5.3
-        compile_result = unreal.KismetEditorUtilities.compile_blueprint(blueprint)
+    # --- Extract from pre-existing compile result (avoid recompilation) ---
+    if compile_result is not None:
+        # UE 5.5+ CompileResults object with .Messages
         if hasattr(compile_result, "Messages") and compile_result.Messages:
             return compile_result.Messages
-        # Some UE 5.3 builds expose Messages directly as list-like
+        # UE 5.5+ alternative: .get_messages()
         if hasattr(compile_result, "get_messages"):
-            return compile_result.get_messages()
+            try:
+                msgs = compile_result.get_messages()
+                if msgs:
+                    return msgs
+            except Exception:
+                pass
+        # UE 5.3: compile_result is a plain bool — no messages embedded;
+        # fall through to message-log path below.
+
+    # --- UE 5.3 fallback: message log subsystem ---
+    try:
+        # Some 5.3 builds expose log_blueprint_compile_messages
+        if lib is not None and hasattr(lib, "log_blueprint_compile_messages"):
+            lib.log_blueprint_compile_messages(blueprint)
     except Exception:
         pass
 
@@ -432,7 +483,11 @@ def get_blueprint_graph(blueprint: Any = None, asset_path: str = "", graph_name:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    if blueprint is None:
+    if isinstance(blueprint, str):
+        bp, err = _load_blueprint(blueprint)
+        if err:
+            return err
+    elif blueprint is None:
         bp, err = _load_blueprint(asset_path)
         if err:
             return err
@@ -588,7 +643,14 @@ def create_graph_node(
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graph, err = _resolve_graph(blueprint, graph_name)
+    if isinstance(blueprint, str):
+        bp, err = _load_blueprint(blueprint)
+        if err:
+            return err
+    else:
+        bp = blueprint
+
+    graph, err = _resolve_graph(bp, graph_name)
     if err:
         return err
 
@@ -620,7 +682,7 @@ def create_graph_node(
                 except Exception as prop_exc:
                     logger.debug("Could not set property '%s' on node: %s", key, prop_exc)
 
-        _refresh_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(bp)
         node_guid = str(node.get_node_guid())
 
         return unreal_success(
@@ -707,21 +769,28 @@ def find_graph_nodes(
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
+    if isinstance(blueprint, str):
+        bp, err = _load_blueprint(blueprint)
+        if err:
+            return err
+    else:
+        bp = blueprint
+
     filters = filters or {}
     target_graphs: List[Any]
 
     if graph_name is not None:
-        graph, err = _resolve_graph(blueprint, graph_name)
+        graph, err = _resolve_graph(bp, graph_name)
         if err:
             return err
         target_graphs = [graph]
     else:
-        target_graphs = _get_blueprint_graphs(blueprint)
+        target_graphs = _get_blueprint_graphs(bp)
         if not target_graphs:
             return unreal_error(
                 "No graphs found in Blueprint",
                 error_code=ERROR_GRAPH_NOT_FOUND,
-                blueprint_name=blueprint.get_name(),
+                blueprint_name=bp.get_name(),
             )
 
     matches: List[Dict[str, Any]] = []
@@ -1372,7 +1441,14 @@ def auto_layout_nodes(
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graph, err = _resolve_graph(blueprint, graph_name)
+    if isinstance(blueprint, str):
+        bp, err = _load_blueprint(blueprint)
+        if err:
+            return err
+    else:
+        bp = blueprint
+
+    graph, err = _resolve_graph(bp, graph_name)
     if err:
         return err
 
@@ -1422,7 +1498,7 @@ def auto_layout_nodes(
                 except Exception:
                     pass
 
-        _refresh_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(bp)
 
         return unreal_success(
             f"Auto-layout ({strategy}) applied to '{graph.get_name()}'",
@@ -1516,9 +1592,9 @@ def compile_blueprint(
         bp = blueprint
 
     try:
-        result = ue.KismetEditorUtilities.compile_blueprint(bp)
+        compile_result = ue.KismetEditorUtilities.compile_blueprint(bp)
 
-        if not result:
+        if not compile_result:
             return unreal_error(
                 f"Compilation failed for '{bp.get_name()}'",
                 error="KismetEditorUtilities.compile_blueprint returned False",
@@ -1532,8 +1608,10 @@ def compile_blueprint(
                 ],
             )
 
-        # Count errors/warnings from the message log
-        errors, warnings = _count_compile_issues(bp)
+        # Count errors/warnings from the message log;
+        # pass compile_result to avoid an expensive recompilation in the
+        # diagnostics helpers.
+        errors, warnings = _count_compile_issues(bp, compile_result)
 
         return unreal_success(
             f"Compiled '{bp.get_name()}' successfully",
@@ -1551,13 +1629,18 @@ def compile_blueprint(
                                      error_code=ERROR_COMPILE_FAILED)
 
 
-def _count_compile_issues(blueprint: Any) -> Tuple[int, int]:
-    """Count error and warning messages from the engine's message log for a Blueprint."""
+def _count_compile_issues(blueprint: Any, compile_result: Any = None) -> Tuple[int, int]:
+    """Count error and warning messages from the engine's message log for a Blueprint.
+
+    Args:
+        blueprint: The loaded Blueprint object.
+        compile_result: Optional pre-existing compile result to avoid recompilation.
+    """
     errors = 0
     warnings = 0
     try:
 
-        for msg in _get_compilation_messages(blueprint):
+        for msg in _get_compilation_messages(blueprint, compile_result):
             try:
                 msg_type = str(msg.message_type) if hasattr(msg, "message_type") else ""
             except Exception:
@@ -1659,12 +1742,19 @@ def refresh_blueprint_graph(blueprint: Any) -> Dict[str, Any]:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
+    if isinstance(blueprint, str):
+        bp, err = _load_blueprint(blueprint)
+        if err:
+            return err
+    else:
+        bp = blueprint
+
     try:
-        _refresh_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(bp)
         return unreal_success(
             f"Refreshed Blueprint graph for '{blueprint.get_name()}'",
             refreshed=True,
-            blueprint_name=blueprint.get_name(),
+            blueprint_name=bp.get_name(),
         )
     except Exception as exc:
         return unreal_from_exception(exc, f"Failed to refresh graph for '{blueprint.get_name()}'")
