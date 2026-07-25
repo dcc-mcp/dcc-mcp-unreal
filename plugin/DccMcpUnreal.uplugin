@@ -1,0 +1,32 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1.0",
+    "FriendlyName": "DCC MCP Unreal",
+    "Description": "Secure UObject reflection bridge for the DCC Model Context Protocol (MCP) ecosystem. Provides object discovery, restricted property read/write, and restricted UFunction invocation with fail-closed security.",
+    "Category": "Editor",
+    "CreatedBy": "dcc-mcp",
+    "CreatedByURL": "https://github.com/dcc-mcp/dcc-mcp-unreal",
+    "DocsURL": "https://github.com/dcc-mcp/dcc-mcp-unreal",
+    "MarketplaceURL": "",
+    "SupportURL": "https://github.com/dcc-mcp/dcc-mcp-unreal/issues",
+    "CanContainContent": false,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "DccMcpUnreal",
+            "Type": "Editor",
+            "LoadingPhase": "Default",
+            "PlatformAllowList": ["Win64", "Mac", "Linux"]
+        }
+    ],
+    "Plugins": [
+        {
+            "Name": "PythonScriptPlugin",
+            "Enabled": true,
+            "Optional": true
+        }
+    ]
+}

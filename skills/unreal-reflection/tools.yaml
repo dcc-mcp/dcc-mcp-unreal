@@ -1,0 +1,147 @@
+# dcc-mcp-unreal reflection tools
+# Each tool maps to a UObjectReflection method with fail-closed security.
+
+tools:
+  - name: unreal_discover_objects
+    description: >
+      Discover UObjects in the current Unreal Editor world. Returns a list of
+      ObjectDescriptors with class path, outer path, actor label, and tags.
+      Use this before describe_object to find what's in the level.
+    group: core
+    read_only: true
+    input_schema:
+      type: object
+      properties:
+        class_filter:
+          type: string
+          description: "Optional glob pattern to filter by class path (e.g. '/Script/Engine.StaticMeshActor')."
+        outer_filter:
+          type: string
+          description: "Optional glob pattern to filter by outer path."
+        max_results:
+          type: integer
+          description: "Maximum number of results (default 100)."
+          default: 100
+      required: []
+    source_file: unreal_discover_objects.py
+    call_examples:
+      - description: "List all actors in the current level"
+        arguments: {}
+      - description: "Find all static mesh actors"
+        arguments:
+          class_filter: "/Script/Engine.StaticMeshActor"
+          max_results: 50
+
+  - name: unreal_describe_object
+    description: >
+      Get detailed reflection info for a single UObject — class path, properties,
+      and callable UFunctions. Properties/functions denied by the security policy
+      are silently excluded from the result.
+    group: core
+    read_only: true
+    input_schema:
+      type: object
+      properties:
+        object_path:
+          type: string
+          description: "Full UObject path (e.g. '/Game/Maps/Level.Level:PersistentLevel.Sphere_0')."
+        include_properties:
+          type: boolean
+          description: "Whether to list all visible properties."
+          default: true
+        include_functions:
+          type: boolean
+          description: "Whether to list all callable UFunctions."
+          default: true
+      required: ["object_path"]
+    source_file: unreal_describe_object.py
+    call_examples:
+      - description: "Describe an actor and its properties"
+        arguments:
+          object_path: "/Game/Maps/MyLevel.MyLevel:PersistentLevel.Cube_0"
+          include_properties: true
+          include_functions: false
+
+  - name: unreal_get_property
+    description: >
+      Read a single property value from a UObject. Security policy applies:
+      private properties and denied class paths are rejected.
+    group: core
+    read_only: true
+    input_schema:
+      type: object
+      properties:
+        object_path:
+          type: string
+          description: "Full UObject path."
+        property_name:
+          type: string
+          description: "Name of the property to read."
+      required: ["object_path", "property_name"]
+    source_file: unreal_get_property.py
+    call_examples:
+      - description: "Read an actor's location"
+        arguments:
+          object_path: "/Game/Maps/Level.Level:PersistentLevel.MyActor"
+          property_name: "RelativeLocation"
+
+  - name: unreal_set_property
+    description: >
+      Write a property value on a UObject. REQUIRES DCC_MCP_UNREAL_ALLOW_WRITE=1.
+      Must execute on the editor main thread. Security policy applies.
+    group: core
+    read_only: false
+    destructive: true
+    input_schema:
+      type: object
+      properties:
+        object_path:
+          type: string
+          description: "Full UObject path."
+        property_name:
+          type: string
+          description: "Name of the property to write."
+        value:
+          description: "New value (JSON-serializable)."
+      required: ["object_path", "property_name", "value"]
+    source_file: unreal_set_property.py
+    call_examples:
+      - description: "Hide an actor"
+        arguments:
+          object_path: "/Game/Maps/Level.Level:PersistentLevel.MyActor"
+          property_name: "bHidden"
+          value: true
+
+  - name: unreal_call_function
+    description: >
+      Call a Blueprint-callable UFunction on a UObject. REQUIRES
+      DCC_MCP_UNREAL_ALLOW_EXECUTE=1. Must execute on the editor main thread.
+      Security policy applies (lifecycle, RPC, and internal functions are denied).
+    group: core
+    read_only: false
+    destructive: true
+    input_schema:
+      type: object
+      properties:
+        object_path:
+          type: string
+          description: "Full UObject path."
+        function_name:
+          type: string
+          description: "Name of the UFunction to call."
+        args:
+          type: object
+          description: "Optional keyword arguments for the function."
+          default: {}
+        timeout_ms:
+          type: integer
+          description: "Maximum wait time in milliseconds."
+          default: 10000
+      required: ["object_path", "function_name"]
+    source_file: unreal_call_function.py
+    call_examples:
+      - description: "Call a Blueprint function on an actor"
+        arguments:
+          object_path: "/Game/Maps/Level.Level:PersistentLevel.MyActor"
+          function_name: "DoSomething"
+          args: {}

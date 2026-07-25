@@ -44,3 +44,25 @@ def _remove_project_root_from_syspath() -> None:
 
 
 _remove_project_root_from_syspath()
+
+# ---------------------------------------------------------------------------
+# Shared fixtures for dcc-mcp-unreal security and reflection tests
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from dcc_mcp_unreal.security import ReflectionPolicy
+from dcc_mcp_unreal.security import default_full_policy
+from dcc_mcp_unreal.security import default_read_policy
+
+
+@pytest.fixture
+def read_policy() -> ReflectionPolicy:
+    """Safe read-only policy."""
+    return default_read_policy()
+
+
+@pytest.fixture
+def full_policy() -> ReflectionPolicy:
+    """Full access policy with write and execute enabled."""
+    return default_full_policy()

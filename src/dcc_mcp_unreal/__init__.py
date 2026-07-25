@@ -50,8 +50,25 @@ from dcc_mcp_unreal.api import (
     vector_to_list,
     with_unreal,
 )
+from dcc_mcp_unreal.bridge import DccMcpBridge, get_bridge
 from dcc_mcp_unreal.capabilities import UNREAL_CAPABILITIES_DICT, unreal_capabilities
 from dcc_mcp_unreal.compatibility import unreal_compatibility
+from dcc_mcp_unreal.host import UnrealHost
+from dcc_mcp_unreal.reflection import (
+    FunctionDescriptor,
+    FunctionResult,
+    ObjectDescriptor,
+    PropertyDescriptor,
+    PropertyValue,
+    UObjectReflection,
+)
+from dcc_mcp_unreal.security import (
+    OperationKind,
+    ReflectionPolicy,
+    SecurityDeniedError,
+    default_full_policy,
+    default_read_policy,
+)
 from dcc_mcp_unreal.server import UnrealMcpServer, start_server, stop_server
 
 __all__ = [
@@ -89,4 +106,22 @@ __all__ = [
     "unreal_capabilities",
     "UNREAL_CAPABILITIES_DICT",
     "unreal_compatibility",
+    # Host
+    "UnrealHost",
+    # Bridge
+    "DccMcpBridge",
+    "get_bridge",
+    # Reflection
+    "UObjectReflection",
+    "ObjectDescriptor",
+    "PropertyDescriptor",
+    "PropertyValue",
+    "FunctionDescriptor",
+    "FunctionResult",
+    # Security
+    "ReflectionPolicy",
+    "SecurityDeniedError",
+    "OperationKind",
+    "default_read_policy",
+    "default_full_policy",
 ]
