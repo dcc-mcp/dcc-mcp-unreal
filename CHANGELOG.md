@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.7](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.6...v0.2.7) (2026-07-25)
+
+
+### Features
+
+* add typed chaos destruction workflow ([bd08c7b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/bd08c7bbd69138d4949c53cc8a1d2d0127005ae8))
+* add typed Chaos destruction workflow ([8f9d747](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/8f9d7478ff288b9a2a267da0c7bb358c701252bd))
+
 ## [0.2.6](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.5...v0.2.6) (2026-07-25)
 
 
