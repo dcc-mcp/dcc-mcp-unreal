@@ -1,0 +1,33 @@
+tools:
+  - name: start_physics_simulation
+    description: Start Unreal's in-editor physics simulation for validating live Chaos behavior.
+    source_file: scripts/start_physics_simulation.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      properties: {}
+    next-tools:
+      on-success: [dcc_diagnostics__screenshot, unreal_runtime__stop_physics_simulation]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: stop_physics_simulation
+    description: Stop the active in-editor physics simulation without changing saved level content.
+    source_file: scripts/stop_physics_simulation.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties: {}
+    next-tools:
+      on-failure: [dcc_diagnostics__audit_log]

@@ -100,6 +100,10 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 - **Collision-free instances** — the OS assigns a free MCP instance port by default
 - **Built-in actor skill** — `unreal-actors` ships out of the box (list, spawn,
   delete, transform actors)
+- **Game-destruction path** — typed `unreal-chaos` converts imported Static
+  Meshes into clustered Geometry Collections and spawns them for Chaos physics
+- **Lookdev and runtime validation** — typed material-instance binding and
+  Simulation-in-Editor controls keep destruction tests reproducible
 
 ---
 
