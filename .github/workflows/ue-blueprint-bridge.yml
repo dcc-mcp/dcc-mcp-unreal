@@ -1,0 +1,161 @@
+name: UE Blueprint Bridge Matrix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/dcc_mcp_unreal/unreal_bridge/**"
+      - "tests/test_unreal_bridge_blueprint.py"
+      - "tests/test_blueprint_skills.py"
+      - "tests/blueprint_runtime_regression.py"
+      - "tools/test_blueprint_bridge_multi_ue.py"
+      - "tools/discover_ue_versions.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/dcc_mcp_unreal/unreal_bridge/**"
+      - "tests/test_unreal_bridge_blueprint.py"
+      - "tests/test_blueprint_skills.py"
+      - "tests/blueprint_runtime_regression.py"
+      - "tools/test_blueprint_bridge_multi_ue.py"
+      - "tools/discover_ue_versions.py"
+  workflow_dispatch:
+    inputs:
+      skip_runtime:
+        description: "Skip runtime (in-editor) tests"
+        type: boolean
+        default: false
+      ue_filter:
+        description: "Comma-separated UE versions to test (empty = all discovered)"
+        type: string
+        default: ""
+
+concurrency:
+  group: ue-bridge-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  # Job 0: Fast path — unit tests on GitHub-hosted runner (no UE needed)
+  unit-tests:
+    name: Unit Tests (No UE Required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run Blueprint Bridge unit tests
+        run: |
+          pytest tests/test_unreal_bridge_blueprint.py tests/test_blueprint_skills.py \
+            -v --tb=short --junitxml=junit-bridge.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-unit-results
+          path: junit-bridge.xml
+
+  # Job 1: Full matrix — runtime tests on self-hosted runner with UE
+  runtime-matrix:
+    name: Runtime Matrix (Self-Hosted)
+    runs-on: self-hosted
+    needs: unit-tests
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.skip_runtime != true) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover UE versions
+        id: discover
+        shell: bash
+        run: |
+          python tools/discover_ue_versions.py --json > ue_versions.json
+          cat ue_versions.json
+
+      - name: Run multi-UE test suite
+        id: test
+        shell: bash
+        run: |
+          python tools/test_blueprint_bridge_multi_ue.py --json 2>&1 | tee multi_ue_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
+
+      - name: Upload multi-UE report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-ue-report
+          path: |
+            tools/multi_ue_report.json
+            multi_ue_output.txt
+
+      - name: Upload per-UE runtime results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: per-ue-runtime-results
+          path: tests/blueprint_runtime_regression.result.json
+
+  # Job 2: Lint bridge code
+  lint-bridge:
+    name: Lint Bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check (bridge-specific)
+        run: |
+          ruff check src/dcc_mcp_unreal/unreal_bridge/ tests/test_unreal_bridge_blueprint.py tests/test_blueprint_skills.py
+
+      - name: Ruff format check
+        run: |
+          ruff format --check src/dcc_mcp_unreal/unreal_bridge/ tests/test_unreal_bridge_blueprint.py tests/test_blueprint_skills.py
+
+  # Job 3: Contract validation
+  contract-check:
+    name: Contract Validation (22/22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run contract validation
+        run: |
+          python -c "
+          from dcc_mcp_unreal.unreal_bridge.blueprint import _run_validation
+          result = _run_validation()
+          print(f'Contract: {result[\"contract\"]}')
+          print(f'Functions: {result[\"passed\"]}/{result[\"total\"]} passed')
+          if result.get('failures'):
+              for f in result['failures']:
+                  print(f'  FAIL: {f}')
+          if not result['success']:
+              exit(1)
+          "
