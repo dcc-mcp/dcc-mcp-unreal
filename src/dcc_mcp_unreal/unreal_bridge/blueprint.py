@@ -135,9 +135,8 @@ def _load_blueprint(asset_path: str) -> Tuple[Optional[Any], Optional[Dict[str, 
 
 def _get_blueprint_event_graph(blueprint: Any) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
     """Return the primary event graph of a Blueprint."""
-    import unreal  # noqa: PLC0415
 
-    event_graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    event_graphs = _get_blueprint_graphs(blueprint)
     if not event_graphs:
         return None, unreal_error(
             "No event graph found in Blueprint",
@@ -153,12 +152,11 @@ def _get_blueprint_event_graph(blueprint: Any) -> Tuple[Optional[Any], Optional[
 
 def _resolve_graph(blueprint: Any, graph_name: Optional[str]) -> Tuple[Any, Optional[Dict[str, Any]]]:
     """Resolve a named graph or the default event graph."""
-    import unreal  # noqa: PLC0415
 
     if graph_name is None:
         return _get_blueprint_event_graph(blueprint)
 
-    graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for g in graphs:
         if g.get_name() == graph_name:
             return g, None
@@ -266,6 +264,100 @@ def _find_pin_on_node(node: Any, pin_name: str) -> Tuple[Optional[Any], Optional
     )
 
 
+# ---------------------------------------------------------------------------
+# UE version compatibility helpers (UE 5.3 / 5.5 / 5.7 / 5.8 bridge)
+# ---------------------------------------------------------------------------
+
+
+def _get_blueprint_graphs(blueprint: Any) -> Any:
+    """Return all editable graphs for a Blueprint across UE 5.3–5.8.
+
+    UE 5.5+ provides ``BlueprintEditorLibrary.get_blueprint_event_graphs()``.
+    UE 5.3 exposes ``find_event_graph(bp)`` and the ``UberGraphPages`` /
+    ``FunctionGraphs`` attributes directly on the Blueprint object.
+    """
+    import unreal  # noqa: PLC0415
+
+    lib = unreal.BlueprintEditorLibrary
+    if hasattr(lib, "get_blueprint_event_graphs"):
+        return lib.get_blueprint_event_graphs(blueprint)
+
+    # --- UE 5.3 fallback ---
+    graphs: List[Any] = []
+
+    # Primary EventGraph
+    if hasattr(lib, "find_event_graph"):
+        try:
+            event_graph = lib.find_event_graph(blueprint)
+            if event_graph is not None:
+                graphs.append(event_graph)
+        except Exception:
+            pass
+
+    # UberGraphPages (inherited from UBlueprint)
+    for attr in ("UberGraphPages", "FunctionGraphs", "ImplementedInterfaces"):
+        try:
+            pages = getattr(blueprint, attr, None)
+            if pages is not None:
+                for page in pages:
+                    if page is not None and page not in graphs:
+                        graphs.append(page)
+        except Exception:
+            pass
+
+    return graphs
+
+
+def _refresh_blueprint_nodes(blueprint: Any) -> None:
+    """Refresh the Blueprint editor after graph mutations across UE 5.3–5.8.
+
+    UE 5.5+ provides ``refresh_open_blueprint_nodes()``.
+    UE 5.3: ``refresh_all_open_blueprint_editors()`` or no-op (the next
+    compilation implicitly refreshes).
+    """
+    import unreal  # noqa: PLC0415
+
+    lib = unreal.BlueprintEditorLibrary
+    if hasattr(lib, "refresh_open_blueprint_nodes"):
+        lib.refresh_open_blueprint_nodes(blueprint)
+        return
+    if hasattr(lib, "refresh_all_open_blueprint_editors"):
+        lib.refresh_all_open_blueprint_editors()
+        return
+    # UE 5.3: compile_blueprint() implicitly refreshes; no-op is acceptable.
+    logger.debug("BlueprintEditorLibrary refresh not available; skipping visual refresh")
+
+
+def _get_compilation_messages(blueprint: Any) -> Any:
+    """Return compilation messages for a Blueprint across UE 5.3–5.8.
+
+    UE 5.5+ provides ``BlueprintEditorLibrary.get_compilation_messages()``.
+    UE 5.3 returns structured messages embedded in the ``CompileResults``
+    object from ``KismetEditorUtilities.compile_blueprint()``.
+    """
+    import unreal  # noqa: PLC0415
+
+    lib = unreal.BlueprintEditorLibrary
+    if hasattr(lib, "get_compilation_messages"):
+        return lib.get_compilation_messages(blueprint)
+
+    # --- UE 5.3 fallback: extract from compile result ---
+    try:
+        # compile_blueprint returns a CompileResults object in UE 5.3
+        compile_result = unreal.KismetEditorUtilities.compile_blueprint(blueprint)
+        if hasattr(compile_result, "Messages") and compile_result.Messages:
+            return compile_result.Messages
+        # Some UE 5.3 builds expose Messages directly as list-like
+        if hasattr(compile_result, "get_messages"):
+            return compile_result.get_messages()
+    except Exception:
+        pass
+
+    # Final fallback: empty list (no diagnostics available)
+    logger.debug("Compilation messages not available for this engine version")
+    return []
+
+
 # ======================================================================
 # Graph Lifecycle (functions 1-4)
 # ======================================================================
@@ -284,7 +376,7 @@ def open_blueprint(asset_path: str) -> Dict[str, Any]:
         ``blueprint_class``, ``parent_class``, and ``graphs`` list.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -303,7 +395,7 @@ def open_blueprint(asset_path: str) -> Dict[str, Any]:
             if parent_class_obj:
                 parent_class = parent_class_obj.get_name()
 
-        graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(bp)
+        graphs = _get_blueprint_graphs(bp)
         graph_names = [g.get_name() for g in graphs]
 
         return unreal_success(
@@ -418,7 +510,7 @@ def get_blueprint_info(asset_path: str) -> Dict[str, Any]:
         ``is_data_only``, ``blueprint_type``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -435,7 +527,7 @@ def get_blueprint_info(asset_path: str) -> Dict[str, Any]:
         if hasattr(bp, "parent_class") and bp.parent_class:
             parent_class = bp.parent_class.get_name()
 
-        graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(bp)
+        graphs = _get_blueprint_graphs(bp)
         total_nodes = 0
         graph_names = []
         for g in graphs:
@@ -528,7 +620,7 @@ def create_graph_node(
                 except Exception as prop_exc:
                     logger.debug("Could not set property '%s' on node: %s", key, prop_exc)
 
-        ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(blueprint)
         node_guid = str(node.get_node_guid())
 
         return unreal_success(
@@ -554,12 +646,12 @@ def delete_graph_node(blueprint: Any, node_guid: str) -> Dict[str, Any]:
         Result envelope with ``deleted_node_guid``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     if not graphs:
         return unreal_error(
             "No graphs found in Blueprint",
@@ -572,7 +664,7 @@ def delete_graph_node(blueprint: Any, node_guid: str) -> Dict[str, Any]:
         if node is not None:
             try:
                 graph.remove_node(node)
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Deleted node: {node_guid}",
                     deleted_node_guid=node_guid,
@@ -610,7 +702,7 @@ def find_graph_nodes(
         Result envelope with ``nodes`` list and ``match_count``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -624,7 +716,7 @@ def find_graph_nodes(
             return err
         target_graphs = [graph]
     else:
-        target_graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+        target_graphs = _get_blueprint_graphs(blueprint)
         if not target_graphs:
             return unreal_error(
                 "No graphs found in Blueprint",
@@ -684,12 +776,12 @@ def get_node_properties(blueprint: Any, node_guid: str) -> Dict[str, Any]:
         comment, pins with linked_to info).
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -724,12 +816,12 @@ def set_node_properties(
         ``failed`` list of keys that could not be set.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -743,7 +835,7 @@ def set_node_properties(
                     failed.append(key)
 
             if updated:
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
 
             if not updated:
                 return unreal_error(
@@ -863,7 +955,7 @@ def add_pin_to_node(
             possible_solutions=["Provide pin_spec with at least 'pin_name'."],
         )
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -890,7 +982,7 @@ def add_pin_to_node(
                     except Exception:
                         pass
 
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
 
                 return unreal_success(
                     f"Added pin '{pin_name}' to node {node_guid}",
@@ -925,12 +1017,12 @@ def remove_pin_from_node(
         Result envelope with ``node_guid`` and ``removed_pin``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -940,7 +1032,7 @@ def remove_pin_from_node(
 
             try:
                 node.remove_pin(pin)
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Removed pin '{pin_name}' from node {node_guid}",
                     node_guid=node_guid,
@@ -968,7 +1060,7 @@ def connect_pins(blueprint: Any, source_pin: Dict[str, Any], target_pin: Dict[st
         Result envelope with ``source_pin`` and ``target_pin`` details.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -994,7 +1086,7 @@ def connect_pins(blueprint: Any, source_pin: Dict[str, Any], target_pin: Dict[st
     if not val_result.get("success"):
         return val_result
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     src_pin_obj: Optional[Any] = None
     tgt_pin_obj: Optional[Any] = None
 
@@ -1010,7 +1102,7 @@ def connect_pins(blueprint: Any, source_pin: Dict[str, Any], target_pin: Dict[st
             try:
                 # The make_link_to call is directional
                 src_pin_obj.make_link_to(tgt_pin_obj)
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Connected {src_pin_name} → {tgt_pin_name}",
                     source_pin={"node_guid": src_guid, "pin_name": src_pin_name},
@@ -1047,7 +1139,7 @@ def disconnect_pin(blueprint: Any, pin_ref: Dict[str, Any]) -> Dict[str, Any]:
         Result envelope with ``disconnected`` list of previously-linked pins.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -1061,7 +1153,7 @@ def disconnect_pin(blueprint: Any, pin_ref: Dict[str, Any]) -> Dict[str, Any]:
             error_code=ERROR_PIN_NOT_FOUND,
         )
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -1076,7 +1168,7 @@ def disconnect_pin(blueprint: Any, pin_ref: Dict[str, Any]) -> Dict[str, Any]:
                     for lp in (pin.linked_to or [])
                 ]
                 pin.break_all_pin_links()
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Disconnected pin '{pin_name}' from {len(previous_links)} link(s)",
                     node_guid=node_guid,
@@ -1105,12 +1197,12 @@ def get_pin_default_value(blueprint: Any, node_guid: str, pin_name: str) -> Dict
         Result envelope with ``default_value``, ``default_object``, ``pin_type``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -1154,12 +1246,12 @@ def set_pin_default_value(
         Result envelope with ``pin_name``, ``new_value``.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
@@ -1189,7 +1281,7 @@ def set_pin_default_value(
 
             try:
                 pin.default_value = str(value)
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Set default value for {pin_name}",
                     node_guid=node_guid,
@@ -1275,7 +1367,7 @@ def auto_layout_nodes(
         Result envelope with ``nodes_rearranged`` count.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -1330,7 +1422,7 @@ def auto_layout_nodes(
                 except Exception:
                     pass
 
-        ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(blueprint)
 
         return unreal_success(
             f"Auto-layout ({strategy}) applied to '{graph.get_name()}'",
@@ -1361,19 +1453,19 @@ def set_node_position(
         Result envelope with ``node_guid`` and ``new_position`` [x, y].
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
-    graphs = ue.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
+    graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
         node, _ = _find_node_by_guid(graph, node_guid)
         if node is not None:
             try:
                 node.set_editor_property("node_pos_x", int(x))
                 node.set_editor_property("node_pos_y", int(y))
-                ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+                _refresh_blueprint_nodes(blueprint)
                 return unreal_success(
                     f"Moved node {node_guid} to ({int(x)}, {int(y)})",
                     node_guid=node_guid,
@@ -1464,9 +1556,8 @@ def _count_compile_issues(blueprint: Any) -> Tuple[int, int]:
     errors = 0
     warnings = 0
     try:
-        import unreal  # noqa: PLC0415
 
-        for msg in unreal.BlueprintEditorLibrary.get_compilation_messages(blueprint):
+        for msg in _get_compilation_messages(blueprint):
             try:
                 msg_type = str(msg.message_type) if hasattr(msg, "message_type") else ""
             except Exception:
@@ -1497,7 +1588,7 @@ def get_blueprint_diagnostics(
         ``pin_name`` (if available).
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
@@ -1510,7 +1601,7 @@ def get_blueprint_diagnostics(
         bp = blueprint
 
     try:
-        messages = ue.BlueprintEditorLibrary.get_compilation_messages(bp)
+        messages = _get_compilation_messages(bp)
         diagnostics: List[Dict[str, Any]] = []
 
         for msg in messages:
@@ -1563,13 +1654,13 @@ def refresh_blueprint_graph(blueprint: Any) -> Dict[str, Any]:
         Result envelope with ``refreshed`` bool.
     """
     try:
-        ue = require_unreal()
+        require_unreal()
     except Exception as exc:
         return unreal_from_exception(exc, "Unreal Engine not available",
                                      error_code=ERROR_UNREAL_UNAVAILABLE)
 
     try:
-        ue.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint)
+        _refresh_blueprint_nodes(blueprint)
         return unreal_success(
             f"Refreshed Blueprint graph for '{blueprint.get_name()}'",
             refreshed=True,

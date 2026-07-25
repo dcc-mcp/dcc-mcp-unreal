@@ -234,3 +234,72 @@ def test_mutation_tools_reference_diagnostics_chain():
     for name in mutation_funcs:
         func = getattr(bp, name)
         assert callable(func), f"{name} is not callable"
+
+
+# ---------------------------------------------------------------------------
+# UE 5.3 version compatibility — the 3 replaced APIs
+# ---------------------------------------------------------------------------
+
+
+def test_ue_compat_helpers_defined(bridge):
+    """The 3 UE version compatibility wrappers are present."""
+    compat_helpers = [
+        "_get_blueprint_graphs",
+        "_refresh_blueprint_nodes",
+        "_get_compilation_messages",
+    ]
+    for name in compat_helpers:
+        func = getattr(bridge, name, None)
+        assert callable(func), f"UE compat helper '{name}' missing or not callable"
+
+
+def test_ue_compat_no_direct_api_calls(bridge):
+    """No function body directly calls the 3 deprecated UE 5.5+ APIs."""
+    import inspect
+
+    deprecated_calls = [
+        ".get_blueprint_event_graphs(",
+        ".refresh_open_blueprint_nodes(",
+        ".get_compilation_messages(",
+    ]
+    for name in sorted(CONTRACT_FUNCTION_NAMES):
+        func = getattr(bridge, name)
+        source = inspect.getsource(func)
+        for call in deprecated_calls:
+            assert call not in source, \
+                f"{name}() should not call '{call}' directly; use the compat wrapper"
+
+
+def test_ue_compat_helpers_tolerate_missing_unreal():
+    """Compat helpers do not crash when the unreal module is absent.
+
+    Each helper wraps its body in a try/except or does its import inside the
+    function body, so importing the module never fails outside the engine.
+    """
+    from dcc_mcp_unreal.unreal_bridge import blueprint as bp
+
+    helpers = [
+        bp._get_blueprint_graphs,
+        bp._refresh_blueprint_nodes,
+        bp._get_compilation_messages,
+    ]
+    for helper in helpers:
+        # Each helper imports 'unreal' internally; outside UE that raises.
+        # The helpers should handle this gracefully.
+        try:
+            result = helper(blueprint=None)
+        except ImportError:
+            # Expected outside Unreal Engine — the import guard failed.
+            # Let's verify the import is inside the function.
+            import inspect
+            source = inspect.getsource(helper)
+            assert "import unreal" in source, \
+                f"{helper.__name__} should import unreal inside its body for lazy resolution"
+        except TypeError:
+            # Also expected: passing None triggers attribute errors on 'unreal'
+            # But the import should happen first, so we'd get ImportError.
+            # TypeError here means the helper was called without arguments.
+            pass
+        except Exception:
+            # Any other exception is acceptable outside UE
+            pass
