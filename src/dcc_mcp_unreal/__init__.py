@@ -53,6 +53,7 @@ from dcc_mcp_unreal.api import (
 from dcc_mcp_unreal.capabilities import UNREAL_CAPABILITIES_DICT, unreal_capabilities
 from dcc_mcp_unreal.compatibility import unreal_compatibility
 from dcc_mcp_unreal.server import UnrealMcpServer, start_server, stop_server
+from dcc_mcp_unreal import unreal_bridge  # noqa: F401
 
 __all__ = [
     "__version__",
@@ -89,4 +90,6 @@ __all__ = [
     "unreal_capabilities",
     "UNREAL_CAPABILITIES_DICT",
     "unreal_compatibility",
+    # Bridge modules
+    "unreal_bridge",
 ]
