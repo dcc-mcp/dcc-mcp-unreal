@@ -74,6 +74,7 @@ def verify(plugin_root: Path) -> bool:
     try:
         import dcc_mcp_unreal  # noqa: F401, PLC0415
         from dcc_mcp_unreal.__version__ import __version__  # noqa: PLC0415
+
         passed &= check(True, f"dcc_mcp_unreal importable (version={__version__})", "")
     except ImportError as exc:
         passed &= check(False, "", f"dcc_mcp_unreal import failed: {exc}")
@@ -81,7 +82,20 @@ def verify(plugin_root: Path) -> bool:
     # 6. dcc_mcp_core importable
     try:
         import dcc_mcp_core  # noqa: F401, PLC0415
-        passed &= check(True, "dcc_mcp_core importable", "")
+
+        if python_dir.is_dir():
+            try:
+                Path(dcc_mcp_core.__file__).resolve().relative_to(python_dir.resolve())
+                bundled_core = True
+            except (AttributeError, ValueError):
+                bundled_core = False
+            passed &= check(
+                bundled_core,
+                "dcc_mcp_core is bundled in python/",
+                "dcc_mcp_core resolved outside the plugin python/ payload",
+            )
+        else:
+            passed &= check(True, "dcc_mcp_core importable", "")
     except ImportError as exc:
         passed &= check(False, "", f"dcc_mcp_core import failed: {exc}")
 
