@@ -1,0 +1,306 @@
+tools:
+  - name: create_material_graph
+    description: >-
+      Create a new Material asset at /Game/Materials/{material_name}
+      with the specified blend mode and shading model.
+    source_file: scripts/create_material_graph.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [material_name]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name for the new Material asset (e.g. "M_MyMaterial")
+        package_path:
+          type: string
+          default: /Game/Materials
+          description: Content Browser path for the Material asset
+        blend_mode:
+          type: string
+          enum: [Opaque, Masked, Translucent, Additive, Modulate]
+          default: Opaque
+          description: Material blend mode
+        shading_model:
+          type: string
+          enum: [DefaultLit, Unlit, Subsurface, PreintegratedSkin, ClearCoat, SubsurfaceProfile, TwoSidedFoliage, Hair, Cloth, Eye]
+          default: DefaultLit
+          description: Material shading model
+        two_sided:
+          type: boolean
+          default: false
+          description: Whether the material is two-sided
+    next-tools:
+      on-success: [unreal_material_shaders__add_material_expression, unreal_material_shaders__create_hlsl_node]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: add_material_expression
+    description: >-
+      Add a Material Expression node to a Material's expression graph.
+      Supports 30+ expression types: Constant, Constant2Vector, Constant3Vector,
+      Constant4Vector, TextureSample, Multiply, Add, Subtract, Divide, Lerp,
+      Fresnel, Time, Panner, Noise, MaterialFunctionCall, Custom, VertexColor,
+      WorldPosition, CameraPositionWS, and more.
+    source_file: scripts/add_material_expression.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [material_name, expression_type]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the target Material
+        expression_type:
+          type: string
+          minLength: 1
+          description: >-
+            Material Expression class name (e.g. "Constant3Vector", "Multiply",
+            "TextureSample", "Lerp", "Fresnel", "Custom")
+        node_pos:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: integer
+          default: [0, 0]
+          description: "[X, Y] position of the node in the graph"
+        params:
+          type: object
+          default: {}
+          description: >-
+            Expression-specific parameters (e.g. {"R": 1.0, "G": 0.0, "B": 0.0}
+            for Constant3Vector, or {"Texture": "/Game/Textures/T_Base"} for TextureSample)
+    next-tools:
+      on-success: [unreal_material_shaders__connect_material_expressions, unreal_material_shaders__list_material_expressions]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: connect_material_expressions
+    description: >-
+      Connect two Material Expression nodes in a Material graph by linking
+      a source output pin to a target input pin.
+    source_file: scripts/connect_material_expressions.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [material_name, source_expression, target_expression, target_pin]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the target Material
+        source_expression:
+          type: string
+          minLength: 1
+          description: Name or index of the source expression node
+        source_pin:
+          type: string
+          default: ""
+          description: Output pin name on the source (empty string for default output)
+        target_expression:
+          type: string
+          minLength: 1
+          description: Name or index of the target expression node
+        target_pin:
+          type: string
+          minLength: 1
+          description: Input pin name on the target (e.g. "A", "BaseColor", "EmissiveColor")
+    next-tools:
+      on-success: [unreal_material_shaders__compile_material]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: compile_material
+    description: >-
+      Compile a Material and return shader compilation errors and warnings.
+      This triggers the full HLSL shader compilation pipeline in UE.
+    source_file: scripts/compile_material.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [material_name]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the Material to compile
+    next-tools:
+      on-success: [unreal_material_shaders__list_material_expressions]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: create_material_function
+    description: >-
+      Create a reusable Material Function asset at /Game/Materials/{function_name}.
+      Material Functions encapsulate reusable node graphs with inputs and outputs.
+    source_file: scripts/create_material_function.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [function_name]
+      properties:
+        function_name:
+          type: string
+          minLength: 1
+          description: Name for the Material Function (e.g. "MF_Desaturate")
+        package_path:
+          type: string
+          default: /Game/Materials
+          description: Content Browser path for the function asset
+        description:
+          type: string
+          default: ""
+          description: Description for the Material Function
+    next-tools:
+      on-success: [unreal_material_shaders__add_material_expression]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: create_hlsl_node
+    description: >-
+      Create a Custom HLSL expression node in a Material graph.
+      The HLSL source is stored as a string in the UE CustomExpression node;
+      UE performs security checks during shader compilation. No HLSL execution
+      happens on the Python side.
+    source_file: scripts/create_hlsl_node.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [material_name, hlsl_code]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the target Material or Material Function
+        hlsl_code:
+          type: string
+          minLength: 1
+          description: HLSL source code for the custom expression body
+        inputs:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+                minLength: 1
+              type:
+                type: string
+                default: float
+                enum: [float, float2, float3, float4, Texture2D, TextureCube, MaterialAttributes]
+          description: Input parameter declarations
+        output_type:
+          type: string
+          default: CMOT_Float3
+          enum: [CMOT_Float1, CMOT_Float2, CMOT_Float3, CMOT_Float4, CMOT_MaterialAttributes]
+          description: Custom Material Output Type
+        description:
+          type: string
+          default: ""
+          description: Description for the custom node
+        node_pos:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: integer
+          default: [0, 0]
+    next-tools:
+      on-success: [unreal_material_shaders__validate_hlsl_syntax, unreal_material_shaders__compile_material]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: validate_hlsl_syntax
+    description: >-
+      Pure syntax validation: parse HLSL source code (no compilation, no linking,
+      no execution). Returns a list of syntax errors. Uses regex-based parsing
+      for basic validation; DXC compiler features (SM 6.0+) are gated to UE 5.4+.
+      Read-only — never compiles or runs HLSL.
+    source_file: scripts/validate_hlsl_syntax.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [hlsl_code]
+      properties:
+        hlsl_code:
+          type: string
+          minLength: 1
+          description: HLSL source code to validate
+        entry_point:
+          type: string
+          default: ""
+          description: Optional entry-point function name to check for existence
+    next-tools:
+      on-success: []
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: list_material_expressions
+    description: >-
+      List all expression nodes and their connections in a Material or
+      Material Function graph. Returns node IDs, types, positions, and
+      pin connections for graph inspection. Read-only.
+    source_file: scripts/list_material_expressions.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [material_name]
+      properties:
+        material_name:
+          type: string
+          minLength: 1
+          description: Name of the Material or Material Function to inspect
+        target_kind:
+          type: string
+          enum: [material, material_function]
+          default: material
+          description: Whether to inspect a Material or Material Function
+    next-tools:
+      on-success: []
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
