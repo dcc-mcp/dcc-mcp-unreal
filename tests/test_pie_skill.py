@@ -17,12 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 _PIE_SCRIPTS_DIR = str(
-    Path(__file__).resolve().parent.parent
-    / "src"
-    / "dcc_mcp_unreal"
-    / "skills"
-    / "unreal-pie"
-    / "scripts"
+    Path(__file__).resolve().parent.parent / "src" / "dcc_mcp_unreal" / "skills" / "unreal-pie" / "scripts"
 )
 
 if _PIE_SCRIPTS_DIR not in sys.path:
@@ -209,6 +204,7 @@ class TestPieHelpers:
         _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
+
             fake_ue._fake_subsystem.is_pie_running.return_value = True
             mod2 = _ensure_fresh_helpers()
             assert mod2.is_pie_active() is True
@@ -266,6 +262,7 @@ class TestPieControl:
         _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
+
             fake_ue._fake_subsystem.is_pie_running.return_value = True
             fake_ue._fake_subsystem.is_pie_paused.return_value = False
             mod2 = _import_script("pie_control")
@@ -279,6 +276,7 @@ class TestPieControl:
         _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
+
             fake_ue._fake_subsystem.is_pie_running.return_value = True
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
@@ -291,6 +289,7 @@ class TestPieControl:
         _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
+
             fake_ue._fake_subsystem.is_pie_running.return_value = True
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
@@ -422,6 +421,7 @@ class TestPieGetStatus:
         _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
+
             fake_ue._fake_subsystem.is_pie_running.return_value = True
             _ensure_fresh_helpers()
             mod = _import_script("pie_get_status")

@@ -89,9 +89,7 @@ def pie_capture_screenshot(
         # Fallback: HighResShot console command
         world = unreal.EditorLevelLibrary.get_editor_world()
         if resolution_x > 0 and resolution_y > 0:
-            cmd = "HighResShot {}x{} filename={}".format(
-                int(resolution_x), int(resolution_y), filepath
-            )
+            cmd = "HighResShot {}x{} filename={}".format(int(resolution_x), int(resolution_y), filepath)
         else:
             cmd = "HighResShot filename={}".format(filepath)
 
