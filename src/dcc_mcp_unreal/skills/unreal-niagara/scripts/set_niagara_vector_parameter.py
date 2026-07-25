@@ -1,0 +1,81 @@
+"""Set a 3D vector parameter on a Niagara component."""
+
+from __future__ import annotations
+
+from dcc_mcp_core.skill import skill_entry
+from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+
+@skill_entry
+def set_niagara_vector_parameter(
+    actor_name: str,
+    parameter_name: str,
+    vector: list,
+    **kwargs,
+) -> dict:
+    """Set a 3D vector parameter on a Niagara component.
+
+    Args:
+        actor_name: Label or name of the Niagara actor in the level.
+        parameter_name: Name of the exposed vector parameter.
+        vector: [X, Y, Z] vector values.
+
+    Returns:
+        ActionResultModel dict.
+    """
+    if not actor_name or not parameter_name or not vector:
+        return unreal_error(
+            "Missing required parameters",
+            "actor_name, parameter_name, and vector are required",
+        )
+    if len(vector) < 3:
+        return unreal_error(
+            "Invalid vector",
+            "vector must have exactly 3 components [X, Y, Z]",
+        )
+
+    try:
+        import unreal  # noqa: PLC0415
+    except ImportError:
+        return unreal_error("Unreal Engine not available", "ImportError: unreal module not found")
+
+    try:
+        actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
+            unreal.EditorLevelLibrary.get_editor_world(),
+            actor_name,
+        )
+        if actor is None:
+            all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
+            matches = [a for a in all_actors if a.get_name() == actor_name or a.get_actor_label() == actor_name]
+            if not matches:
+                return unreal_error(
+                    "Niagara actor not found",
+                    f"No actor named '{actor_name}' in the current level.",
+                )
+            actor = matches[0]
+
+        niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
+        if niagara_component is None:
+            return unreal_error(
+                "No Niagara component found",
+                f"Actor '{actor_name}' does not have a NiagaraComponent.",
+            )
+
+        vec = unreal.Vector(float(vector[0]), float(vector[1]), float(vector[2]))
+        niagara_component.set_variable_vec3(parameter_name, vec)
+
+        return unreal_success(
+            f"Set vector param '{parameter_name}' = [{vector[0]:.2f}, {vector[1]:.2f}, {vector[2]:.2f}] on '{actor_name}'",
+            actor_name=actor_name,
+            parameter_name=parameter_name,
+            vector=vector,
+            prompt="Use reset_niagara_system to restart the effect with the new vector.",
+        )
+
+    except Exception as exc:
+        return unreal_error(
+            "Failed to set vector parameter",
+            str(exc),
+            actor_name=actor_name,
+            parameter_name=parameter_name,
+        )

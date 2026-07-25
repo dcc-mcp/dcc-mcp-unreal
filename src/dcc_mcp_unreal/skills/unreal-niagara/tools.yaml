@@ -1,0 +1,243 @@
+tools:
+  - name: create_niagara_system
+    description: >-
+      Create a new Niagara system asset from a template. Returns the
+      package path for use with other Niagara tools.
+    source_file: scripts/create_niagara_system.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 60
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [system_name]
+      properties:
+        system_name:
+          type: string
+          minLength: 1
+          description: Name for the new Niagara system asset.
+        package_path:
+          type: string
+          default: /Game/VFX
+          description: Content Browser folder path (must start with /Game).
+        emitter_template:
+          type: string
+          description: >-
+            Optional emitter template path. Common built-in templates:
+            /Niagara/DefaultTextures/Fountain,
+            /Niagara/DefaultTextures/SimpleSpriteBurst,
+            /Niagara/DefaultTextures/Smoke. Leave empty for empty system.
+    next-tools:
+      on-success: [unreal_niagara__spawn_niagara_actor]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: spawn_niagara_actor
+    description: >-
+      Spawn a Niagara system as an actor in the current level at a
+      specified location.
+    source_file: scripts/spawn_niagara_actor.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [niagara_system_path]
+      properties:
+        niagara_system_path:
+          type: string
+          minLength: 1
+          description: Package path to the Niagara system asset.
+        location_x:
+          type: number
+          default: 0.0
+        location_y:
+          type: number
+          default: 0.0
+        location_z:
+          type: number
+          default: 0.0
+        auto_activate:
+          type: boolean
+          default: true
+          description: Start the particle system immediately after spawning.
+        label:
+          type: string
+          description: Optional World Outliner label for the actor.
+    next-tools:
+      on-success: [unreal_niagara__set_niagara_float_parameter, unreal_niagara__get_niagara_system_info]
+      on-failure: [dcc_diagnostics__screenshot]
+
+  - name: set_niagara_float_parameter
+    description: >-
+      Set a float parameter value on a Niagara component by name.
+      Parameters must be exposed as user parameters in the Niagara system.
+    source_file: scripts/set_niagara_float_parameter.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [actor_name, parameter_name, value]
+      properties:
+        actor_name:
+          type: string
+          minLength: 1
+          description: Label or name of the Niagara actor in the level.
+        parameter_name:
+          type: string
+          minLength: 1
+          description: Name of the exposed float parameter.
+        value:
+          type: number
+          description: Float value to set.
+
+  - name: set_niagara_color_parameter
+    description: >-
+      Set a linear color parameter on a Niagara component. Colors are
+      specified as [R, G, B, A] with values in 0.0–1.0 range.
+    source_file: scripts/set_niagara_color_parameter.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [actor_name, parameter_name, color]
+      properties:
+        actor_name:
+          type: string
+          minLength: 1
+          description: Label or name of the Niagara actor in the level.
+        parameter_name:
+          type: string
+          minLength: 1
+          description: Name of the exposed color parameter.
+        color:
+          type: array
+          minItems: 3
+          maxItems: 4
+          items:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          description: '[R, G, B] or [R, G, B, A] linear color values in 0-1 range.'
+
+  - name: set_niagara_vector_parameter
+    description: >-
+      Set a 3D vector parameter on a Niagara component.
+    source_file: scripts/set_niagara_vector_parameter.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [actor_name, parameter_name, vector]
+      properties:
+        actor_name:
+          type: string
+          minLength: 1
+          description: Label or name of the Niagara actor in the level.
+        parameter_name:
+          type: string
+          minLength: 1
+          description: Name of the exposed vector parameter.
+        vector:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: number
+          description: '[X, Y, Z] vector values.'
+
+  - name: get_niagara_system_info
+    description: >-
+      Inspect a Niagara system: list emitters, exposed parameters, and
+      current state. Works on both the system asset and running actors.
+    source_file: scripts/get_niagara_system_info.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          description: >-
+            Either a Niagara system asset path (e.g. /Game/VFX/MySystem)
+            or an actor label for a spawned Niagara actor in the level.
+    next-tools:
+      on-success: [unreal_niagara__set_niagara_float_parameter, unreal_niagara__set_niagara_emitter_state]
+
+  - name: reset_niagara_system
+    description: >-
+      Deactivate and reactivate a Niagara component to restart the
+      particle simulation from its initial state. Useful during
+      parameter iteration.
+    source_file: scripts/reset_niagara_system.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [actor_name]
+      properties:
+        actor_name:
+          type: string
+          minLength: 1
+          description: Label or name of the Niagara actor in the level.
+
+  - name: set_niagara_emitter_state
+    description: >-
+      Enable or disable a specific emitter within a Niagara system
+      component by emitter name.
+    source_file: scripts/set_niagara_emitter_state.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [actor_name, emitter_name, enabled]
+      properties:
+        actor_name:
+          type: string
+          minLength: 1
+          description: Label or name of the Niagara actor in the level.
+        emitter_name:
+          type: string
+          minLength: 1
+          description: Name of the emitter to toggle.
+        enabled:
+          type: boolean
+          description: True to enable the emitter, False to disable.
