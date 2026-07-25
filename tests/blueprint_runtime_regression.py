@@ -7,6 +7,7 @@ Version-aware: on UE < 5.5, node-level API (K2Node_*, EdGraph.get_all_nodes,
 EdGraph.add_node) is unavailable — the bridge must return structured error
 envelopes instead of crashing.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,6 +44,7 @@ def _get_engine_version() -> Tuple[int, int]:
         return _ENGINE_VERSION
     try:
         import unreal
+
         ver = unreal.SystemLibrary.get_engine_version()
         m = re.match(r"(\d+)\.(\d+)", ver)
         if m:
@@ -148,6 +150,7 @@ def run_regression() -> dict:
             set_pin_default_value,
             validate_pin_connection,
         )
+
         record("import_module", True, "All 22 functions imported")
     except Exception as exc:
         record("import_module", False, str(exc))
@@ -155,10 +158,10 @@ def run_regression() -> dict:
 
     try:
         import unreal
+
         ver_str = unreal.SystemLibrary.get_engine_version()
         can_node = _node_api_available()
-        record("engine_available", True,
-               f"UE {ver_str}  node_api={'yes' if can_node else 'NO'}")
+        record("engine_available", True, f"UE {ver_str}  node_api={'yes' if can_node else 'NO'}")
     except ImportError as exc:
         record("engine_available", False, str(exc))
         return _summary()
@@ -184,7 +187,11 @@ def run_regression() -> dict:
             else:
                 # UE < 5.5: hardcoded list still returned (the bridge lists
                 # canonical names regardless of whether the engine exposes them)
-                record("list_available_node_classes", count > 0, f"{count} node classes (UE<5.5; classes not runtime-verified)")
+                record(
+                    "list_available_node_classes",
+                    count > 0,
+                    f"{count} node classes (UE<5.5; classes not runtime-verified)",
+                )
             if count > 0:
                 sample = node_classes[:3] if len(node_classes) >= 3 else node_classes
                 record("node_class_sample", True, str(sample))
@@ -220,8 +227,7 @@ def run_regression() -> dict:
             # ``node_count`` and ``nodes`` are inside the context sub-dict
             graph_count = _ctx(result, "node_count", 0)
             graph_name = _ctx(result, "graph_name", "?")
-            record("get_blueprint_graph", True,
-                   f"graph='{graph_name}' nodes={graph_count}")
+            record("get_blueprint_graph", True, f"graph='{graph_name}' nodes={graph_count}")
         else:
             record("get_blueprint_graph", False, str(result)[:200])
     except Exception as exc:
@@ -244,8 +250,11 @@ def run_regression() -> dict:
             # error envelope is the *correct* behaviour.
             error_code = _ctx(result, "error_code", "")
             if not node_api and error_code in ("NODE_NOT_FOUND",):
-                record("create_node_1", True,
-                       f"K2Node_* unavailable on UE {_ue_major()}.{_ue_minor()} (expected; graceful error)")
+                record(
+                    "create_node_1",
+                    True,
+                    f"K2Node_* unavailable on UE {_ue_major()}.{_ue_minor()} (expected; graceful error)",
+                )
             else:
                 record("create_node_1", False, str(result)[:200])
     except Exception as exc:
@@ -260,8 +269,11 @@ def run_regression() -> dict:
         else:
             error_code = _ctx(result, "error_code", "")
             if not node_api and error_code in ("NODE_NOT_FOUND",):
-                record("create_node_2", True,
-                       f"K2Node_* unavailable on UE {_ue_major()}.{_ue_minor()} (expected; graceful error)")
+                record(
+                    "create_node_2",
+                    True,
+                    f"K2Node_* unavailable on UE {_ue_major()}.{_ue_minor()} (expected; graceful error)",
+                )
             else:
                 record("create_node_2", False, str(result)[:200])
     except Exception as exc:
@@ -277,8 +289,11 @@ def run_regression() -> dict:
             else:
                 # UE < 5.5: EdGraph.get_all_nodes is unavailable — graph
                 # enumeration returns empty.  This is expected.
-                record("find_graph_nodes", True,
-                       f"{count} CallFunction nodes (UE<5.5: graph enumeration unavailable; 0 expected)")
+                record(
+                    "find_graph_nodes",
+                    True,
+                    f"{count} CallFunction nodes (UE<5.5: graph enumeration unavailable; 0 expected)",
+                )
         else:
             record("find_graph_nodes", False, str(result)[:200])
     except Exception as exc:
@@ -427,8 +442,11 @@ def run_regression() -> dict:
             if not node_api and error_code:
                 # UE < 5.5: KismetEditorUtilities may not be fully exposed —
                 # graceful error envelope is the expected behaviour.
-                record("compile_blueprint", True,
-                       f"UE<5.5 compile delegate unavailable (expected; error_code={error_code})")
+                record(
+                    "compile_blueprint",
+                    True,
+                    f"UE<5.5 compile delegate unavailable (expected; error_code={error_code})",
+                )
             else:
                 record("compile_blueprint", has_chain, f"failed with diagnostics chain: {has_chain}")
     except Exception as exc:

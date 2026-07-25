@@ -11,6 +11,7 @@ Modules:
                   graph lifecycle, node CRUD, pin wiring, layout, compile,
                   and diagnostics.
 """
+
 from __future__ import annotations
 
 __all__ = ["blueprint"]

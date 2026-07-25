@@ -15,49 +15,55 @@ import pytest
 # Contract constants
 # ---------------------------------------------------------------------------
 
-CONTRACT_FUNCTION_NAMES = frozenset([
-    "open_blueprint",
-    "get_blueprint_graph",
-    "save_blueprint",
-    "get_blueprint_info",
-    "create_graph_node",
-    "delete_graph_node",
-    "find_graph_nodes",
-    "get_node_properties",
-    "set_node_properties",
-    "list_available_node_classes",
-    "add_pin_to_node",
-    "remove_pin_from_node",
-    "connect_pins",
-    "disconnect_pin",
-    "get_pin_default_value",
-    "set_pin_default_value",
-    "validate_pin_connection",
-    "auto_layout_nodes",
-    "set_node_position",
-    "compile_blueprint",
-    "get_blueprint_diagnostics",
-    "refresh_blueprint_graph",
-])
+CONTRACT_FUNCTION_NAMES = frozenset(
+    [
+        "open_blueprint",
+        "get_blueprint_graph",
+        "save_blueprint",
+        "get_blueprint_info",
+        "create_graph_node",
+        "delete_graph_node",
+        "find_graph_nodes",
+        "get_node_properties",
+        "set_node_properties",
+        "list_available_node_classes",
+        "add_pin_to_node",
+        "remove_pin_from_node",
+        "connect_pins",
+        "disconnect_pin",
+        "get_pin_default_value",
+        "set_pin_default_value",
+        "validate_pin_connection",
+        "auto_layout_nodes",
+        "set_node_position",
+        "compile_blueprint",
+        "get_blueprint_diagnostics",
+        "refresh_blueprint_graph",
+    ]
+)
 
-CONTRACT_ERROR_CODES = frozenset([
-    "BLUEPRINT_NOT_FOUND",
-    "GRAPH_NOT_FOUND",
-    "NODE_NOT_FOUND",
-    "PIN_NOT_FOUND",
-    "CONNECTION_INVALID",
-    "PIN_TYPE_MISMATCH",
-    "COMPILE_FAILED",
-    "UNREAL_UNAVAILABLE",
-])
+CONTRACT_ERROR_CODES = frozenset(
+    [
+        "BLUEPRINT_NOT_FOUND",
+        "GRAPH_NOT_FOUND",
+        "NODE_NOT_FOUND",
+        "PIN_NOT_FOUND",
+        "CONNECTION_INVALID",
+        "PIN_TYPE_MISMATCH",
+        "COMPILE_FAILED",
+        "UNREAL_UNAVAILABLE",
+    ]
+)
 
 # ---------------------------------------------------------------------------
 # Module fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def bridge():
     from dcc_mcp_unreal.unreal_bridge import blueprint
+
     return blueprint
 
 
@@ -65,12 +71,10 @@ def bridge():
 # Contract function count
 # ---------------------------------------------------------------------------
 
+
 def test_all_22_functions_exported(bridge):
     """Every contract function name is a public top-level callable."""
-    exported = {
-        name for name, val in vars(bridge).items()
-        if not name.startswith("_") and callable(val)
-    }
+    exported = {name for name, val in vars(bridge).items() if not name.startswith("_") and callable(val)}
     missing = CONTRACT_FUNCTION_NAMES - exported
     assert not missing, f"Missing contract functions: {sorted(missing)}"
 
@@ -81,14 +85,26 @@ def test_all_22_functions_exported(bridge):
 def test_no_unexpected_public_functions_outside_contract(bridge):
     """The only public top-level callables should be the 22 contract functions."""
     # These names come from typing imports and api re-exports; they are expected.
-    expected_extra = frozenset([
-        "Any", "Dict", "List", "Optional", "Tuple",
-        "unreal_success", "unreal_error", "unreal_from_exception",
-        "require_unreal", "get_unreal", "build_context_dict",
-    ])
+    expected_extra = frozenset(
+        [
+            "Any",
+            "Dict",
+            "List",
+            "Optional",
+            "Tuple",
+            "unreal_success",
+            "unreal_error",
+            "unreal_from_exception",
+            "require_unreal",
+            "get_unreal",
+            "build_context_dict",
+        ]
+    )
     unexpected = {
-        name for name, val in vars(bridge).items()
-        if not name.startswith("_") and callable(val)
+        name
+        for name, val in vars(bridge).items()
+        if not name.startswith("_")
+        and callable(val)
         and name not in CONTRACT_FUNCTION_NAMES
         and name not in expected_extra
     }
@@ -98,6 +114,7 @@ def test_no_unexpected_public_functions_outside_contract(bridge):
 # ---------------------------------------------------------------------------
 # Error codes
 # ---------------------------------------------------------------------------
+
 
 def test_all_eight_error_codes(bridge):
     """All 8 standard error codes are defined as module-level constants."""
@@ -117,6 +134,7 @@ def test_error_codes_are_strings(bridge):
 # ---------------------------------------------------------------------------
 # Result envelope contract
 # ---------------------------------------------------------------------------
+
 
 def test_unreal_unavailable_envelope_for_each_function(bridge):
     """When run without Unreal Engine, each function returns an error envelope."""
@@ -173,6 +191,7 @@ def test_list_available_node_classes_works_without_ue(bridge):
 # Validation script
 # ---------------------------------------------------------------------------
 
+
 def test_run_validation_reports_22_passed(bridge):
     """The built-in contract validation reports all 22 functions."""
     result = bridge._run_validation()
@@ -186,6 +205,7 @@ def test_run_validation_reports_22_passed(bridge):
 # ---------------------------------------------------------------------------
 # Compile-then-verify loop chain integrity
 # ---------------------------------------------------------------------------
+
 
 def test_compile_blueprint_chains_to_get_diagnostics():
     """compile_blueprint error instructs caller to use get_blueprint_diagnostics.
@@ -266,8 +286,7 @@ def test_ue_compat_no_direct_api_calls(bridge):
         func = getattr(bridge, name)
         source = inspect.getsource(func)
         for call in deprecated_calls:
-            assert call not in source, \
-                f"{name}() should not call '{call}' directly; use the compat wrapper"
+            assert call not in source, f"{name}() should not call '{call}' directly; use the compat wrapper"
 
 
 def test_ue_compat_helpers_tolerate_missing_unreal():
@@ -292,9 +311,11 @@ def test_ue_compat_helpers_tolerate_missing_unreal():
             # Expected outside Unreal Engine — the import guard failed.
             # Let's verify the import is inside the function.
             import inspect
+
             source = inspect.getsource(helper)
-            assert "import unreal" in source, \
+            assert "import unreal" in source, (
                 f"{helper.__name__} should import unreal inside its body for lazy resolution"
+            )
         except TypeError:
             # Also expected: passing None triggers attribute errors on 'unreal'
             # But the import should happen first, so we'd get ImportError.

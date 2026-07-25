@@ -260,11 +260,14 @@ def _pin_to_dict(pin: Any) -> Dict[str, Any]:
     except Exception:
         d["default_object"] = None
     try:
-        d["linked_to"] = [
-            {"node_guid": str(lp.get_node_guid()) if hasattr(lp, "get_node_guid") else "",
-             "pin_name": lp.pin_name}
-            for lp in pin.linked_to
-        ] if hasattr(pin, "linked_to") and pin.linked_to else []
+        d["linked_to"] = (
+            [
+                {"node_guid": str(lp.get_node_guid()) if hasattr(lp, "get_node_guid") else "", "pin_name": lp.pin_name}
+                for lp in pin.linked_to
+            ]
+            if hasattr(pin, "linked_to") and pin.linked_to
+            else []
+        )
     except Exception:
         d["linked_to"] = []
     return d
@@ -397,6 +400,8 @@ def _get_blueprint_graphs(blueprint: Any) -> Any:
             pass
 
     return graphs
+
+
 def _refresh_blueprint_nodes(blueprint: Any) -> None:
     """Refresh the Blueprint editor after graph mutations across UE 5.3–5.8.
 
@@ -488,8 +493,7 @@ def open_blueprint(asset_path: str) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     bp, err = _load_blueprint(asset_path)
     if err:
@@ -522,7 +526,9 @@ def open_blueprint(asset_path: str) -> Dict[str, Any]:
         return unreal_from_exception(exc, f"Failed to open Blueprint: {asset_path}")
 
 
-def get_blueprint_graph(blueprint: Any = None, asset_path: str = "", graph_name: Optional[str] = None) -> Dict[str, Any]:
+def get_blueprint_graph(
+    blueprint: Any = None, asset_path: str = "", graph_name: Optional[str] = None
+) -> Dict[str, Any]:
     """Get the structure of a Blueprint graph (nodes, pins, connections).
 
     Args:
@@ -539,8 +545,7 @@ def get_blueprint_graph(blueprint: Any = None, asset_path: str = "", graph_name:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -584,8 +589,7 @@ def save_blueprint(asset_path: str) -> Dict[str, Any]:
     try:
         ue = require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     path = _resolve_blueprint_path(asset_path)
 
@@ -626,8 +630,7 @@ def get_blueprint_info(asset_path: str) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     bp, err = _load_blueprint(asset_path)
     if err:
@@ -699,8 +702,7 @@ def create_graph_node(
     try:
         ue = require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -779,8 +781,7 @@ def delete_graph_node(blueprint: Any, node_guid: str) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     if not graphs:
@@ -835,8 +836,7 @@ def find_graph_nodes(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -916,8 +916,7 @@ def get_node_properties(blueprint: Any, node_guid: str) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -956,8 +955,7 @@ def set_node_properties(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -1009,8 +1007,7 @@ def list_available_node_classes() -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     # Canonical set of K2Node subclasses available in UE 4.18+
     classes = [
@@ -1082,8 +1079,7 @@ def add_pin_to_node(
     try:
         ue = require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     pin_name = pin_spec.get("pin_name", "")
     if not pin_name:
@@ -1157,8 +1153,7 @@ def remove_pin_from_node(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -1200,8 +1195,7 @@ def connect_pins(blueprint: Any, source_pin: Dict[str, Any], target_pin: Dict[st
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     src_guid = source_pin.get("node_guid", "")
     src_pin_name = source_pin.get("pin_name", "")
@@ -1279,8 +1273,7 @@ def disconnect_pin(blueprint: Any, pin_ref: Dict[str, Any]) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     node_guid = pin_ref.get("node_guid", "")
     pin_name = pin_ref.get("pin_name", "")
@@ -1301,9 +1294,7 @@ def disconnect_pin(blueprint: Any, pin_ref: Dict[str, Any]) -> Dict[str, Any]:
 
             try:
                 previous_links = [
-                    {"node_guid": str(lp.get_node_guid()),
-                     "pin_name": lp.pin_name}
-                    for lp in (pin.linked_to or [])
+                    {"node_guid": str(lp.get_node_guid()), "pin_name": lp.pin_name} for lp in (pin.linked_to or [])
                 ]
                 pin.break_all_pin_links()
                 _refresh_blueprint_nodes(blueprint)
@@ -1337,8 +1328,7 @@ def get_pin_default_value(blueprint: Any, node_guid: str, pin_name: str) -> Dict
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -1352,7 +1342,9 @@ def get_pin_default_value(blueprint: Any, node_guid: str, pin_name: str) -> Dict
                 node_guid=node_guid,
                 pin_name=pin_name,
                 default_value=pin.default_value if hasattr(pin, "default_value") else "",
-                default_object=str(pin.default_object) if hasattr(pin, "default_object") and pin.default_object else None,
+                default_object=str(pin.default_object)
+                if hasattr(pin, "default_object") and pin.default_object
+                else None,
                 pin_type=str(pin.pin_type) if hasattr(pin, "pin_type") else "",
             )
 
@@ -1386,8 +1378,7 @@ def set_pin_default_value(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -1507,8 +1498,7 @@ def auto_layout_nodes(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -1557,7 +1547,7 @@ def auto_layout_nodes(
 
         elif strategy == "simple":
             # Grid layout
-            cols = max(1, int(node_count ** 0.5))
+            cols = max(1, int(node_count**0.5))
             for i, node in enumerate(nodes):
                 row = i // cols
                 col = i % cols
@@ -1600,8 +1590,7 @@ def set_node_position(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     graphs = _get_blueprint_graphs(blueprint)
     for graph in graphs:
@@ -1649,8 +1638,7 @@ def compile_blueprint(
     try:
         ue = require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     # Allow asset path string as input
     if isinstance(blueprint, str):
@@ -1694,8 +1682,9 @@ def compile_blueprint(
             prompt="Compilation succeeded. Save the Blueprint to persist changes.",
         )
     except Exception as exc:
-        return unreal_from_exception(exc, f"Compilation exception for '{bp.get_name()}'",
-                                     error_code=ERROR_COMPILE_FAILED)
+        return unreal_from_exception(
+            exc, f"Compilation exception for '{bp.get_name()}'", error_code=ERROR_COMPILE_FAILED
+        )
 
 
 def _count_compile_issues(blueprint: Any, compile_result: Any = None) -> Tuple[int, int]:
@@ -1708,7 +1697,6 @@ def _count_compile_issues(blueprint: Any, compile_result: Any = None) -> Tuple[i
     errors = 0
     warnings = 0
     try:
-
         for msg in _get_compilation_messages(blueprint, compile_result):
             try:
                 msg_type = str(msg.message_type) if hasattr(msg, "message_type") else ""
@@ -1742,8 +1730,7 @@ def get_blueprint_diagnostics(
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -1808,8 +1795,7 @@ def refresh_blueprint_graph(blueprint: Any) -> Dict[str, Any]:
     try:
         require_unreal()
     except Exception as exc:
-        return unreal_from_exception(exc, "Unreal Engine not available",
-                                     error_code=ERROR_UNREAL_UNAVAILABLE)
+        return unreal_from_exception(exc, "Unreal Engine not available", error_code=ERROR_UNREAL_UNAVAILABLE)
 
     if isinstance(blueprint, str):
         bp, err = _load_blueprint(blueprint)
@@ -1849,30 +1835,32 @@ def _is_float_str(s: str) -> bool:
 
 _CONTRACT_FUNCTION_COUNT = 22
 
-_CONTRACT_FUNCTIONS = frozenset([
-    "open_blueprint",
-    "get_blueprint_graph",
-    "save_blueprint",
-    "get_blueprint_info",
-    "create_graph_node",
-    "delete_graph_node",
-    "find_graph_nodes",
-    "get_node_properties",
-    "set_node_properties",
-    "list_available_node_classes",
-    "add_pin_to_node",
-    "remove_pin_from_node",
-    "connect_pins",
-    "disconnect_pin",
-    "get_pin_default_value",
-    "set_pin_default_value",
-    "validate_pin_connection",
-    "auto_layout_nodes",
-    "set_node_position",
-    "compile_blueprint",
-    "get_blueprint_diagnostics",
-    "refresh_blueprint_graph",
-])
+_CONTRACT_FUNCTIONS = frozenset(
+    [
+        "open_blueprint",
+        "get_blueprint_graph",
+        "save_blueprint",
+        "get_blueprint_info",
+        "create_graph_node",
+        "delete_graph_node",
+        "find_graph_nodes",
+        "get_node_properties",
+        "set_node_properties",
+        "list_available_node_classes",
+        "add_pin_to_node",
+        "remove_pin_from_node",
+        "connect_pins",
+        "disconnect_pin",
+        "get_pin_default_value",
+        "set_pin_default_value",
+        "validate_pin_connection",
+        "auto_layout_nodes",
+        "set_node_position",
+        "compile_blueprint",
+        "get_blueprint_diagnostics",
+        "refresh_blueprint_graph",
+    ]
+)
 
 
 def _run_validation() -> Dict[str, Any]:
@@ -1893,8 +1881,7 @@ def _run_validation() -> Dict[str, Any]:
     failures: List[str] = []
 
     # 1. Count functions
-    exported = {name for name, obj in inspect.getmembers(module, inspect.isfunction)
-                if not name.startswith("_")}
+    exported = {name for name, obj in inspect.getmembers(module, inspect.isfunction) if not name.startswith("_")}
     actual_contract = exported & _CONTRACT_FUNCTIONS
     missing = _CONTRACT_FUNCTIONS - exported
     extra = exported - _CONTRACT_FUNCTIONS
@@ -1916,12 +1903,14 @@ def _run_validation() -> Dict[str, Any]:
         sig = inspect.signature(func)
         params = list(sig.parameters.values())
         has_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
-        if not has_var_kwargs and func_name not in ("validate_pin_connection",
-                                                     "list_available_node_classes",
-                                                     "save_blueprint",
-                                                     "get_blueprint_info",
-                                                     "open_blueprint",
-                                                     "refresh_blueprint_graph"):
+        if not has_var_kwargs and func_name not in (
+            "validate_pin_connection",
+            "list_available_node_classes",
+            "save_blueprint",
+            "get_blueprint_info",
+            "open_blueprint",
+            "refresh_blueprint_graph",
+        ):
             # Several functions have fixed signatures by design; noting but not failing
             pass
 
