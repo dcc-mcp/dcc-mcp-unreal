@@ -11,8 +11,6 @@ from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_error, unreal_from_exception, unreal_success
 
-from _pie_helpers import is_pie_active
-
 _VALID_INPUT_TYPES = {"key_press", "key_release", "key_tap", "mouse_button", "mouse_move", "mouse_scroll"}
 
 
@@ -51,9 +49,7 @@ def _inject_key_press(key: str) -> dict:
     # Use the InputProcessor subsystem
     input_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     if input_subsystem is not None:
-        # Try to get the slate application for input injection
-        slate_app = unreal.SlateBlueprintLibrary
-        # Use console command as fallback - this is the most reliable cross-version path
+        # Use console command - the most reliable cross-version path
         cmd = "InputKey {}".format(resolved)
         unreal.SystemLibrary.execute_console_command(
             unreal.EditorLevelLibrary.get_editor_world(),

@@ -9,15 +9,12 @@ from __future__ import annotations
 import os
 import sys
 import types
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Setup: add scripts dir to sys.path for bare imports like "from _pie_helpers import ..."
 # ---------------------------------------------------------------------------
-
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 _PIE_SCRIPTS_DIR = str(
     Path(__file__).resolve().parent.parent
@@ -209,7 +206,7 @@ class TestPieHelpers:
 
     def test_is_pie_active_with_unreal(self):
         """is_pie_active returns True when unreal subsystem reports running."""
-        mod = _ensure_fresh_helpers()
+        _ensure_fresh_helpers()
         with _patch_unreal():
             import unreal as fake_ue
             fake_ue._fake_subsystem.is_pie_running.return_value = True
@@ -218,7 +215,7 @@ class TestPieHelpers:
 
     def test_run_console_command(self):
         """run_console_command executes without error."""
-        mod = _ensure_fresh_helpers()
+        _ensure_fresh_helpers()
         with _patch_unreal():
             mod2 = _ensure_fresh_helpers()
             result = mod2.run_console_command("stat fps")
@@ -256,7 +253,6 @@ class TestPieControl:
     def test_enter_pie(self):
         """enter starts PIE via editor subsystem."""
         _ensure_fresh_helpers()
-        mod = _import_script("pie_control")
         with _patch_unreal():
             # Re-import after patching so import unreal resolves inside handler
             mod2 = _import_script("pie_control")
@@ -268,7 +264,6 @@ class TestPieControl:
     def test_pause_pie(self):
         """pause freezes a running PIE session."""
         _ensure_fresh_helpers()
-        mod = _import_script("pie_control")
         with _patch_unreal():
             import unreal as fake_ue
             fake_ue._fake_subsystem.is_pie_running.return_value = True
@@ -282,7 +277,6 @@ class TestPieControl:
     def test_exit_pie(self):
         """exit/stop stops a running PIE session."""
         _ensure_fresh_helpers()
-        mod = _import_script("pie_control")
         with _patch_unreal():
             import unreal as fake_ue
             fake_ue._fake_subsystem.is_pie_running.return_value = True
@@ -295,7 +289,6 @@ class TestPieControl:
     def test_stop_is_alias_for_exit(self):
         """stop is an alias for exit."""
         _ensure_fresh_helpers()
-        mod = _import_script("pie_control")
         with _patch_unreal():
             import unreal as fake_ue
             fake_ue._fake_subsystem.is_pie_running.return_value = True
@@ -470,7 +463,6 @@ class TestPieJobWorkflow:
     def test_run_test(self):
         """Run creates a job and returns job_id."""
         _ensure_fresh_helpers()
-        mod_run = _import_script("pie_run_test")
         with _patch_unreal():
             _ensure_fresh_helpers()
             mod2 = _import_script("pie_run_test")

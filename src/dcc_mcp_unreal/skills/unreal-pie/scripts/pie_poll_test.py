@@ -6,11 +6,10 @@ Automation Test framework for completion evidence.
 
 from __future__ import annotations
 
+from _pie_helpers import get_job, update_job
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_error, unreal_from_exception, unreal_success
-
-from _pie_helpers import get_job, update_job
 
 
 def _check_native_completion(job: dict) -> dict:
