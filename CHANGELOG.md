@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.6](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.5...v0.2.6) (2026-07-25)
+
+
+### Features
+
+* **unreal:** add unified menu with Copy Instance ID, Server Info, and About ([b38a3f3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b38a3f3b2991074cb37897b1914c89ce72bf1624))
+
+
+### Bug Fixes
+
+* vendor base core in Unreal plugin ([2368c48](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2368c4877bb57670eed130aec3c6356885741408))
+
 ## [0.2.5](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.4...v0.2.5) (2026-07-23)
 
 
