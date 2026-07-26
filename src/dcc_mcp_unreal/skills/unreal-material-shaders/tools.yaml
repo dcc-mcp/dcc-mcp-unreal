@@ -224,7 +224,10 @@ tools:
                 type: string
                 default: float
                 enum: [float, float2, float3, float4, Texture2D, TextureCube, MaterialAttributes]
-          description: Input parameter declarations
+                description: >-
+                  Expected HLSL type for documentation. Unreal infers the actual
+                  CustomExpression input type from the connected expression.
+          description: Named CustomExpression input pin declarations
         output_type:
           type: string
           default: CMOT_Float3

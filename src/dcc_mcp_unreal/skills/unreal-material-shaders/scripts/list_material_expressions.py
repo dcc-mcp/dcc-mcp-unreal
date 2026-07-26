@@ -138,17 +138,19 @@ def list_material_expressions(
         # Gather outgoing connections from this expression's pins
         for pin_idx in range(8):  # Check up to 8 output pins
             try:
-                connected = unreal.MaterialEditingLibrary.get_material_expression_connected_output_pin(
-                    expr, pin_idx
-                )
+                connected = unreal.MaterialEditingLibrary.get_material_expression_connected_output_pin(expr, pin_idx)
                 if connected is not None:
-                    connections.append({
-                        "from_node": str(expr_name),
-                        "from_node_index": i,
-                        "from_pin_index": pin_idx,
-                        "to_node": str(connected["expression"].get_name() if connected.get("expression") else "unknown"),
-                        "to_pin_index": connected.get("output_index", -1),
-                    })
+                    connections.append(
+                        {
+                            "from_node": str(expr_name),
+                            "from_node_index": i,
+                            "from_pin_index": pin_idx,
+                            "to_node": str(
+                                connected["expression"].get_name() if connected.get("expression") else "unknown"
+                            ),
+                            "to_pin_index": connected.get("output_index", -1),
+                        }
+                    )
             except Exception:
                 break
 

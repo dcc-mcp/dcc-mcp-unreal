@@ -38,32 +38,8 @@ def compile_material(
             f"Could not load asset at '{material_path}'",
         )
 
-    # Trigger recompilation
-    errors = []
-    warnings = []
-    compiled = False
-
     try:
-        # Force update and compile
-        unreal.MaterialEditingLibrary.update_material_after_graph_change(material)
-        unreal.MaterialEditingLibrary.layout_material_expressions(material)
-
-        # Check for material compile errors
-        stats = unreal.MaterialEditingLibrary.get_material_instance_statistics(material)
-        if stats is not None:
-            material_info = unreal.MaterialEditingLibrary.get_material_instance_info(material)
-            if material_info is not None:
-                compiled = True
-
-        # Check for shader compiler errors programmatically
-        try:
-            if hasattr(unreal.ShaderPipelineCacheTools, "get_number_of_shader_compilation_failures"):
-                # This is a best-effort check; not all builds expose it
-                pass
-        except Exception:
-            pass
-
-        compiled = True
+        compiler_errors = unreal.MaterialEditingLibrary.recompile_material(material)
     except Exception as exc:
         return skill_error(
             f"Compilation failed for '{material_name}': {exc}",
@@ -71,11 +47,25 @@ def compile_material(
             prompt="Check the Material graph in the editor for invalid connections or expressions.",
         )
 
-    if not compiled:
+    if compiler_errors is None:
         return skill_error(
-            f"Material '{material_name}' compilation returned errors",
-            "Check the Material Editor for compilation errors in the output log.",
-            prompt="Use list_material_expressions to inspect the graph.",
+            f"Could not verify compilation for Material '{material_name}'",
+            "This Unreal version does not return compiler diagnostics from recompile_material.",
+            prompt="Inspect the Material Editor compiler output before using this material.",
+            material_name=material_name,
+            material_path=material_path,
+            verification="unavailable",
+        )
+
+    errors = [str(error) for error in compiler_errors if str(error).strip()]
+    if errors:
+        return skill_error(
+            f"Material '{material_name}' compilation failed",
+            "\n".join(errors),
+            prompt="Fix the reported shader compiler errors and compile again.",
+            material_name=material_name,
+            material_path=material_path,
+            errors=errors,
         )
 
     # Save after successful compilation
@@ -86,6 +76,6 @@ def compile_material(
         prompt="The Material is ready. Inspect with list_material_expressions or test in the viewport.",
         material_name=material_name,
         material_path=material_path,
-        errors=errors,
-        warnings=warnings,
+        errors=[],
+        warnings=[],
     )

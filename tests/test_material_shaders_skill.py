@@ -172,10 +172,7 @@ def _load_hlsl_validator():
     [
         ("float3 brighten(float3 c) { return c * 2.0; }", True),
         (
-            "float4 blend(float4 a, float4 b, float t) {\n"
-            "    float4 result = lerp(a, b, t);\n"
-            "    return result;\n"
-            "}",
+            "float4 blend(float4 a, float4 b, float t) {\n    float4 result = lerp(a, b, t);\n    return result;\n}",
             True,
         ),
         (
@@ -187,9 +184,7 @@ def _load_hlsl_validator():
             True,
         ),
         (
-            "float threshold(float v) {\n"
-            "    if (v > 0.5) { return 1.0; } else { return 0.0; }\n"
-            "}",
+            "float threshold(float v) {\n    if (v > 0.5) { return 1.0; } else { return 0.0; }\n}",
             True,
         ),
         ("float4 proc(float3 n, float3 l) { return saturate(dot(normalize(n), normalize(l))); }", True),
@@ -408,6 +403,32 @@ class TestConnectMaterialExpressions:
         assert result["success"] is False
         assert "required" in result["message"].lower()
 
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_material_output_uses_named_enum(self):
+        """Material output connections must use Unreal's enum, not ordinal guesses."""
+        import unreal
+
+        material = MagicMock()
+        source = MagicMock()
+        source.get_name.return_value = "Source"
+        material.get_editor_property.return_value = [source]
+        unreal.EditorAssetLibrary.load_asset.return_value = material
+        base_color = object()
+        unreal.MaterialProperty.MP_BASE_COLOR = base_color
+        unreal.MaterialEditingLibrary.connect_material_property.return_value = True
+
+        module, spec = _load_skill_script("connect_material_expressions")
+        spec.loader.exec_module(module)
+        result = module.connect_material_expressions(
+            material_name="M_Test",
+            source_expression="Source",
+            target_expression="Material",
+            target_pin="BaseColor",
+        )
+
+        assert result["success"] is True
+        unreal.MaterialEditingLibrary.connect_material_property.assert_called_once_with(source, "", base_color)
+
 
 # ---------------------------------------------------------------------------
 # compile_material — error paths
@@ -437,6 +458,36 @@ class TestCompileMaterial:
         spec.loader.exec_module(module)
         result = module.compile_material(material_name="")
         assert result["success"] is False
+
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_compiler_errors_are_failures(self):
+        """Shader compiler diagnostics must prevent a success result."""
+        import unreal
+
+        unreal.EditorAssetLibrary.load_asset.return_value = MagicMock()
+        unreal.MaterialEditingLibrary.recompile_material.return_value = ["CustomExpression: unknown identifier"]
+        module, spec = _load_skill_script("compile_material")
+        spec.loader.exec_module(module)
+
+        result = module.compile_material(material_name="M_Broken")
+
+        assert result["success"] is False
+        assert result["context"]["errors"] == ["CustomExpression: unknown identifier"]
+
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_missing_compiler_diagnostics_fails_closed(self):
+        """Older Unreal versions returning None cannot be reported as verified success."""
+        import unreal
+
+        unreal.EditorAssetLibrary.load_asset.return_value = MagicMock()
+        unreal.MaterialEditingLibrary.recompile_material.return_value = None
+        module, spec = _load_skill_script("compile_material")
+        spec.loader.exec_module(module)
+
+        result = module.compile_material(material_name="M_Unverified")
+
+        assert result["success"] is False
+        assert result["context"]["verification"] == "unavailable"
 
 
 # ---------------------------------------------------------------------------
@@ -490,11 +541,43 @@ class TestCreateHlslNode:
         """Invalid output_type returns error."""
         module, spec = _load_skill_script("create_hlsl_node")
         spec.loader.exec_module(module)
-        result = module.create_hlsl_node(
-            material_name="M_Test", hlsl_code="return 1.0;", output_type="InvalidType"
-        )
+        result = module.create_hlsl_node(material_name="M_Test", hlsl_code="return 1.0;", output_type="InvalidType")
         assert result["success"] is False
         assert "output_type" in result["message"].lower()
+
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_creates_named_custom_inputs(self):
+        """Declared inputs must become real CustomInput entries on the expression."""
+        import unreal
+
+        class FakeCustomInput:
+            def __init__(self):
+                self.properties = {}
+
+            def set_editor_property(self, name, value):
+                self.properties[name] = value
+
+        material = MagicMock()
+        expression = MagicMock()
+        unreal.EditorAssetLibrary.load_asset.return_value = material
+        unreal.MaterialEditingLibrary.create_material_expression.return_value = expression
+        unreal.CustomInput = FakeCustomInput
+        unreal.Name = lambda value: value
+        output_enum = object()
+        unreal.CustomMaterialOutputType.CMOT_FLOAT3 = output_enum
+
+        module, spec = _load_skill_script("create_hlsl_node")
+        spec.loader.exec_module(module)
+        result = module.create_hlsl_node(
+            material_name="M_Test",
+            hlsl_code="return UV;",
+            inputs=[{"name": "UV", "type": "float2"}],
+        )
+
+        assert result["success"] is True
+        input_call = next(call for call in expression.set_editor_property.call_args_list if call.args[0] == "inputs")
+        assert input_call.args[1][0].properties["input_name"] == "UV"
+        expression.set_editor_property.assert_any_call("output_type", output_enum)
 
 
 # ---------------------------------------------------------------------------

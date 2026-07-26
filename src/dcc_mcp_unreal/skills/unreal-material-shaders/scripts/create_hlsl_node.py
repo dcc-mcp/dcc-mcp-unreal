@@ -4,33 +4,27 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
-_VALID_INPUT_TYPES = frozenset({"float", "float2", "float3", "float4", "Texture2D", "TextureCube", "MaterialAttributes"})
+_VALID_INPUT_TYPES = frozenset(
+    {"float", "float2", "float3", "float4", "Texture2D", "TextureCube", "MaterialAttributes"}
+)
 
-_VALID_OUTPUT_TYPES = frozenset({
-    "CMOT_Float1", "CMOT_Float2", "CMOT_Float3", "CMOT_Float4", "CMOT_MaterialAttributes",
-})
-
-_OUTPUT_TYPE_MAP = {
-    "CMOT_Float1": 0,
-    "CMOT_Float2": 1,
-    "CMOT_Float3": 2,
-    "CMOT_Float4": 3,
-    "CMOT_MaterialAttributes": 4,
-}
-
-
-def _hlsl_type_to_unreal(hlsl_type: str) -> str:
-    """Map a friendly input type string to unreal ECustomMaterialOutputType."""
-    mapping = {
-        "float": "float",
-        "float2": "MaterialFloat2",
-        "float3": "MaterialFloat3",
-        "float4": "MaterialFloat4",
-        "Texture2D": "Texture2D",
-        "TextureCube": "TextureCube",
-        "MaterialAttributes": "MaterialAttributes",
+_VALID_OUTPUT_TYPES = frozenset(
+    {
+        "CMOT_Float1",
+        "CMOT_Float2",
+        "CMOT_Float3",
+        "CMOT_Float4",
+        "CMOT_MaterialAttributes",
     }
-    return mapping.get(hlsl_type, "MaterialFloat3")
+)
+
+_OUTPUT_TYPE_ATTRS = {
+    "CMOT_Float1": "CMOT_FLOAT1",
+    "CMOT_Float2": "CMOT_FLOAT2",
+    "CMOT_Float3": "CMOT_FLOAT3",
+    "CMOT_Float4": "CMOT_FLOAT4",
+    "CMOT_MaterialAttributes": "CMOT_MATERIAL_ATTRIBUTES",
+}
 
 
 @skill_entry
@@ -84,6 +78,11 @@ def create_hlsl_node(
                 f"Invalid input at index {i}",
                 "Each input must be a dict with at least a 'name' key.",
             )
+        if not str(inp["name"]).strip():
+            return skill_error(
+                f"Invalid input at index {i}",
+                "Custom HLSL input names must be non-empty.",
+            )
         inp_type = inp.get("type", "float3")
         if inp_type not in _VALID_INPUT_TYPES:
             return skill_error(
@@ -121,25 +120,28 @@ def create_hlsl_node(
             "MaterialEditingLibrary.create_material_expression returned None",
         )
 
-    # Set HLSL code
-    custom_expr.set_editor_property("code", hlsl_code)
+    try:
+        custom_expr.set_editor_property("code", hlsl_code)
+        output_enum = getattr(unreal.CustomMaterialOutputType, _OUTPUT_TYPE_ATTRS[output_type], None)
+        if output_enum is None:
+            raise RuntimeError(f"Unreal does not expose output type {output_type}")
+        custom_expr.set_editor_property("output_type", output_enum)
 
-    # Set output type
-    custom_expr.set_editor_property("output_type", _OUTPUT_TYPE_MAP.get(output_type, 2))
+        if description:
+            custom_expr.set_editor_property("description", description)
 
-    if description:
-        custom_expr.set_editor_property("description", description)
-
-    # Configure inputs
-    if inputs:
-        custom_expr.set_editor_property("inputs", [])
-    for inp in inputs:
-        input_name = inp["name"]
-        _unused = inp.get("type", "float3")
-        # UE Python API for CustomExpression inputs is limited;
-        # most input configuration happens via the editor UI.
-        # We store the input signature for documentation.
-        custom_expr.set_editor_property("description", f"{description}\nInput: {input_name}".strip())
+        custom_inputs = []
+        for inp in inputs:
+            custom_input = unreal.CustomInput()
+            custom_input.set_editor_property("input_name", unreal.Name(str(inp["name"])))
+            custom_inputs.append(custom_input)
+        custom_expr.set_editor_property("inputs", custom_inputs)
+    except Exception as exc:
+        unreal.MaterialEditingLibrary.delete_material_expression(material, custom_expr)
+        return skill_error(
+            f"Failed to configure Custom HLSL node for '{material_name}'",
+            str(exc),
+        )
 
     # Save
     unreal.EditorAssetLibrary.save_asset(material_path)

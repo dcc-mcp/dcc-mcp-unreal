@@ -5,10 +5,20 @@ from __future__ import annotations
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 _VALID_BLEND_MODES = frozenset({"Opaque", "Masked", "Translucent", "Additive", "Modulate"})
-_VALID_SHADING_MODELS = frozenset({
-    "DefaultLit", "Unlit", "Subsurface", "PreintegratedSkin",
-    "ClearCoat", "SubsurfaceProfile", "TwoSidedFoliage", "Hair", "Cloth", "Eye",
-})
+_VALID_SHADING_MODELS = frozenset(
+    {
+        "DefaultLit",
+        "Unlit",
+        "Subsurface",
+        "PreintegratedSkin",
+        "ClearCoat",
+        "SubsurfaceProfile",
+        "TwoSidedFoliage",
+        "Hair",
+        "Cloth",
+        "Eye",
+    }
+)
 
 
 def _resolve_blend_mode(unreal, mode: str):

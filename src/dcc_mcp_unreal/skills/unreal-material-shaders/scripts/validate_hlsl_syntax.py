@@ -21,33 +21,135 @@ from dcc_mcp_core.skill import skill_entry, skill_success
 
 _HLSL_RESERVED_KEYWORDS: set[str] = {
     # Types
-    "float", "float2", "float3", "float4", "half", "half2", "half3", "half4",
-    "double", "double2", "double3", "double4",
-    "int", "int2", "int3", "int4", "uint", "uint2", "uint3", "uint4",
-    "bool", "bool2", "bool3", "bool4",
-    "matrix", "void", "struct", "sampler", "sampler2D", "samplerCube",
-    "Texture2D", "TextureCube", "RWTexture2D", "RWTexture3D",
-    "StructuredBuffer", "RWStructuredBuffer", "ByteAddressBuffer", "RWByteAddressBuffer",
+    "float",
+    "float2",
+    "float3",
+    "float4",
+    "half",
+    "half2",
+    "half3",
+    "half4",
+    "double",
+    "double2",
+    "double3",
+    "double4",
+    "int",
+    "int2",
+    "int3",
+    "int4",
+    "uint",
+    "uint2",
+    "uint3",
+    "uint4",
+    "bool",
+    "bool2",
+    "bool3",
+    "bool4",
+    "matrix",
+    "void",
+    "struct",
+    "sampler",
+    "sampler2D",
+    "samplerCube",
+    "Texture2D",
+    "TextureCube",
+    "RWTexture2D",
+    "RWTexture3D",
+    "StructuredBuffer",
+    "RWStructuredBuffer",
+    "ByteAddressBuffer",
+    "RWByteAddressBuffer",
     # Flow control
-    "if", "else", "for", "while", "do", "switch", "case", "default",
-    "break", "continue", "return", "discard",
+    "if",
+    "else",
+    "for",
+    "while",
+    "do",
+    "switch",
+    "case",
+    "default",
+    "break",
+    "continue",
+    "return",
+    "discard",
     # Qualifiers
-    "const", "static", "uniform", "in", "out", "inout", "inline",
+    "const",
+    "static",
+    "uniform",
+    "in",
+    "out",
+    "inout",
+    "inline",
     # DXC / SM 6.0+ (UE 5.4+)
-    "WaveGetLaneIndex", "WaveActiveSum", "WaveActiveMin", "WaveActiveMax",
-    "groupshared", "RayDesc", "TraceRay", "ReportHit", "IgnoreHit", "AcceptHitAndEndSearch",
+    "WaveGetLaneIndex",
+    "WaveActiveSum",
+    "WaveActiveMin",
+    "WaveActiveMax",
+    "groupshared",
+    "RayDesc",
+    "TraceRay",
+    "ReportHit",
+    "IgnoreHit",
+    "AcceptHitAndEndSearch",
 }
 
 _HLSL_BUILTIN_IDENTIFIERS: set[str] = {
-    "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
-    "abs", "sign", "ceil", "floor", "round", "trunc", "frac",
-    "sqrt", "rsqrt", "pow", "exp", "exp2", "log", "log2", "log10",
-    "min", "max", "clamp", "saturate", "lerp", "step", "smoothstep",
-    "dot", "cross", "normalize", "length", "distance", "reflect", "refract",
-    "ddx", "ddy", "ddx_coarse", "ddy_coarse", "ddx_fine", "ddy_fine", "fwidth",
-    "Sample", "SampleLevel", "SampleBias", "SampleGrad", "Load",
-    "all", "any", "mul", "transpose", "determinant",
-    "asfloat", "asint", "asuint",
+    "sin",
+    "cos",
+    "tan",
+    "asin",
+    "acos",
+    "atan",
+    "atan2",
+    "abs",
+    "sign",
+    "ceil",
+    "floor",
+    "round",
+    "trunc",
+    "frac",
+    "sqrt",
+    "rsqrt",
+    "pow",
+    "exp",
+    "exp2",
+    "log",
+    "log2",
+    "log10",
+    "min",
+    "max",
+    "clamp",
+    "saturate",
+    "lerp",
+    "step",
+    "smoothstep",
+    "dot",
+    "cross",
+    "normalize",
+    "length",
+    "distance",
+    "reflect",
+    "refract",
+    "ddx",
+    "ddy",
+    "ddx_coarse",
+    "ddy_coarse",
+    "ddx_fine",
+    "ddy_fine",
+    "fwidth",
+    "Sample",
+    "SampleLevel",
+    "SampleBias",
+    "SampleGrad",
+    "Load",
+    "all",
+    "any",
+    "mul",
+    "transpose",
+    "determinant",
+    "asfloat",
+    "asint",
+    "asuint",
 }
 
 # Simple regex patterns for HLSL structure
@@ -80,30 +182,36 @@ def _check_brace_balance(source: str) -> list[dict[str, Any]]:
                 stack.append((ch, lineno))
             elif ch in pairs.values():
                 if not stack:
-                    errors.append({
-                        "line": lineno,
-                        "column": col + 1,
-                        "message": f"Unmatched closing '{ch}'",
-                        "severity": "error",
-                    })
+                    errors.append(
+                        {
+                            "line": lineno,
+                            "column": col + 1,
+                            "message": f"Unmatched closing '{ch}'",
+                            "severity": "error",
+                        }
+                    )
                 else:
                     opener, _oline = stack.pop()
                     expected = pairs[opener]
                     if ch != expected:
-                        errors.append({
-                            "line": lineno,
-                            "column": col + 1,
-                            "message": f"Mismatched closing '{ch}' (expected '{expected}' from line {_oline})",
-                            "severity": "error",
-                        })
+                        errors.append(
+                            {
+                                "line": lineno,
+                                "column": col + 1,
+                                "message": f"Mismatched closing '{ch}' (expected '{expected}' from line {_oline})",
+                                "severity": "error",
+                            }
+                        )
 
     for opener, lineno in stack:
-        errors.append({
-            "line": lineno,
-            "column": 0,
-            "message": f"Unclosed '{opener}'",
-            "severity": "error",
-        })
+        errors.append(
+            {
+                "line": lineno,
+                "column": 0,
+                "message": f"Unclosed '{opener}'",
+                "severity": "error",
+            }
+        )
 
     return errors
 
@@ -113,9 +221,7 @@ def _check_semicolons(source: str) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     lines = source.splitlines()
 
-    statement_keywords = re.compile(
-        r"^\s*(float\d*|half\d*|int\d*|uint\d*|bool\d*|double\d*)\s+\w+\s*="
-    )
+    statement_keywords = re.compile(r"^\s*(float\d*|half\d*|int\d*|uint\d*|bool\d*|double\d*)\s+\w+\s*=")
     for lineno, line in enumerate(lines, 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("//") or stripped.startswith("/*"):
@@ -123,12 +229,14 @@ def _check_semicolons(source: str) -> list[dict[str, Any]]:
         if stripped.startswith("#") or stripped.startswith("{") or stripped.startswith("}"):
             continue
         if statement_keywords.match(stripped) and not stripped.endswith(";"):
-            errors.append({
-                "line": lineno,
-                "column": 1,
-                "message": f"Statement likely missing semicolon: '{stripped[:80]}'",
-                "severity": "warning",
-            })
+            errors.append(
+                {
+                    "line": lineno,
+                    "column": 1,
+                    "message": f"Statement likely missing semicolon: '{stripped[:80]}'",
+                    "severity": "warning",
+                }
+            )
 
     return errors
 
@@ -139,18 +247,18 @@ def _check_type_mismatches(source: str) -> list[dict[str, Any]]:
     lines = source.splitlines()
 
     # Detect: float3 result = float_value (scalar assigned to vector)
-    scalar_to_vector = re.compile(
-        r"\b(float3|float4|int3|int4)\s+(\w+)\s*=\s*(\d+\.?\d*f?)\s*;"
-    )
+    scalar_to_vector = re.compile(r"\b(float3|float4|int3|int4)\s+(\w+)\s*=\s*(\d+\.?\d*f?)\s*;")
     for lineno, line in enumerate(lines, 1):
         m = scalar_to_vector.search(line)
         if m:
-            errors.append({
-                "line": lineno,
-                "column": m.start() + 1,
-                "message": f"Likely type mismatch: assigning scalar literal to {m.group(1)} '{m.group(2)}'",
-                "severity": "warning",
-            })
+            errors.append(
+                {
+                    "line": lineno,
+                    "column": m.start() + 1,
+                    "message": f"Likely type mismatch: assigning scalar literal to {m.group(1)} '{m.group(2)}'",
+                    "severity": "warning",
+                }
+            )
 
     # Detect: return type mismatch — return float in void function context
     # (simplified; full check requires call context)
@@ -161,7 +269,6 @@ def _check_type_mismatches(source: str) -> list[dict[str, Any]]:
 def _check_functions(source: str) -> list[dict[str, Any]]:
     """Check function definitions for basic correctness."""
     errors: list[dict[str, Any]] = []
-    lines = source.splitlines()
 
     for m in _RE_FUNCTION_DEFS.finditer(source):
         return_type = m.group(1)
@@ -169,12 +276,14 @@ def _check_functions(source: str) -> list[dict[str, Any]]:
         params = m.group(3)
 
         if return_type not in _HLSL_RESERVED_KEYWORDS and not return_type.startswith("_"):
-            errors.append({
-                "line": source[:m.start()].count("\n") + 1,
-                "column": m.start(1) + 1,
-                "message": f"Unrecognized return type '{return_type}' for function '{func_name}'",
-                "severity": "warning",
-            })
+            errors.append(
+                {
+                    "line": source[: m.start()].count("\n") + 1,
+                    "column": m.start(1) + 1,
+                    "message": f"Unrecognized return type '{return_type}' for function '{func_name}'",
+                    "severity": "warning",
+                }
+            )
 
         if params.strip():
             for param in params.split(","):
@@ -183,12 +292,14 @@ def _check_functions(source: str) -> list[dict[str, Any]]:
                     continue
                 parts = param.split()
                 if len(parts) < 2:
-                    errors.append({
-                        "line": source[:m.start()].count("\n") + 1,
-                        "column": m.start(3) + 1,
-                        "message": f"Malformed parameter '{param.strip()}' in function '{func_name}'",
-                        "severity": "error",
-                    })
+                    errors.append(
+                        {
+                            "line": source[: m.start()].count("\n") + 1,
+                            "column": m.start(3) + 1,
+                            "message": f"Malformed parameter '{param.strip()}' in function '{func_name}'",
+                            "severity": "error",
+                        }
+                    )
 
     return errors
 
@@ -240,17 +351,17 @@ def validate_hlsl_syntax(
 
     # 5. Entry point check
     if entry_point:
-        _pattern = (
-            r"\b" + re.escape(entry_point) + r"\s*\([^)]*\)\s*" + r"[{]"
-        )
+        _pattern = r"\b" + re.escape(entry_point) + r"\s*\([^)]*\)\s*" + r"[{]"
         found = re.search(_pattern, clean)
         if not found:
-            all_errors.append({
-                "line": 0,
-                "column": 0,
-                "message": f"Entry point '{entry_point}' not found in source",
-                "severity": "error",
-            })
+            all_errors.append(
+                {
+                    "line": 0,
+                    "column": 0,
+                    "message": f"Entry point '{entry_point}' not found in source",
+                    "severity": "error",
+                }
+            )
 
     is_valid = len([e for e in all_errors if e["severity"] == "error"]) == 0
 

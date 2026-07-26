@@ -198,9 +198,12 @@ def add_material_expression(
     elif expression_type == "VectorParameter" and "Value" in params:
         val = params["Value"]
         if isinstance(val, (list, tuple)) and 3 <= len(val) <= 4:
-            expression.set_editor_property("default_value", unreal.LinearColor(
-                float(val[0]), float(val[1]), float(val[2]), float(val[3]) if len(val) == 4 else 1.0
-            ))
+            expression.set_editor_property(
+                "default_value",
+                unreal.LinearColor(
+                    float(val[0]), float(val[1]), float(val[2]), float(val[3]) if len(val) == 4 else 1.0
+                ),
+            )
 
     # Save
     unreal.EditorAssetLibrary.save_asset(material_path)

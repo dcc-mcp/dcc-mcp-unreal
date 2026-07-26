@@ -5,12 +5,23 @@ from __future__ import annotations
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 # Material property pins that connect directly to the material output
-_MATERIAL_PROPERTY_PINS = frozenset({
-    "BaseColor", "Metallic", "Specular", "Roughness", "Anisotropy",
-    "EmissiveColor", "Opacity", "OpacityMask", "Normal", "Tangent",
-    "WorldPositionOffset", "SubsurfaceColor", "Refraction",
-    "AmbientOcclusion", "PixelDepthOffset",
-})
+_MATERIAL_PROPERTY_ATTRS = {
+    "BaseColor": "MP_BASE_COLOR",
+    "Metallic": "MP_METALLIC",
+    "Specular": "MP_SPECULAR",
+    "Roughness": "MP_ROUGHNESS",
+    "Anisotropy": "MP_ANISOTROPY",
+    "EmissiveColor": "MP_EMISSIVE_COLOR",
+    "Opacity": "MP_OPACITY",
+    "OpacityMask": "MP_OPACITY_MASK",
+    "Normal": "MP_NORMAL",
+    "Tangent": "MP_TANGENT",
+    "WorldPositionOffset": "MP_WORLD_POSITION_OFFSET",
+    "SubsurfaceColor": "MP_SUBSURFACE_COLOR",
+    "Refraction": "MP_REFRACTION",
+    "AmbientOcclusion": "MP_AMBIENT_OCCLUSION",
+    "PixelDepthOffset": "MP_PIXEL_DEPTH_OFFSET",
+}
 
 
 @skill_entry
@@ -61,7 +72,7 @@ def connect_material_expressions(
         )
 
     # If target_pin maps to a material property, connect to material output
-    if target_pin in _MATERIAL_PROPERTY_PINS:
+    if target_pin in _MATERIAL_PROPERTY_ATTRS:
         return _connect_to_material_output(unreal, material, material_path, source_expr, source_pin, target_pin)
 
     # Resolve target expression
@@ -75,10 +86,19 @@ def connect_material_expressions(
     # Connect source output pin → target input pin
     try:
         if source_pin:
-            unreal.MaterialEditingLibrary.connect_material_expressions(source_expr, source_pin, target_expr, target_pin)
+            connected = unreal.MaterialEditingLibrary.connect_material_expressions(
+                source_expr, source_pin, target_expr, target_pin
+            )
         else:
             # Let the engine figure out the default output pin
-            unreal.MaterialEditingLibrary.connect_material_expressions(source_expr, "", target_expr, target_pin)
+            connected = unreal.MaterialEditingLibrary.connect_material_expressions(
+                source_expr, "", target_expr, target_pin
+            )
+        if not connected:
+            return skill_error(
+                f"Failed to connect '{source_expression}' → '{target_expression}.{target_pin}'",
+                "Unreal rejected the material expression connection.",
+            )
     except Exception as exc:
         return skill_error(
             f"Failed to connect '{source_expression}' → '{target_expression}.{target_pin}'",
@@ -133,20 +153,18 @@ def _find_expression(material, key: str):
 def _connect_to_material_output(unreal, material, material_path, source_expr, source_pin, property_name):
     """Connect an expression to a material output property pin."""
     try:
-        property_enum = getattr(unreal.MaterialProperty, f"MP_{property_name}", None)
+        property_enum = getattr(unreal.MaterialProperty, _MATERIAL_PROPERTY_ATTRS[property_name], None)
         if property_enum is None:
-            # Fallback mapping
-            _fallback = {
-                "BaseColor": 0, "Metallic": 1, "Specular": 2, "Roughness": 3,
-                "EmissiveColor": 4, "Opacity": 5, "OpacityMask": 6, "Normal": 7,
-                "WorldPositionOffset": 8, "AmbientOcclusion": 9, "Refraction": 10,
-                "PixelDepthOffset": 11, "SubsurfaceColor": 12, "Anisotropy": 13,
-                "Tangent": 14,
-            }
-            prop_idx = _fallback.get(property_name, 0)
-            unreal.MaterialEditingLibrary.connect_material_property(source_expr, source_pin, prop_idx)
-        else:
-            unreal.MaterialEditingLibrary.connect_material_property(source_expr, source_pin, property_enum)
+            return skill_error(
+                f"Material property unavailable: {property_name}",
+                f"Unreal does not expose {_MATERIAL_PROPERTY_ATTRS[property_name]} in this engine version.",
+            )
+        connected = unreal.MaterialEditingLibrary.connect_material_property(source_expr, source_pin, property_enum)
+        if not connected:
+            return skill_error(
+                f"Failed to connect to Material {property_name}",
+                "Unreal rejected the material property connection.",
+            )
 
         unreal.EditorAssetLibrary.save_asset(material_path)
         return skill_success(
