@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
 def add_actor_to_sequence(
     sequence_path: str,
     actor_name: str,
-    binding_type: str = "possessable",
     binding_name: str = "",
     **kwargs,
 ) -> dict:
@@ -20,7 +19,6 @@ def add_actor_to_sequence(
     Args:
         sequence_path: Package path to the Level Sequence.
         actor_name: Label or name of the actor in the current level.
-        binding_type: 'spawnable' (new copy) or 'possessable' (reference existing).
         binding_name: Custom name for the binding; defaults to actor label.
 
     Returns:
@@ -31,12 +29,6 @@ def add_actor_to_sequence(
             "Missing required parameters",
             "sequence_path and actor_name are required",
         )
-    if binding_type not in ("spawnable", "possessable"):
-        return unreal_error(
-            "Invalid binding_type",
-            f"binding_type must be 'spawnable' or 'possessable', got '{binding_type}'",
-        )
-
     try:
         import unreal  # noqa: PLC0415
     except ImportError:
@@ -51,24 +43,16 @@ def add_actor_to_sequence(
             )
 
         # Find the actor in the current level
-        actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
-            unreal.EditorLevelLibrary.get_editor_world(),
-            actor_name,
-        )
+        actor = find_level_actor(actor_name)
         if actor is None:
-            # Try by name
-            all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-            matches = [a for a in all_actors if a.get_name() == actor_name or a.get_actor_label() == actor_name]
-            if not matches:
-                return unreal_error(
-                    "Actor not found",
-                    f"No actor named '{actor_name}' in the current level.",
-                    possible_solutions=[
-                        "Spawn or select the actor first with unreal_actors__spawn_actor.",
-                        "Check the actor label in the World Outliner.",
-                    ],
-                )
-            actor = matches[0]
+            return unreal_error(
+                "Actor not found",
+                f"No actor named '{actor_name}' in the current level.",
+                possible_solutions=[
+                    "Spawn or select the actor first with unreal_actors__spawn_actor.",
+                    "Check the actor label in the World Outliner.",
+                ],
+            )
 
         # Resolve binding name
         resolved_binding_name = binding_name or actor.get_actor_label() or actor_name
@@ -80,28 +64,35 @@ def add_actor_to_sequence(
                 "Failed to add actor binding",
                 f"Could not create possessable for '{actor_name}'.",
             )
+        if binding_name:
+            binding.set_display_name(binding_name)
 
-        # Add a transform track if the actor has a root component
-        root_component = actor.get_actor_root_component()
-        if root_component is not None:
-            sequence.add_possessable(root_component)
+        transform_track = binding.add_track(unreal.MovieScene3DTransformTrack)
+        if transform_track is None:
+            return unreal_error("Failed to add transform track", f"Could not add a transform track for '{actor_name}'.")
+        transform_section = transform_track.add_section()
+        if transform_section is None:
+            return unreal_error(
+                "Failed to add transform section", f"Could not add a transform section for '{actor_name}'."
+            )
+        transform_section.set_range(sequence.get_playback_start(), sequence.get_playback_end())
 
-        unreal.EditorAssetLibrary.save_loaded_asset(sequence)
+        if not unreal.EditorAssetLibrary.save_loaded_asset(sequence):
+            return unreal_error("Failed to save Level Sequence", f"Unreal could not save '{sequence_path}'.")
 
         return unreal_success(
             f"Added '{resolved_binding_name}' to Level Sequence",
             sequence_path=sequence_path,
             binding_name=resolved_binding_name,
             actor_name=actor_name,
-            binding_type=binding_type,
+            binding_type="possessable",
             prompt="Use add_transform_keyframe to author animation on this binding.",
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Actor binding attempted for '{actor_name}'",
+        return unreal_from_exception(
+            exc,
+            f"Failed to bind actor '{actor_name}'",
             sequence_path=sequence_path,
             actor_name=actor_name,
-            note=str(exc),
-            prompt="Verify the sequence is valid and the actor exists in the level.",
         )

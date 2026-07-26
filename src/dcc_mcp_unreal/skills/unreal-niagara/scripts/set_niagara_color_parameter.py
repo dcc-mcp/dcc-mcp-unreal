@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_success
 
 
 @skill_entry
@@ -29,11 +31,14 @@ def set_niagara_color_parameter(
             "Missing required parameters",
             "actor_name, parameter_name, and color are required",
         )
-    if len(color) < 3:
+    if len(color) not in (3, 4):
         return unreal_error(
             "Invalid color",
-            "color must have at least 3 components [R, G, B]",
+            "color must contain [R, G, B] or [R, G, B, A]",
         )
+    color_values = [float(component) for component in color]
+    if not all(math.isfinite(component) and 0.0 <= component <= 1.0 for component in color_values):
+        return unreal_error("Invalid color", "all color components must be finite values in the 0-1 range")
 
     try:
         import unreal  # noqa: PLC0415
@@ -42,19 +47,12 @@ def set_niagara_color_parameter(
 
     try:
         # Find actor
-        actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
-            unreal.EditorLevelLibrary.get_editor_world(),
-            actor_name,
-        )
+        actor = find_level_actor(actor_name)
         if actor is None:
-            all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-            matches = [a for a in all_actors if a.get_name() == actor_name or a.get_actor_label() == actor_name]
-            if not matches:
-                return unreal_error(
-                    "Niagara actor not found",
-                    f"No actor named '{actor_name}' in the current level.",
-                )
-            actor = matches[0]
+            return unreal_error(
+                "Niagara actor not found",
+                f"No actor named '{actor_name}' in the current level.",
+            )
 
         niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
         if niagara_component is None:
@@ -64,10 +62,10 @@ def set_niagara_color_parameter(
             )
 
         # Build linear color
-        r = float(color[0])
-        g = float(color[1])
-        b = float(color[2])
-        a = float(color[3]) if len(color) >= 4 else 1.0
+        r = color_values[0]
+        g = color_values[1]
+        b = color_values[2]
+        a = color_values[3] if len(color_values) == 4 else 1.0
 
         linear_color = unreal.LinearColor(r, g, b, a)
         niagara_component.set_variable_linear_color(parameter_name, linear_color)

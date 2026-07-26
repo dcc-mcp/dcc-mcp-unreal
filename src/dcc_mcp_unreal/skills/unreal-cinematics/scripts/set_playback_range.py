@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
@@ -29,10 +31,10 @@ def set_playback_range(
             "Invalid sequence_path",
             "sequence_path must start with /Game",
         )
-    if start_time >= end_time:
+    if not math.isfinite(start_time) or not math.isfinite(end_time) or start_time >= end_time:
         return unreal_error(
             "Invalid playback range",
-            f"start_time ({start_time}) must be less than end_time ({end_time})",
+            "start_time and end_time must be finite, and start_time must be less than end_time",
         )
 
     try:
@@ -46,13 +48,20 @@ def set_playback_range(
             return unreal_error("Level Sequence not found", f"No asset at '{sequence_path}'.")
 
         display_rate = sequence.get_display_rate()
-        start_frame = unreal.FrameNumber(int(start_time * display_rate.numerator))
-        end_frame = unreal.FrameNumber(int(end_time * display_rate.numerator))
+        if display_rate.numerator <= 0 or display_rate.denominator <= 0:
+            return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
+        start_frame = round(start_time * display_rate.numerator / display_rate.denominator)
+        end_frame = round(end_time * display_rate.numerator / display_rate.denominator)
 
-        sequence.set_playback_start(start_frame.value)
-        sequence.set_playback_end(end_frame.value)
+        sequence.set_playback_start(start_frame)
+        sequence.set_playback_end(end_frame)
 
-        unreal.EditorAssetLibrary.save_loaded_asset(sequence)
+        if sequence.get_playback_start() != start_frame or sequence.get_playback_end() != end_frame:
+            return unreal_error(
+                "Playback range verification failed", "The sequence did not retain the requested frame range."
+            )
+        if not unreal.EditorAssetLibrary.save_loaded_asset(sequence):
+            return unreal_error("Failed to save Level Sequence", f"Unreal could not save '{sequence_path}'.")
 
         duration = end_time - start_time
         return unreal_success(
@@ -61,15 +70,16 @@ def set_playback_range(
             start_time=start_time,
             end_time=end_time,
             duration=duration,
-            prompt="Use get_sequence_info to verify, then render_sequence_to_movie to export.",
+            start_frame=start_frame,
+            end_frame=end_frame,
+            prompt="Use get_sequence_info to verify, then queue_sequence_render when the sequence is ready.",
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Playback range set attempted for '{sequence_path}'",
+        return unreal_from_exception(
+            exc,
+            f"Failed to set playback range for '{sequence_path}'",
             sequence_path=sequence_path,
             start_time=start_time,
             end_time=end_time,
-            note=str(exc),
-            prompt="Verify the sequence asset is valid.",
         )

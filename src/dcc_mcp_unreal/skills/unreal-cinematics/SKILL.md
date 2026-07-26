@@ -2,8 +2,8 @@
 name: unreal-cinematics
 description: >-
   Domain skill — Sequencer shot and keyframe orchestration, camera cut tracks,
-  and cinematic preview/render. Use when creating or editing Level Sequences,
-  authoring camera animation, or rendering cinematics in Unreal Engine 5.
+  and Movie Render Queue job setup. Use when creating or editing Level
+  Sequences, authoring camera animation, or preparing an MRQ job in Unreal Engine 5.
   Not for Blueprint scripting (unreal-blueprints) or runtime playback
   (unreal-runtime).
 license: MIT
@@ -23,8 +23,9 @@ metadata:
 # unreal-cinematics (Authoring stage)
 
 Create and edit Level Sequences, add camera cuts and actor bindings,
-author transform keyframes, control playback range, and render cinematic
-output via the Movie Render Queue.
+author transform keyframes, control playback range, and prepare cinematic jobs
+for the Movie Render Queue. Starting a render and verifying output are outside
+this skill's current contract.
 
 ## Workflow
 
@@ -34,7 +35,7 @@ output via the Movie Render Queue.
 4. Add camera cuts via `add_camera_cut_track` for shot switching.
 5. Set playback ranges with `set_playback_range`.
 6. Inspect sequence state with `get_sequence_info`.
-7. Render to video with `render_sequence_to_movie`.
+7. Add an MRQ job to the active editor queue with `queue_sequence_render`, then start and monitor it in Unreal.
 
 When UE 5.8+ official MCP is available, the `unreal-official-mcp` skill
 provides additional Sequencer tools through Epic's toolset registry.
@@ -49,4 +50,4 @@ Prefer the official path for complex shot workflows.
 - `set_playback_range` — Set the sequence start and end frame
 - `get_sequence_info` — Inspect tracks, bindings, and playback range
 - `add_camera_cut_track` — Add a camera cut track for shot switching
-- `render_sequence_to_movie` — Queue a cinematic render via Movie Render Queue
+- `queue_sequence_render` — Configure an active-session MRQ job without starting a render

@@ -11,7 +11,7 @@ tools:
     timeout_hint_secs: 30
     read_only: false
     destructive: false
-    idempotent: true
+    idempotent: false
     input_schema:
       type: object
       required: [sequence_name]
@@ -26,6 +26,7 @@ tools:
           description: Content Browser folder path (must start with /Game).
         frame_rate:
           type: number
+          exclusiveMinimum: 0
           default: 30.0
           description: Frame rate for the sequence (FPS).
     next-tools:
@@ -57,9 +58,9 @@ tools:
 
   - name: add_actor_to_sequence
     description: >-
-      Add an actor from the current level as a spawnable or possessable
-      binding in a Level Sequence. The binding name defaults to the actor
-      label.
+      Add an actor from the current level as a possessable binding with a
+      transform track in a Level Sequence. The binding name defaults to the
+      actor label.
     source_file: scripts/add_actor_to_sequence.py
     execution: sync
     affinity: main
@@ -67,7 +68,7 @@ tools:
     timeout_hint_secs: 30
     read_only: false
     destructive: false
-    idempotent: true
+    idempotent: false
     input_schema:
       type: object
       required: [sequence_path, actor_name]
@@ -80,11 +81,6 @@ tools:
           type: string
           minLength: 1
           description: Label or name of the actor in the current level.
-        binding_type:
-          type: string
-          enum: [spawnable, possessable]
-          default: possessable
-          description: Whether to create a spawnable (new copy) or possessable (reference existing) binding.
         binding_name:
           type: string
           description: Custom name for the binding; defaults to the actor label.
@@ -193,7 +189,7 @@ tools:
           minLength: 1
           description: Package path to the Level Sequence.
     next-tools:
-      on-success: [unreal_cinematics__add_camera_cut_track, unreal_cinematics__render_sequence_to_movie]
+      on-success: [unreal_cinematics__add_camera_cut_track, unreal_cinematics__queue_sequence_render]
 
   - name: add_camera_cut_track
     description: >-
@@ -231,15 +227,16 @@ tools:
     next-tools:
       on-success: [unreal_cinematics__get_sequence_info]
 
-  - name: render_sequence_to_movie
+  - name: queue_sequence_render
     description: >-
-      Queue a Level Sequence for cinematic rendering via the Movie Render Queue.
-      Returns the job status. Not for real-time viewport capture.
-    source_file: scripts/render_sequence_to_movie.py
-    execution: async
+      Add a configured Level Sequence job to the active Movie Render Queue.
+      The job remains in the current editor session; this tool does not start
+      rendering, save a queue preset, or verify output files.
+    source_file: scripts/queue_sequence_render.py
+    execution: sync
     affinity: main
     enforce_thread_affinity: false
-    timeout_hint_secs: 300
+    timeout_hint_secs: 30
     read_only: false
     destructive: false
     idempotent: false
@@ -254,12 +251,14 @@ tools:
         output_path:
           type: string
           minLength: 1
-          description: Absolute output directory for rendered frames/video.
+          description: Absolute output directory configured for rendered image frames.
         resolution_x:
           type: integer
+          minimum: 1
           default: 1920
         resolution_y:
           type: integer
+          minimum: 1
           default: 1080
         output_format:
           type: string
@@ -268,6 +267,8 @@ tools:
           description: Output file format.
         frame_rate_override:
           type: number
+          minimum: 0
+          default: 0.0
           description: Override frame rate; uses sequence default when omitted.
     next-tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
@@ -36,6 +36,7 @@ def spawn_niagara_actor(
             "Provide the package path to a Niagara system asset.",
         )
 
+    actor = None
     try:
         import unreal  # noqa: PLC0415
     except ImportError:
@@ -82,8 +83,15 @@ def spawn_niagara_actor(
 
         # Get the Niagara component
         niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
-        if niagara_component is not None and auto_activate:
+        if niagara_component is None:
+            actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            if actor_subsystem is not None:
+                actor_subsystem.destroy_actor(actor)
+            return unreal_error("No Niagara component found", "The spawned actor has no NiagaraComponent.")
+        if auto_activate:
             niagara_component.activate()
+        else:
+            niagara_component.deactivate()
 
         return unreal_success(
             f"Spawned Niagara actor '{actor_label}'",
@@ -96,9 +104,15 @@ def spawn_niagara_actor(
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Niagara actor spawn attempted for '{niagara_system_path}'",
+        if actor is not None:
+            try:
+                actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+                if actor_subsystem is not None:
+                    actor_subsystem.destroy_actor(actor)
+            except Exception:
+                pass
+        return unreal_from_exception(
+            exc,
+            f"Failed to spawn Niagara actor for '{niagara_system_path}'",
             system_path=niagara_system_path,
-            note=str(exc),
-            prompt="Manually drag the Niagara system into the level from the Content Browser.",
         )

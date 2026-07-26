@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
@@ -46,8 +46,11 @@ def open_level_sequence(
             )
 
         # Open in the Sequencer editor
-        asset_editor_subsystem = unreal.AssetEditorSubsystem()
-        asset_editor_subsystem.open_editor_for_assets([sequence])
+        asset_editor_subsystem = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
+        if asset_editor_subsystem is None:
+            return unreal_error("Asset editor unavailable", "AssetEditorSubsystem could not be obtained.")
+        if not asset_editor_subsystem.open_editor_for_assets([sequence]):
+            return unreal_error("Failed to open Sequencer", f"Unreal did not open an editor for '{sequence_path}'.")
 
         return unreal_success(
             f"Opened Level Sequence '{sequence_path}' in Sequencer",
@@ -56,9 +59,8 @@ def open_level_sequence(
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Sequencer open attempted for '{sequence_path}'",
+        return unreal_from_exception(
+            exc,
+            f"Failed to open Sequencer for '{sequence_path}'",
             sequence_path=sequence_path,
-            note=str(exc),
-            prompt="The sequence may already be open. Use get_sequence_info to verify.",
         )

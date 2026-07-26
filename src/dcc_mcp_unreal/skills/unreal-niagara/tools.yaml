@@ -10,7 +10,7 @@ tools:
     timeout_hint_secs: 60
     read_only: false
     destructive: false
-    idempotent: true
+    idempotent: false
     input_schema:
       type: object
       required: [system_name]
@@ -167,8 +167,9 @@ tools:
 
   - name: get_niagara_system_info
     description: >-
-      Inspect a Niagara system: list emitters, exposed parameters, and
-      current state. Works on both the system asset and running actors.
+      Resolve a Niagara system asset or actor and report its verified asset
+      path and component state. Unreal Python 5.8 does not expose emitter or
+      module graph details; use the official Niagara toolsets for those.
     source_file: scripts/get_niagara_system_info.py
     execution: sync
     affinity: main
@@ -188,7 +189,7 @@ tools:
             Either a Niagara system asset path (e.g. /Game/VFX/MySystem)
             or an actor label for a spawned Niagara actor in the level.
     next-tools:
-      on-success: [unreal_niagara__set_niagara_float_parameter, unreal_niagara__set_niagara_emitter_state]
+      on-success: [unreal_niagara__set_niagara_float_parameter, unreal_niagara__reset_niagara_system]
 
   - name: reset_niagara_system
     description: >-
@@ -211,31 +212,3 @@ tools:
           type: string
           minLength: 1
           description: Label or name of the Niagara actor in the level.
-
-  - name: set_niagara_emitter_state
-    description: >-
-      Enable or disable a specific emitter within a Niagara system
-      component by emitter name.
-    source_file: scripts/set_niagara_emitter_state.py
-    execution: sync
-    affinity: main
-    enforce_thread_affinity: false
-    timeout_hint_secs: 15
-    read_only: false
-    destructive: false
-    idempotent: true
-    input_schema:
-      type: object
-      required: [actor_name, emitter_name, enabled]
-      properties:
-        actor_name:
-          type: string
-          minLength: 1
-          description: Label or name of the Niagara actor in the level.
-        emitter_name:
-          type: string
-          minLength: 1
-          description: Name of the emitter to toggle.
-        enabled:
-          type: boolean
-          description: True to enable the emitter, False to disable.

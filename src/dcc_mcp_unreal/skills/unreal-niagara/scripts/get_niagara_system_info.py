@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_success
 
 
 @skill_entry
@@ -12,14 +12,14 @@ def get_niagara_system_info(
     target: str,
     **kwargs,
 ) -> dict:
-    """Inspect a Niagara system asset or running actor.
+    """Resolve a Niagara system asset or running actor and report basic state.
 
     Args:
         target: Either a Niagara system asset path (/Game/VFX/MySystem)
                 or an actor label for a spawned Niagara actor.
 
     Returns:
-        ActionResultModel dict with emitter and parameter info.
+        ActionResultModel dict with verified asset/component state.
     """
     if not target:
         return unreal_error(
@@ -51,15 +51,7 @@ def get_niagara_system_info(
                 )
         else:
             # Try as actor name
-            actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
-                unreal.EditorLevelLibrary.get_editor_world(),
-                target,
-            )
-            if actor is None:
-                all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-                matches = [a for a in all_actors if a.get_name() == target or a.get_actor_label() == target]
-                if matches:
-                    actor = matches[0]
+            actor = find_level_actor(target)
 
             if actor is not None:
                 niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
@@ -78,53 +70,15 @@ def get_niagara_system_info(
                 ],
             )
 
-        # Gather emitter info
-        emitters = system_asset.get_emitter_handles()
-        emitter_info = []
-        for i, emitter_handle in enumerate(emitters):
-            emitter_instance = emitter_handle.get_instance()
-            emitter_name = emitter_instance.get_name() if emitter_instance else f"emitter_{i}"
-
-            emitter_entry = {
-                "name": emitter_name,
-                "index": i,
-                "is_enabled": emitter_handle.get_is_enabled() if hasattr(emitter_handle, "get_is_enabled") else True,
-            }
-
-            # Try to get modules
-            if emitter_instance is not None and hasattr(emitter_instance, "get_scripts"):
-                scripts = emitter_instance.get_scripts()
-                module_names = []
-                for script in scripts:
-                    if hasattr(script, "get_name"):
-                        module_names.append(script.get_name())
-                emitter_entry["modules"] = module_names
-
-            emitter_info.append(emitter_entry)
-
-        # Gather exposed parameters
-        exposed_params = []
-        if hasattr(system_asset, "get_exposed_parameters"):
-            exposed = system_asset.get_exposed_parameters()
-            if exposed is not None:
-                for param in exposed:
-                    param_info = {
-                        "name": param.get_name() if hasattr(param, "get_name") else str(param),
-                    }
-                    if hasattr(param, "get_type"):
-                        param_info["type"] = str(param.get_type())
-                    exposed_params.append(param_info)
-
         system_name = system_asset.get_name() if system_asset else "unknown"
+        system_path = str(system_asset.get_path_name())
 
         context = {
             "system_name": system_name,
-            "system_path": target if target.startswith("/Game") else str(system_asset.get_path_name()),
-            "emitter_count": len(emitter_info),
-            "emitters": emitter_info,
-            "exposed_parameter_count": len(exposed_params),
-            "exposed_parameters": exposed_params,
+            "system_path": system_path,
             "is_running_in_level": is_actor,
+            "emitter_details_available": False,
+            "parameter_details_available": False,
         }
         if is_actor:
             context["actor_name"] = actor_name
@@ -135,9 +89,12 @@ def get_niagara_system_info(
                 )
 
         return unreal_success(
-            f"Niagara system '{system_name}': {len(emitter_info)} emitters, {len(exposed_params)} params",
+            f"Resolved Niagara system '{system_name}'",
             **context,
-            prompt="Use set_niagara_float_parameter or set_niagara_emitter_state to modify.",
+            prompt=(
+                "Use the Niagara editor or UE 5.8 official Niagara toolsets for emitter/module inspection; "
+                "the standard Unreal Python API does not expose those details."
+            ),
         )
 
     except Exception as exc:

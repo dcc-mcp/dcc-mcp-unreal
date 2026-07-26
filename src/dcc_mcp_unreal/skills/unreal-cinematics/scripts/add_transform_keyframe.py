@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from dcc_mcp_core.skill import skill_entry
@@ -42,6 +43,16 @@ def add_transform_keyframe(
             "No transform data provided",
             "At least one of location, rotation, or scale must be specified.",
         )
+    if not math.isfinite(time):
+        return unreal_error("Invalid key time", "time must be a finite number")
+    for field_name, values in (("location", location), ("rotation", rotation), ("scale", scale)):
+        if values is None:
+            continue
+        if len(values) != 3 or not all(math.isfinite(float(value)) for value in values):
+            return unreal_error(
+                f"Invalid {field_name}",
+                f"{field_name} must contain exactly three finite numbers",
+            )
 
     try:
         import unreal  # noqa: PLC0415
@@ -89,39 +100,54 @@ def add_transform_keyframe(
 
         # Set keyframes
         display_rate = sequence.get_display_rate()
-        key_time = unreal.FrameNumber(int(time * display_rate.numerator / display_rate.denominator))
+        if display_rate.numerator <= 0 or display_rate.denominator <= 0:
+            return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
+        key_time = unreal.FrameNumber(round(time * display_rate.numerator / display_rate.denominator))
+        keys_added = 0
 
-        if location is not None and len(location) >= 3:
+        if location is not None:
             for channel in channels:
-                channel_name = channel.get_name()
+                channel_name = str(channel.get_name())
                 if "Location.X" in channel_name:
                     channel.add_key(key_time, float(location[0]))
+                    keys_added += 1
                 elif "Location.Y" in channel_name:
                     channel.add_key(key_time, float(location[1]))
+                    keys_added += 1
                 elif "Location.Z" in channel_name:
                     channel.add_key(key_time, float(location[2]))
+                    keys_added += 1
 
-        if rotation is not None and len(rotation) >= 3:
+        if rotation is not None:
             for channel in channels:
-                channel_name = channel.get_name()
+                channel_name = str(channel.get_name())
                 if "Rotation.X" in channel_name:
-                    channel.add_key(key_time, float(rotation[0]))
-                elif "Rotation.Y" in channel_name:
-                    channel.add_key(key_time, float(rotation[1]))
-                elif "Rotation.Z" in channel_name:
                     channel.add_key(key_time, float(rotation[2]))
+                    keys_added += 1
+                elif "Rotation.Y" in channel_name:
+                    channel.add_key(key_time, float(rotation[0]))
+                    keys_added += 1
+                elif "Rotation.Z" in channel_name:
+                    channel.add_key(key_time, float(rotation[1]))
+                    keys_added += 1
 
-        if scale is not None and len(scale) >= 3:
+        if scale is not None:
             for channel in channels:
-                channel_name = channel.get_name()
+                channel_name = str(channel.get_name())
                 if "Scale.X" in channel_name:
                     channel.add_key(key_time, float(scale[0]))
+                    keys_added += 1
                 elif "Scale.Y" in channel_name:
                     channel.add_key(key_time, float(scale[1]))
+                    keys_added += 1
                 elif "Scale.Z" in channel_name:
                     channel.add_key(key_time, float(scale[2]))
+                    keys_added += 1
 
-        unreal.EditorAssetLibrary.save_loaded_asset(sequence)
+        if keys_added == 0:
+            return unreal_error("No matching transform channels", "The transform section exposed no matching channels.")
+        if not unreal.EditorAssetLibrary.save_loaded_asset(sequence):
+            return unreal_error("Failed to save Level Sequence", f"Unreal could not save '{sequence_path}'.")
 
         return unreal_success(
             f"Added transform keyframe at t={time:.2f}s for '{binding_name}'",
@@ -131,7 +157,8 @@ def add_transform_keyframe(
             location=location,
             rotation=rotation,
             scale=scale,
-            prompt="Use add_transform_keyframe again for more keyframes, then render_sequence_to_movie.",
+            keys_added=keys_added,
+            prompt="Use add_transform_keyframe again for more keyframes, then queue_sequence_render.",
         )
 
     except Exception as exc:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_success
 
 
 @skill_entry
@@ -32,19 +32,12 @@ def reset_niagara_system(
         return unreal_error("Unreal Engine not available", "ImportError: unreal module not found")
 
     try:
-        actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
-            unreal.EditorLevelLibrary.get_editor_world(),
-            actor_name,
-        )
+        actor = find_level_actor(actor_name)
         if actor is None:
-            all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-            matches = [a for a in all_actors if a.get_name() == actor_name or a.get_actor_label() == actor_name]
-            if not matches:
-                return unreal_error(
-                    "Niagara actor not found",
-                    f"No actor named '{actor_name}' in the current level.",
-                )
-            actor = matches[0]
+            return unreal_error(
+                "Niagara actor not found",
+                f"No actor named '{actor_name}' in the current level.",
+            )
 
         niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
         if niagara_component is None:

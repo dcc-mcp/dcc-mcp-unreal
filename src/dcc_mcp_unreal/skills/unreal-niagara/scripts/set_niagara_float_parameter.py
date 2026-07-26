@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 from dcc_mcp_core.skill import skill_entry
 
-from dcc_mcp_unreal.api import unreal_error, unreal_success
+from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_success
 
 
 @skill_entry
@@ -29,6 +31,8 @@ def set_niagara_float_parameter(
             "Missing required parameters",
             "actor_name and parameter_name are required",
         )
+    if not math.isfinite(value):
+        return unreal_error("Invalid value", "value must be a finite number")
 
     try:
         import unreal  # noqa: PLC0415
@@ -37,20 +41,13 @@ def set_niagara_float_parameter(
 
     try:
         # Find the actor
-        actor = unreal.EditorLevelLibrary.find_actor_by_label_in_level(
-            unreal.EditorLevelLibrary.get_editor_world(),
-            actor_name,
-        )
+        actor = find_level_actor(actor_name)
         if actor is None:
-            all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-            matches = [a for a in all_actors if a.get_name() == actor_name or a.get_actor_label() == actor_name]
-            if not matches:
-                return unreal_error(
-                    "Niagara actor not found",
-                    f"No actor named '{actor_name}' in the current level.",
-                    possible_solutions=["Spawn it first with spawn_niagara_actor."],
-                )
-            actor = matches[0]
+            return unreal_error(
+                "Niagara actor not found",
+                f"No actor named '{actor_name}' in the current level.",
+                possible_solutions=["Spawn it first with spawn_niagara_actor."],
+            )
 
         # Get the Niagara component
         niagara_component = actor.get_component_by_class(unreal.NiagaraComponent)
