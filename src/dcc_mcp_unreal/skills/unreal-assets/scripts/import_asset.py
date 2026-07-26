@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from _asset_import import configure_fbx_options, primary_object_path
+from _asset_import import configure_alembic_geometry_cache_options, configure_fbx_options, primary_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -19,13 +19,15 @@ def import_asset(
     import_textures: bool = True,
     import_as_skeletal: bool = False,
     import_animations: bool = True,
+    import_as_geometry_cache: bool = False,
     **kwargs,
 ) -> dict:
     """Import a file from disk into the Content Browser.
 
     Supports any format Unreal's ``AssetTools`` can handle:
-    FBX (static mesh / skeletal mesh / animation), PNG/TGA/JPEG (texture),
-    WAV (sound), CSV (data table), and more.
+    FBX (static mesh / skeletal mesh / animation), Alembic (static mesh /
+    Geometry Cache), PNG/TGA/JPEG (texture), WAV (sound), CSV (data table),
+    and more.
 
     Args:
         source_path: Absolute path to the source file on disk
@@ -42,6 +44,8 @@ def import_asset(
         import_as_skeletal: For FBX files, import a skeletal mesh instead of a
             static mesh.
         import_animations: For skeletal FBX files, also import embedded animation.
+        import_as_geometry_cache: For Alembic files, import an animated
+            Geometry Cache instead of the default Static Mesh.
 
     Returns:
         dict: ActionResultModel with the imported asset's object path.
@@ -78,7 +82,13 @@ def import_asset(
     task.set_editor_property("replace_existing", replace_existing)
     task.set_editor_property("automated", True)
     task.set_editor_property("save", True)
-    if os.path.splitext(source_path)[1].lower() == ".fbx":
+    extension = os.path.splitext(source_path)[1].lower()
+    if import_as_geometry_cache and extension != ".abc":
+        return skill_error(
+            "Invalid Geometry Cache source",
+            "import_as_geometry_cache requires an Alembic (.abc) source file",
+        )
+    if extension == ".fbx":
         task.set_editor_property(
             "options",
             configure_fbx_options(
@@ -90,6 +100,9 @@ def import_asset(
                 import_animations=import_animations,
             ),
         )
+    elif extension == ".abc" and import_as_geometry_cache:
+        task.set_editor_property("factory", unreal.AlembicImportFactory())
+        task.set_editor_property("options", configure_alembic_geometry_cache_options(unreal))
 
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     asset_tools.import_asset_tasks([task])

@@ -78,6 +78,10 @@ tools:
           type: boolean
           description: For skeletal FBX files, import embedded animation.
           default: true
+        import_as_geometry_cache:
+          type: boolean
+          description: For Alembic files, import an animated Geometry Cache instead of a Static Mesh.
+          default: false
     next-tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

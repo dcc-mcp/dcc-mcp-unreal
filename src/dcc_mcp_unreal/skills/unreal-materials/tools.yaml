@@ -71,7 +71,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: assign_material
-    description: Bind a Material Interface to a Static Mesh asset or every primitive component on one level actor.
+    description: Bind a Material Interface to a Static Mesh or Geometry Cache asset, or every primitive component on one level actor.
     source_file: scripts/assign_material.py
     execution: sync
     affinity: main
@@ -86,11 +86,11 @@ tools:
       properties:
         target_kind:
           type: string
-          enum: [static_mesh, actor]
+          enum: [static_mesh, geometry_cache, actor]
         target_path:
           type: string
           minLength: 1
-          description: Static Mesh object path or exact level actor name/label.
+          description: Static Mesh or Geometry Cache object path, or exact level actor name/label.
         material_path:
           type: string
           minLength: 1

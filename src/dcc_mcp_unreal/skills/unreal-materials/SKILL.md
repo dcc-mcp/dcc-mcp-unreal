@@ -2,7 +2,7 @@
 name: unreal-materials
 description: >-
   Domain skill - create reusable Material Instances, set typed material parameters,
-  and bind materials to Static Meshes or live level actors in Unreal Engine.
+  and bind materials to Static Meshes, Geometry Caches, or live level actors in Unreal Engine.
 license: MIT
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
