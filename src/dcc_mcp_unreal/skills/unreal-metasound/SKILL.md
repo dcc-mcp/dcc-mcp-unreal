@@ -1,12 +1,11 @@
 ---
 name: unreal-metasound
 description: >-
-  Domain skill — Unreal Engine MetaSound audio graph authoring: create
-  MetaSound Source assets, add inputs and graph nodes, connect nodes, set
-  defaults, build assets, list nodes, and validate graphs. Use for
-  procedural audio design and MetaSound graph creation in Unreal Engine
-  5.4+. Not for asset management — use unreal-assets for that. Not for
-  Blueprint logic — use unreal-blueprints for gameplay scripting.
+  Unreal Engine MetaSound Source authoring through the reflected Builder API:
+  create sources, add typed inputs and exact registered nodes, connect opaque
+  vertex handles, set defaults, inspect nodes, build, save, and validate. Use
+  for procedural audio graphs in Unreal Engine 5.4+. Not for arbitrary asset
+  management or Blueprint gameplay logic.
 license: MIT
 compatibility: Unreal Engine 5.4+, Python 3.9+
 allowed-tools: Bash Read Write
@@ -16,78 +15,70 @@ metadata:
     version: "1.0.0"
     layer: domain
     stage: authoring
-    search-hint: "metasound, audio graph, oscillator, filter, envelope, mixer, wave player, synthesizer, sound design, procedural audio, MetaSound Source"
+    search-hint: "metasound, audio graph, builder, oscillator, filter, sound design, procedural audio, MetaSound Source"
     tags: "unreal, metasound, audio, graph, authoring, domain"
     tools: tools.yaml
 ---
 
 # Unreal MetaSound Tools
 
-Authoring tools for Unreal Engine MetaSound audio graphs. Build
-procedural audio sources by composing oscillator, filter, envelope,
-mixer, and other DSP nodes.
+Author MetaSound Source assets through Unreal's public reflected APIs:
+`MetaSoundBuilderSubsystem`, `MetaSoundEditorSubsystem`, and
+`EditorValidatorSubsystem`.
 
-**Target:** Unreal Engine 5.4+ (MetaSound stable API).
-**Domain boundary:** audio graph authoring only — no asset management,
-no Blueprint logic, no level/actor manipulation.
+## Workflow
 
-## Tools
+1. Call `unreal_metasound__create_metasound_source`. Keep the returned initial
+   output/input handle tokens.
+2. Add graph inputs or nodes. Nodes require an exact registry identity
+   (`namespace`, `class_name`, `variant`, `major_version`); this skill never
+   maps a broad label such as "Filter" to an arbitrary class.
+3. Use the exact vertex handles returned by create/add/inspect with
+   `unreal_metasound__connect_metasound_nodes`.
+4. Set supported graph-input defaults, then build and validate.
 
-### `unreal_metasound__create_metasound_source`
-Create a new MetaSound Source asset under `/Game/`. Returns the asset
-path and initial graph handle.
-
-### `unreal_metasound__add_metasound_input`
-Add an input parameter (Float, Bool, Int, String, WaveTable, Object) to
-an existing MetaSound graph. Returns the input identifier and type.
-
-### `unreal_metasound__add_metasound_node`
-Add a DSP node to a MetaSound graph. Node types are validated against a
-whitelist: Oscillator, Filter, Envelope, Mixer, WavePlayer, Delay,
-Reverb, PitchShift, DynamicsProcessor, Flanger, Chorus.
-
-### `unreal_metasound__connect_metasound_nodes`
-Connect two nodes in a MetaSound graph via a source pin → target pin
-connection descriptor.
-
-### `unreal_metasound__set_metasound_parameter_default`
-Set the default value of a MetaSound input parameter.
-
-### `unreal_metasound__build_metasound`
-Compile / build a MetaSound asset. Returns build status and diagnostics.
-
-### `unreal_metasound__list_metasound_nodes`
-List every node (name + type) currently in a MetaSound graph. Read-only.
-
-### `unreal_metasound__validate_metasound_graph`
-Validate a MetaSound graph for structural issues: no cycles, all inputs
-connected, all nodes valid. Returns `compatible: false` + reason when
-the Unreal version is below 5.4. Read-only.
-
-## Prerequisites
-
-- Unreal Engine 5.4 or later with MetaSound plugin enabled
-- Python 3.9+ with `unreal` module accessible (embedded Python or
-  remote execution bridge)
-
-## Connection Model
-
-Connections use a structured descriptor:
+For example, Unreal 5.8 registers a sine oscillator as:
 
 ```json
 {
-  "from_node": "Oscillator_1",
-  "from_pin": "Audio",
-  "to_node": "Filter_1",
-  "to_pin": "Input"
+  "namespace": "UE",
+  "class_name": "Sine",
+  "variant": "Audio",
+  "major_version": 1
 }
 ```
 
+## Handle contract
+
+Node and pin handles are opaque Unreal Builder tokens:
+
+```text
+(NodeID=0123456789ABCDEF0123456789ABCDEF)
+(NodeID=0123456789ABCDEF0123456789ABCDEF,VertexID=FEDCBA9876543210FEDCBA9876543210)
+```
+
+Do not edit or synthesize them. A mutating call verifies that each handle
+belongs to the target graph before changing it.
+
+## Supported defaults
+
+Graph inputs support `Bool`, `Float`, `Int32`, and `String` literals. Object,
+WaveTable, and array literals need additional asset/type contracts and are
+intentionally rejected instead of being guessed.
+
+## Validation boundary
+
+`validate_metasound_graph` runs Unreal Data Validation and reports graph input
+and output names exposed by the Builder. It fails when validation is
+inconclusive. It does not claim private graph traversal, exhaustive cycle
+analysis, or compile diagnostics that Unreal's Python API did not return.
+
 ## Safety
 
-- All asset paths are constrained to `/Game/` — absolute or filesystem
-  paths outside Content are rejected.
-- No `exec()`, `eval()`, `subprocess`, or arbitrary Python execution.
-- `import unreal` is always a function-local lazy import so metadata
-  parsing (tools.yaml, SKILL.md) never requires a running Unreal
-  instance.
+- Asset paths must be package paths under `/Game` using letters, digits, and
+  underscores.
+- Mutations run on the Unreal main thread, check every Builder result enum,
+  and require Unreal to confirm the asset save.
+- Unknown engine versions, missing plugins, invalid handles, and unsupported
+  literal types fail closed.
+- No `exec`, `eval`, subprocess, or arbitrary Python execution is exposed.
