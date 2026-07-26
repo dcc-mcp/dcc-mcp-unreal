@@ -65,26 +65,35 @@ def _fake_unreal_module():
     unreal.Paths.project_dir.return_value = "/tmp/FakeProject"
     unreal.Paths.get_project_file_path.return_value = "/tmp/FakeProject/FakeProject.uproject"
 
-    # Editor subsystem — shared instance, default state is not running
-    _fake_subsystem = MagicMock()
-    _fake_subsystem.is_pie_running.return_value = False
-    _fake_subsystem.is_pie_paused.return_value = False
-    _fake_subsystem.start_pie.return_value = None
-    _fake_subsystem.pause_pie.return_value = None
-    _fake_subsystem.resume_pie.return_value = None
-    _fake_subsystem.stop_pie.return_value = None
-    _fake_subsystem.get_pie_world.return_value = MagicMock()
+    # Match the methods exposed by UE 5.8's Python API.
+    _fake_level_editor_subsystem = MagicMock(
+        spec_set=["is_in_play_in_editor", "editor_request_begin_play", "editor_request_end_play"]
+    )
+    _fake_level_editor_subsystem.is_in_play_in_editor.return_value = False
+
+    _fake_unreal_editor_subsystem = MagicMock(spec_set=["get_game_world", "get_editor_world"])
+    _fake_game_world = MagicMock()
+    _fake_unreal_editor_subsystem.get_game_world.return_value = _fake_game_world
+    _fake_unreal_editor_subsystem.get_editor_world.return_value = MagicMock()
+
+    unreal.LevelEditorSubsystem = MagicMock()
+    unreal.UnrealEditorSubsystem = MagicMock()
 
     def _get_editor_subsystem(cls):
-        return _fake_subsystem
+        if cls is unreal.LevelEditorSubsystem:
+            return _fake_level_editor_subsystem
+        if cls is unreal.UnrealEditorSubsystem:
+            return _fake_unreal_editor_subsystem
+        return None
 
     unreal.get_editor_subsystem = _get_editor_subsystem
-    # Store reference so tests can reconfigure the subsystem
-    unreal._fake_subsystem = _fake_subsystem
+    unreal._fake_level_editor_subsystem = _fake_level_editor_subsystem
+    unreal._fake_unreal_editor_subsystem = _fake_unreal_editor_subsystem
+    unreal._fake_game_world = _fake_game_world
 
-    # Required editor subsystem classes (accessed as unreal.UnrealEditorSubsystem etc.)
-    unreal.UnrealEditorSubsystem = MagicMock()
-    unreal.LevelEditorSubsystem = MagicMock()
+    unreal.GameplayStatics = MagicMock(spec_set=["is_game_paused", "set_game_paused"])
+    unreal.GameplayStatics.is_game_paused.return_value = False
+    unreal.GameplayStatics.set_game_paused.return_value = True
 
     # SlateBlueprintLibrary (for input injection)
     unreal.SlateBlueprintLibrary = MagicMock()
@@ -205,7 +214,7 @@ class TestPieHelpers:
         with _patch_unreal():
             import unreal as fake_ue
 
-            fake_ue._fake_subsystem.is_pie_running.return_value = True
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             mod2 = _ensure_fresh_helpers()
             assert mod2.is_pie_active() is True
 
@@ -250,12 +259,16 @@ class TestPieControl:
         """enter starts PIE via editor subsystem."""
         _ensure_fresh_helpers()
         with _patch_unreal():
+            import unreal as fake_ue
+
             # Re-import after patching so import unreal resolves inside handler
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
             result = mod2.pie_control(action="enter")
             assert result["success"] is True
-            assert "PIE session started" in str(result["message"])
+            assert "PIE start requested" in str(result["message"])
+            assert result["context"]["pie_state"] == "starting"
+            fake_ue._fake_level_editor_subsystem.editor_request_begin_play.assert_called_once_with()
 
     def test_pause_pie(self):
         """pause freezes a running PIE session."""
@@ -263,13 +276,28 @@ class TestPieControl:
         with _patch_unreal():
             import unreal as fake_ue
 
-            fake_ue._fake_subsystem.is_pie_running.return_value = True
-            fake_ue._fake_subsystem.is_pie_paused.return_value = False
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            fake_ue.GameplayStatics.is_game_paused.return_value = False
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
             result = mod2.pie_control(action="pause")
             assert result["success"] is True
             assert "paused" in str(result.get("context", {}).get("pie_state", ""))
+            fake_ue.GameplayStatics.set_game_paused.assert_called_once_with(fake_ue._fake_game_world, True)
+
+    def test_resume_pie(self):
+        """resume unpauses the PIE game world."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            fake_ue.GameplayStatics.is_game_paused.return_value = True
+            mod2 = _import_script("pie_control")
+            _ensure_fresh_helpers()
+            result = mod2.pie_control(action="resume")
+            assert result["success"] is True
+            fake_ue.GameplayStatics.set_game_paused.assert_called_once_with(fake_ue._fake_game_world, False)
 
     def test_exit_pie(self):
         """exit/stop stops a running PIE session."""
@@ -277,12 +305,13 @@ class TestPieControl:
         with _patch_unreal():
             import unreal as fake_ue
 
-            fake_ue._fake_subsystem.is_pie_running.return_value = True
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
             result = mod2.pie_control(action="exit")
             assert result["success"] is True
-            assert "stopped" in str(result.get("context", {}).get("pie_state", ""))
+            assert "stopping" in str(result.get("context", {}).get("pie_state", ""))
+            fake_ue._fake_level_editor_subsystem.editor_request_end_play.assert_called_once_with()
 
     def test_stop_is_alias_for_exit(self):
         """stop is an alias for exit."""
@@ -290,12 +319,12 @@ class TestPieControl:
         with _patch_unreal():
             import unreal as fake_ue
 
-            fake_ue._fake_subsystem.is_pie_running.return_value = True
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             mod2 = _import_script("pie_control")
             _ensure_fresh_helpers()
             result = mod2.pie_control(action="stop")
             assert result["success"] is True
-            assert "stopped" in str(result.get("context", {}).get("pie_state", ""))
+            assert "stopping" in str(result.get("context", {}).get("pie_state", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +451,7 @@ class TestPieGetStatus:
         with _patch_unreal():
             import unreal as fake_ue
 
-            fake_ue._fake_subsystem.is_pie_running.return_value = True
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             _ensure_fresh_helpers()
             mod = _import_script("pie_get_status")
             result = mod.pie_get_status()

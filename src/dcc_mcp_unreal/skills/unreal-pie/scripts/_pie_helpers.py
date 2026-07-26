@@ -92,6 +92,16 @@ def fail_job(job_id: str, error: str = "") -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def get_level_editor_subsystem():
+    """Return Unreal's scriptable Level Editor subsystem, or None."""
+    try:
+        import unreal  # noqa: PLC0415
+
+        return unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    except Exception:
+        return None
+
+
 def get_pie_world():
     """Return the PIE world if a PIE session is active, else the editor world.
 
@@ -101,13 +111,12 @@ def get_pie_world():
     try:
         import unreal  # noqa: PLC0415
 
-        # In UE5, the editor subsystem gives us the PIE world directly
         editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
         if editor_subsystem is not None:
-            pie_world = editor_subsystem.get_pie_world()
+            pie_world = editor_subsystem.get_game_world()
             if pie_world is not None:
                 return pie_world
-        # Fallback: editor world
+            return editor_subsystem.get_editor_world()
         return unreal.EditorLevelLibrary.get_editor_world()
     except Exception:
         return None
@@ -116,12 +125,8 @@ def get_pie_world():
 def is_pie_active() -> bool:
     """Return True if a PIE session is currently active (playing or paused)."""
     try:
-        import unreal  # noqa: PLC0415
-
-        editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-        if editor_subsystem is not None:
-            return editor_subsystem.is_pie_running()
-        return False
+        editor_subsystem = get_level_editor_subsystem()
+        return bool(editor_subsystem and editor_subsystem.is_in_play_in_editor())
     except Exception:
         return False
 
@@ -131,10 +136,8 @@ def is_pie_paused() -> bool:
     try:
         import unreal  # noqa: PLC0415
 
-        editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-        if editor_subsystem is not None:
-            return editor_subsystem.is_pie_paused()
-        return False
+        world = get_pie_world() if is_pie_active() else None
+        return bool(world and unreal.GameplayStatics.is_game_paused(world))
     except Exception:
         return False
 
