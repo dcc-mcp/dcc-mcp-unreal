@@ -6,6 +6,7 @@ or console commands — no OS-level input dependency.
 
 from __future__ import annotations
 
+from _pie_helpers import get_level_editor_subsystem, get_pie_world, is_pie_active, is_pie_paused
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_error, unreal_from_exception, unreal_success
@@ -16,12 +17,10 @@ _VALID_ACTIONS = {"enter", "pause", "resume", "exit", "stop"}
 
 def _pie_enter() -> dict:
     """Start a new PIE session."""
-    import unreal  # noqa: PLC0415
-
-    editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+    editor_subsystem = get_level_editor_subsystem()
     if editor_subsystem is None:
         return unreal_error(
-            "UnrealEditorSubsystem is unavailable",
+            "LevelEditorSubsystem is unavailable",
             "Cannot access the editor subsystem to control PIE",
             possible_solutions=[
                 "Ensure the Unreal Editor is running.",
@@ -29,20 +28,19 @@ def _pie_enter() -> dict:
             ],
         )
 
-    if editor_subsystem.is_pie_running():
+    if is_pie_active():
         return unreal_success(
             "PIE is already running",
             prompt="Use pie_control with action=pause or action=exit to manage the session.",
             pie_state="running",
-            pie_paused=editor_subsystem.is_pie_paused(),
+            pie_paused=is_pie_paused(),
         )
 
-    # Start PIE via the editor subsystem
-    editor_subsystem.start_pie()
+    editor_subsystem.editor_request_begin_play()
     return unreal_success(
-        "PIE session started",
-        prompt="PIE is now running. Use pie_inject_input for controlled input or pie_get_status to monitor.",
-        pie_state="running",
+        "PIE start requested",
+        prompt="Use pie_get_status to verify that PIE entered the playing state.",
+        pie_state="starting",
     )
 
 
@@ -50,23 +48,22 @@ def _pie_pause() -> dict:
     """Pause the active PIE session."""
     import unreal  # noqa: PLC0415
 
-    editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-    if editor_subsystem is None:
-        return unreal_error("UnrealEditorSubsystem is unavailable")
-
-    if not editor_subsystem.is_pie_running():
+    if not is_pie_active():
         return unreal_error(
             "No active PIE session to pause",
             possible_solutions=["Start PIE first with action=enter."],
         )
 
-    if editor_subsystem.is_pie_paused():
+    if is_pie_paused():
         return unreal_success(
             "PIE is already paused",
             pie_state="paused",
         )
 
-    editor_subsystem.pause_pie()
+    world = get_pie_world()
+    if world is None or not unreal.GameplayStatics.set_game_paused(world, True):
+        return unreal_error("Failed to pause the active PIE session")
+
     return unreal_success(
         "PIE session paused",
         prompt="Use pie_control with action=resume to continue, or action=exit to stop.",
@@ -78,23 +75,22 @@ def _pie_resume() -> dict:
     """Resume a paused PIE session."""
     import unreal  # noqa: PLC0415
 
-    editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-    if editor_subsystem is None:
-        return unreal_error("UnrealEditorSubsystem is unavailable")
-
-    if not editor_subsystem.is_pie_running():
+    if not is_pie_active():
         return unreal_error(
             "No active PIE session to resume",
             possible_solutions=["Start PIE first with action=enter."],
         )
 
-    if not editor_subsystem.is_pie_paused():
+    if not is_pie_paused():
         return unreal_success(
             "PIE is already running (not paused)",
             pie_state="running",
         )
 
-    editor_subsystem.resume_pie()
+    world = get_pie_world()
+    if world is None or not unreal.GameplayStatics.set_game_paused(world, False):
+        return unreal_error("Failed to resume the paused PIE session")
+
     return unreal_success(
         "PIE session resumed",
         prompt="PIE is running. Use pie_inject_input for controlled actions.",
@@ -104,23 +100,22 @@ def _pie_resume() -> dict:
 
 def _pie_exit() -> dict:
     """Exit/stop the active PIE session."""
-    import unreal  # noqa: PLC0415
 
-    editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+    editor_subsystem = get_level_editor_subsystem()
     if editor_subsystem is None:
-        return unreal_error("UnrealEditorSubsystem is unavailable")
+        return unreal_error("LevelEditorSubsystem is unavailable")
 
-    if not editor_subsystem.is_pie_running():
+    if not is_pie_active():
         return unreal_error(
             "No active PIE session to exit",
             possible_solutions=["Start PIE first with action=enter."],
         )
 
-    editor_subsystem.stop_pie()
+    editor_subsystem.editor_request_end_play()
     return unreal_success(
-        "PIE session stopped",
-        prompt="Returned to editor mode. Use pie_get_status to verify.",
-        pie_state="stopped",
+        "PIE stop requested",
+        prompt="Use pie_get_status to verify that PIE returned to the stopped state.",
+        pie_state="stopping",
     )
 
 
