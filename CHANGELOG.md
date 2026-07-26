@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.8](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.7...v0.2.8) (2026-07-26)
+
+
+### Features
+
+* add unreal-pie skill for PIE closed-loop verification ([#97](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/97)) ([7e12792](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7e12792cbefe6b3726e2452115a48d1cc043defa))
+* add verified cinematics and Niagara skills ([1d81982](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1d8198219d8fb4eed0d17e8a4102287804348091))
+* add verified Unreal MetaSound authoring ([7b7839f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7b7839f1a80363cfcc4dc8aa3f78fe3889ba8981))
+* support Alembic geometry caches ([#105](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/105)) ([5a82f62](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5a82f622616ab367c3a2314e9c119834f71f89bb))
+
+
+### Bug Fixes
+
+* keep unexecuted PIE tests pending ([#104](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/104)) ([af126ce](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/af126ce38fa24624a575db9e64eebaa4d5fceb72))
+
 ## [0.2.7](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.6...v0.2.7) (2026-07-25)
 
 
