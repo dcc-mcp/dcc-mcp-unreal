@@ -6,6 +6,11 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 
+#if (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+#include "HttpRouteHandle.h"
+class IHttpRouter;
+#endif
+
 /**
  * UObject reflection bridge — secure, fail-closed, main-thread-only.
  *
@@ -40,4 +45,9 @@ public:
 private:
     int32 BoundPort = 0;
     bool bIsRunning = false;
+
+#if (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    TSharedPtr<IHttpRouter> HttpRouter;
+    FHttpRouteHandle RouteHandle;
+#endif
 };

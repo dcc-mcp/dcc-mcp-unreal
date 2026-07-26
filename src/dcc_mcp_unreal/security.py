@@ -24,15 +24,9 @@ from __future__ import annotations
 
 import fnmatch
 import logging
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
-from typing import Dict
-from typing import FrozenSet
-from typing import List
-from typing import Optional
-from typing import Set
+from typing import Any, Dict, FrozenSet, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -42,48 +36,54 @@ logger = logging.getLogger(__name__)
 _DENIED_PREFIXES: FrozenSet[str] = frozenset({"_", "bOverride_", "K2Node_", "ExecuteUbergraph_"})
 
 # UObject classes or patterns that are always denied (internal engine objects).
-_DENIED_CLASS_PATTERNS: FrozenSet[str] = frozenset({
-    "*/Script/Engine.Default__*",
-    "*/Script/CoreUObject.Package*",
-    "*/Script/CoreUObject.Class*",
-    "*/Script/CoreUObject.MetaData*",
-    "*/Script/Engine.PlayerController*",  # Disallow direct control
-    "*/Script/Engine.GameModeBase*",      # Disallow game mode mutation
-    "*/Script/Engine.GameStateBase*",     # Disallow game state mutation
-    "*/Script/Engine.WorldSettings*",     # Disallow world settings mutation
-})
+_DENIED_CLASS_PATTERNS: FrozenSet[str] = frozenset(
+    {
+        "*/Script/Engine.Default__*",
+        "*/Script/CoreUObject.Package*",
+        "*/Script/CoreUObject.Class*",
+        "*/Script/CoreUObject.MetaData*",
+        "*/Script/Engine.PlayerController*",  # Disallow direct control
+        "*/Script/Engine.GameModeBase*",  # Disallow game mode mutation
+        "*/Script/Engine.GameStateBase*",  # Disallow game state mutation
+        "*/Script/Engine.WorldSettings*",  # Disallow world settings mutation
+    }
+)
 
 # Properties that are always denied regardless of object/class.
-_DENIED_PROPERTY_NAMES: FrozenSet[str] = frozenset({
-    "bIsEditorOnly",
-    "InternalIndex",
-    "NativeIndex",
-})
+_DENIED_PROPERTY_NAMES: FrozenSet[str] = frozenset(
+    {
+        "bIsEditorOnly",
+        "InternalIndex",
+        "NativeIndex",
+    }
+)
 
 # Functions that are always denied (engine lifecycle, dangerous operations).
-_DENIED_FUNCTION_PATTERNS: FrozenSet[str] = frozenset({
-    "*/K2_DestroyActor",
-    "*/K2_DestroyComponent",
-    "*/Server_*",          # RPC Server functions
-    "*/Client_*",          # RPC Client functions
-    "*/Multicast_*",       # RPC Multicast functions
-    "*/OnRep_*",           # Replication callbacks
-    "*/BeginPlay",
-    "*/EndPlay",
-    "*/Tick",
-    "*/ReceiveTick",
-    "*/ReceiveBeginPlay",
-    "*/ReceiveEndPlay",
-    "*/ReceiveDestroyed",
-    "*/ReceiveActorBeginOverlap",
-    "*/ReceiveActorEndOverlap",
-    "*/ReceiveHit",
-    "*/UserConstructionScript",
-    "*/ReceiveAnyDamage",
-    "*/ReceivePointDamage",
-    "*/ReceiveRadialDamage",
-    "*/BndEvt__*",
-})
+_DENIED_FUNCTION_PATTERNS: FrozenSet[str] = frozenset(
+    {
+        "*/K2_DestroyActor",
+        "*/K2_DestroyComponent",
+        "*/Server_*",  # RPC Server functions
+        "*/Client_*",  # RPC Client functions
+        "*/Multicast_*",  # RPC Multicast functions
+        "*/OnRep_*",  # Replication callbacks
+        "*/BeginPlay",
+        "*/EndPlay",
+        "*/Tick",
+        "*/ReceiveTick",
+        "*/ReceiveBeginPlay",
+        "*/ReceiveEndPlay",
+        "*/ReceiveDestroyed",
+        "*/ReceiveActorBeginOverlap",
+        "*/ReceiveActorEndOverlap",
+        "*/ReceiveHit",
+        "*/UserConstructionScript",
+        "*/ReceiveAnyDamage",
+        "*/ReceivePointDamage",
+        "*/ReceiveRadialDamage",
+        "*/BndEvt__*",
+    }
+)
 
 # Flags enum for operation types.
 _READ = 1 << 0
@@ -93,6 +93,7 @@ _EXECUTE = 1 << 2
 
 class OperationKind(Enum):
     """Kind of reflection operation being performed."""
+
     READ = "read"
     WRITE = "write"
     EXECUTE = "execute"
@@ -308,8 +309,10 @@ class ReflectionPolicy:
                     path=func_path,
                 )
         if self.allowed_functions:
-            if not (any(fnmatch.fnmatch(function_name, p) for p in self.allowed_functions)
-                    or any(fnmatch.fnmatch(func_path, p) for p in self.allowed_functions)):
+            if not (
+                any(fnmatch.fnmatch(function_name, p) for p in self.allowed_functions)
+                or any(fnmatch.fnmatch(func_path, p) for p in self.allowed_functions)
+            ):
                 raise SecurityDeniedError(
                     f"UFunction {function_name!r} is not in the allowed_functions allowlist",
                     operation=OperationKind.EXECUTE,

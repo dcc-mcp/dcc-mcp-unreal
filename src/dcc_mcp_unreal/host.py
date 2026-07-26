@@ -13,12 +13,9 @@ the base ``HostAdapter`` headless loop for UE 4.18 compatibility.
 from __future__ import annotations
 
 import threading
-from typing import Any
-from typing import Callable
-from typing import Optional
+from typing import Any, Callable, Optional
 
-from dcc_mcp_core.host import HostAdapter
-from dcc_mcp_core.host import QueueDispatcher
+from dcc_mcp_core.host import HostAdapter, QueueDispatcher
 
 TickFn = Callable[[], Optional[float]]
 
@@ -59,6 +56,7 @@ class UnrealHost(HostAdapter):
         """
         try:
             import unreal  # noqa: PLC0415
+
             if not unreal.SlateApplication.is_initialized():
                 return True
             # Check command-line for headless flags
@@ -90,26 +88,18 @@ class UnrealHost(HostAdapter):
 
             # Prefer Slate pre-tick (available in UE 4.26+, robust in UE5)
             if hasattr(unreal, "register_slate_pre_tick_callback"):
-                self._tick_handle = unreal.register_slate_pre_tick_callback(
-                    lambda delta_time: tick_fn()
-                )
+                self._tick_handle = unreal.register_slate_pre_tick_callback(lambda delta_time: tick_fn())
                 return
 
             # Fallback: Python tick callback (available since UE 4.20 Python Plugin)
             if hasattr(unreal, "register_python_tick_callback"):
-                self._tick_handle = unreal.register_python_tick_callback(
-                    tick_fn
-                )
+                self._tick_handle = unreal.register_python_tick_callback(tick_fn)
                 return
 
             # Last resort: base class headless thread
-            raise NotImplementedError(
-                "No Slate tick callback available; use run_headless() instead."
-            )
+            raise NotImplementedError("No Slate tick callback available; use run_headless() instead.")
         except ImportError:
-            raise NotImplementedError(
-                "Unreal module not available; use run_headless() instead."
-            )
+            raise NotImplementedError("Unreal module not available; use run_headless() instead.")
 
     # ── Hook 3: undo attach_tick (must be idempotent) ───────────────────
 
@@ -121,6 +111,7 @@ class UnrealHost(HostAdapter):
 
         try:
             import unreal  # noqa: PLC0415
+
             if hasattr(unreal, "unregister_slate_pre_tick_callback"):
                 unreal.unregister_slate_pre_tick_callback(handle)
         except Exception:

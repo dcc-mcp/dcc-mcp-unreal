@@ -2,28 +2,213 @@
 // SPDX-License-Identifier: MIT
 
 #include "DccMcpBridge.h"
+
+#if (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+
+#include "Async/Async.h"
+#include "Containers/StringConv.h"
 #include "DccMcpReflection.h"
-#include "HttpServerModule.h"
-#include "IHttpRouter.h"
+#include "Dom/JsonObject.h"
 #include "HttpPath.h"
+#include "HttpRequestHandler.h"
+#include "HttpServerModule.h"
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
-#include "Dom/JsonObject.h"
+#include "IHttpRouter.h"
+#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-// ── Construction / destruction ──────────────────────────────────────────────
-
-FDccMcpBridge::FDccMcpBridge()
+namespace
 {
+TSharedPtr<FJsonObject> MakeBridgeError(const FString& Message)
+{
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), false);
+    Result->SetStringField(TEXT("error"), Message);
+    return Result;
 }
+
+FString ReadString(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
+{
+    FString Value;
+    if (Object.IsValid())
+    {
+        Object->TryGetStringField(FieldName, Value);
+    }
+    return Value;
+}
+
+bool ReadBool(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName, bool DefaultValue)
+{
+    bool Value = DefaultValue;
+    if (Object.IsValid())
+    {
+        Object->TryGetBoolField(FieldName, Value);
+    }
+    return Value;
+}
+
+int32 ReadInteger(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName, int32 DefaultValue)
+{
+    int32 Value = DefaultValue;
+    if (Object.IsValid())
+    {
+        Object->TryGetNumberField(FieldName, Value);
+    }
+    return Value;
+}
+
+TSharedPtr<FJsonObject> ReadObject(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
+{
+    const TSharedPtr<FJsonObject>* Value = nullptr;
+    if (Object.IsValid() && Object->TryGetObjectField(FieldName, Value) && Value != nullptr)
+    {
+        return *Value;
+    }
+    return MakeShared<FJsonObject>();
+}
+
+TSharedPtr<FJsonObject> DispatchOnGameThread(
+    const FString& Method,
+    const TSharedPtr<FJsonObject>& Params)
+{
+    if (!IsInGameThread())
+    {
+        return MakeBridgeError(TEXT("Bridge dispatch must execute on the Game Thread"));
+    }
+
+    if (Method == TEXT("discover_objects"))
+    {
+        const FString ClassFilter = ReadString(Params, TEXT("class_filter"));
+        const FString OuterFilter = ReadString(Params, TEXT("outer_filter"));
+        const int32 MaxResults = FMath::Clamp(ReadInteger(Params, TEXT("max_results"), 100), 1, 1000);
+        const TArray<FDccMcpObjectDescriptor> Objects =
+            FDccMcpReflection::DiscoverObjects(ClassFilter, OuterFilter, MaxResults);
+
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Reserve(Objects.Num());
+        for (const FDccMcpObjectDescriptor& Object : Objects)
+        {
+            Values.Add(MakeShared<FJsonValueObject>(Object.ToJson()));
+        }
+
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetArrayField(TEXT("objects"), Values);
+        return Result;
+    }
+
+    if (Method == TEXT("describe_object"))
+    {
+        return FDccMcpReflection::DescribeObject(
+            ReadString(Params, TEXT("object_path")),
+            ReadBool(Params, TEXT("include_properties"), true),
+            ReadBool(Params, TEXT("include_functions"), true))
+            .ToJson();
+    }
+
+    if (Method == TEXT("get_property"))
+    {
+        return FDccMcpReflection::GetProperty(
+            ReadString(Params, TEXT("object_path")),
+            ReadString(Params, TEXT("property_name")));
+    }
+
+    if (Method == TEXT("get_properties"))
+    {
+        TArray<FString> PropertyNames;
+        const TArray<TSharedPtr<FJsonValue>>* Names = nullptr;
+        if (Params.IsValid() && Params->TryGetArrayField(TEXT("property_names"), Names) && Names != nullptr)
+        {
+            PropertyNames.Reserve(Names->Num());
+            for (const TSharedPtr<FJsonValue>& Name : *Names)
+            {
+                FString StringValue;
+                if (!Name.IsValid() || !Name->TryGetString(StringValue))
+                {
+                    return MakeBridgeError(TEXT("property_names must contain only strings"));
+                }
+                PropertyNames.Add(MoveTemp(StringValue));
+            }
+        }
+
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetArrayField(
+            TEXT("properties"),
+            FDccMcpReflection::GetProperties(ReadString(Params, TEXT("object_path")), PropertyNames));
+        return Result;
+    }
+
+    if (Method == TEXT("set_property"))
+    {
+        const TSharedPtr<FJsonValue> Value = Params.IsValid()
+            ? Params->TryGetField(TEXT("value"))
+            : TSharedPtr<FJsonValue>();
+        if (!Value.IsValid())
+        {
+            return MakeBridgeError(TEXT("set_property requires a value"));
+        }
+        return FDccMcpReflection::SetProperty(
+            ReadString(Params, TEXT("object_path")),
+            ReadString(Params, TEXT("property_name")),
+            Value);
+    }
+
+    if (Method == TEXT("set_properties"))
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetArrayField(
+            TEXT("properties"),
+            FDccMcpReflection::SetProperties(
+                ReadString(Params, TEXT("object_path")),
+                ReadObject(Params, TEXT("properties"))));
+        return Result;
+    }
+
+    if (Method == TEXT("call_function"))
+    {
+        return FDccMcpReflection::CallFunction(
+            ReadString(Params, TEXT("object_path")),
+            ReadString(Params, TEXT("function_name")),
+            ReadObject(Params, TEXT("args")),
+            ReadInteger(Params, TEXT("timeout_ms"), 10000));
+    }
+
+    return MakeBridgeError(FString::Printf(TEXT("Unknown method: %s"), *Method));
+}
+
+void CompleteJson(
+    const FHttpResultCallback& OnComplete,
+    const TSharedPtr<FJsonObject>& Result,
+    EHttpServerResponseCodes ResponseCode = EHttpServerResponseCodes::Ok)
+{
+    const TSharedPtr<FJsonObject> SafeResult = Result.IsValid()
+        ? Result
+        : MakeBridgeError(TEXT("Bridge handler returned no result"));
+
+    FString ResponseBody;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseBody);
+    if (!FJsonSerializer::Serialize(SafeResult.ToSharedRef(), Writer))
+    {
+        ResponseBody = TEXT("{\"success\":false,\"error\":\"Response serialization failed\"}");
+        ResponseCode = EHttpServerResponseCodes::ServerError;
+    }
+
+    TUniquePtr<FHttpServerResponse> Response =
+        FHttpServerResponse::Create(ResponseBody, TEXT("application/json"));
+    Response->Code = ResponseCode;
+    OnComplete(MoveTemp(Response));
+}
+} // namespace
+
+#endif
+
+FDccMcpBridge::FDccMcpBridge() = default;
 
 FDccMcpBridge::~FDccMcpBridge()
 {
     StopServer();
 }
-
-// ── Server lifecycle ────────────────────────────────────────────────────────
 
 bool FDccMcpBridge::StartServer(int32 Port)
 {
@@ -33,162 +218,86 @@ bool FDccMcpBridge::StartServer(int32 Port)
         return false;
     }
 
-    // The bridge uses UE's HTTP server module (available in UE 5.1+).
-    // For UE 4.18-5.0 compatibility, the Python plugin's HTTP support or
-    // a standalone WebSocket bridge is used instead.
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
-    FHttpServerModule& HttpModule = FHttpServerModule::Get();
-    TSharedPtr<IHttpRouter> Router = HttpModule.GetHttpRouter(BoundPort);
+    if (Port <= 0 || Port > 65535)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[DccMcpBridge] Invalid port: %d"), Port);
+        return false;
+    }
 
-    if (!Router.IsValid())
+#if (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    FHttpServerModule& HttpModule = FHttpServerModule::Get();
+    HttpRouter = HttpModule.GetHttpRouter(static_cast<uint32>(Port), true);
+    if (!HttpRouter.IsValid())
     {
         UE_LOG(LogTemp, Error, TEXT("[DccMcpBridge] Failed to create HTTP router on port %d"), Port);
         return false;
     }
 
-    // POST /bridge — the single endpoint for all reflection calls
-    Router->BindRoute(
+    RouteHandle = HttpRouter->BindRoute(
         FHttpPath(TEXT("/bridge")),
         EHttpServerRequestVerbs::VERB_POST,
-        [](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+        FHttpRequestHandler::CreateLambda([](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
         {
-            // Parse JSON body
             TSharedPtr<FJsonObject> JsonBody;
-            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Request.Body);
+            const FUTF8ToTCHAR BodyConverter(
+                reinterpret_cast<const ANSICHAR*>(Request.Body.GetData()),
+                Request.Body.Num());
+            const FString Body(BodyConverter.Length(), BodyConverter.Get());
+            const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
             if (!FJsonSerializer::Deserialize(Reader, JsonBody) || !JsonBody.IsValid())
             {
-                TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(
-                    TEXT("{\"error\": \"Invalid JSON\"}"), TEXT("application/json")
-                );
-                OnComplete(MoveTemp(Response));
+                CompleteJson(
+                    OnComplete,
+                    MakeBridgeError(TEXT("Invalid JSON")),
+                    EHttpServerResponseCodes::BadRequest);
                 return true;
             }
 
-            FString Method = JsonBody->GetStringField(TEXT("method"));
-            TSharedPtr<FJsonObject> Params = JsonBody->GetObjectField(TEXT("params"));
-
-            TSharedPtr<FJsonObject> Result;
-
-            // Route to the appropriate handler
-            if (Method == TEXT("discover_objects"))
+            FString Method;
+            if (!JsonBody->TryGetStringField(TEXT("method"), Method) || Method.IsEmpty())
             {
-                FString ClassFilter = Params.IsValid() ? Params->GetStringField(TEXT("class_filter")) : TEXT("");
-                FString OuterFilter = Params.IsValid() ? Params->GetStringField(TEXT("outer_filter")) : TEXT("");
-                int32 MaxResults = Params.IsValid() ? Params->GetIntegerField(TEXT("max_results")) : 100;
+                CompleteJson(
+                    OnComplete,
+                    MakeBridgeError(TEXT("A non-empty method is required")),
+                    EHttpServerResponseCodes::BadRequest);
+                return true;
+            }
 
-                TArray<FDccMcpObjectDescriptor> Objects = FDccMcpReflection::DiscoverObjects(ClassFilter, OuterFilter, MaxResults);
-
-                TArray<TSharedPtr<FJsonValue>> ObjArr;
-                for (const auto& Obj : Objects)
+            TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+            const TSharedPtr<FJsonObject>* ParamsField = nullptr;
+            if (JsonBody->HasField(TEXT("params")))
+            {
+                if (!JsonBody->TryGetObjectField(TEXT("params"), ParamsField) || ParamsField == nullptr || !ParamsField->IsValid())
                 {
-                    ObjArr.Add(MakeShareable(new FJsonValueObject(Obj.ToJson())));
+                    CompleteJson(
+                        OnComplete,
+                        MakeBridgeError(TEXT("params must be an object")),
+                        EHttpServerResponseCodes::BadRequest);
+                    return true;
                 }
-
-                Result = MakeShareable(new FJsonObject());
-                Result->SetArrayField(TEXT("objects"), ObjArr);
+                Params = *ParamsField;
             }
-            else if (Method == TEXT("describe_object"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                bool bIncludeProperties = Params.IsValid() ? Params->GetBoolField(TEXT("include_properties")) : true;
-                bool bIncludeFunctions = Params.IsValid() ? Params->GetBoolField(TEXT("include_functions")) : true;
 
-                FDccMcpObjectDescriptor Desc = FDccMcpReflection::DescribeObject(ObjectPath, bIncludeProperties, bIncludeFunctions);
-                Result = Desc.ToJson();
-            }
-            else if (Method == TEXT("get_property"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                FString PropertyName = Params.IsValid() ? Params->GetStringField(TEXT("property_name")) : TEXT("");
-
-                Result = FDccMcpReflection::GetProperty(ObjectPath, PropertyName);
-            }
-            else if (Method == TEXT("get_properties"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                TArray<FString> PropertyNames;
-                if (Params.IsValid() && Params->HasField(TEXT("property_names")))
+            FHttpResultCallback Completion = OnComplete;
+            AsyncTask(
+                ENamedThreads::GameThread,
+                [Method = MoveTemp(Method), Params = MoveTemp(Params), Completion = MoveTemp(Completion)]() mutable
                 {
-                    const TArray<TSharedPtr<FJsonValue>>& NamesArr = Params->GetArrayField(TEXT("property_names"));
-                    for (const auto& NameVal : NamesArr)
-                    {
-                        PropertyNames.Add(NameVal->AsString());
-                    }
-                }
-
-                TArray<TSharedPtr<FJsonValue>> PropsResult = FDccMcpReflection::GetProperties(ObjectPath, PropertyNames);
-
-                Result = MakeShareable(new FJsonObject());
-                Result->SetArrayField(TEXT("properties"), PropsResult);
-            }
-            else if (Method == TEXT("set_property"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                FString PropertyName = Params.IsValid() ? Params->GetStringField(TEXT("property_name")) : TEXT("");
-                TSharedPtr<FJsonValue> Value = Params.IsValid() ? Params->TryGetField(TEXT("value")) : TSharedPtr<FJsonValue>();
-
-                // Route to GameThread
-                TSharedPtr<FJsonObject> SyncResult;
-                AsyncTask(ENamedThreads::GameThread, [&]()
-                {
-                    SyncResult = FDccMcpReflection::SetProperty(ObjectPath, PropertyName, Value);
+                    CompleteJson(Completion, DispatchOnGameThread(Method, Params));
                 });
-                // Note: simplistic sync via busy-wait; production code should use FEvent.
-                Result = SyncResult;
-            }
-            else if (Method == TEXT("set_properties"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                TSharedPtr<FJsonObject> Props = Params.IsValid() ? Params->GetObjectField(TEXT("properties")) : MakeShareable(new FJsonObject());
-
-                TSharedPtr<TArray<TSharedPtr<FJsonValue>>> SyncResult;
-                AsyncTask(ENamedThreads::GameThread, [&]()
-                {
-                    TArray<TSharedPtr<FJsonValue>> Results = FDccMcpReflection::SetProperties(ObjectPath, Props);
-                    SyncResult = MakeShareable(new TArray<TSharedPtr<FJsonValue>>(Results));
-                });
-
-                Result = MakeShareable(new FJsonObject());
-                TArray<TSharedPtr<FJsonValue>> ResultsArr;
-                // Wait for GameThread result (simplified; use FEvent in production)
-                ResultsArr = *SyncResult;
-                Result->SetArrayField(TEXT("properties"), ResultsArr);
-            }
-            else if (Method == TEXT("call_function"))
-            {
-                FString ObjectPath = Params.IsValid() ? Params->GetStringField(TEXT("object_path")) : TEXT("");
-                FString FunctionName = Params.IsValid() ? Params->GetStringField(TEXT("function_name")) : TEXT("");
-                TSharedPtr<FJsonObject> Args = Params.IsValid() ? Params->GetObjectField(TEXT("args")) : MakeShareable(new FJsonObject());
-                int32 TimeoutMs = Params.IsValid() ? Params->GetIntegerField(TEXT("timeout_ms")) : 10000;
-
-                TSharedPtr<FJsonObject> SyncResult;
-                AsyncTask(ENamedThreads::GameThread, [&]()
-                {
-                    SyncResult = FDccMcpReflection::CallFunction(ObjectPath, FunctionName, Args, TimeoutMs);
-                });
-                Result = SyncResult;
-            }
-            else
-            {
-                Result = MakeShareable(new FJsonObject());
-                Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown method: %s"), *Method));
-            }
-
-            // Serialize response
-            FString ResponseBody;
-            TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseBody);
-            FJsonSerializer::Serialize(Result.ToSharedRef(), Writer);
-
-            TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(ResponseBody, TEXT("application/json"));
-            OnComplete(MoveTemp(Response));
             return true;
-        }
-    );
+        }));
+
+    if (!RouteHandle.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("[DccMcpBridge] Failed to bind /bridge on port %d"), Port);
+        HttpRouter.Reset();
+        return false;
+    }
 
     HttpModule.StartAllListeners();
     BoundPort = Port;
     bIsRunning = true;
-
     UE_LOG(LogTemp, Log, TEXT("[DccMcpBridge] Listening on http://127.0.0.1:%d/bridge"), Port);
     return true;
 #else
@@ -199,15 +308,21 @@ bool FDccMcpBridge::StartServer(int32 Port)
 
 void FDccMcpBridge::StopServer()
 {
-    if (!bIsRunning) return;
+    if (!bIsRunning)
+    {
+        return;
+    }
 
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
-    FHttpServerModule& HttpModule = FHttpServerModule::Get();
-    HttpModule.StopAllListeners();
+#if (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    if (HttpRouter.IsValid() && RouteHandle.IsValid())
+    {
+        HttpRouter->UnbindRoute(RouteHandle);
+    }
+    RouteHandle.Reset();
+    HttpRouter.Reset();
 #endif
 
     BoundPort = 0;
     bIsRunning = false;
-
     UE_LOG(LogTemp, Log, TEXT("[DccMcpBridge] Server stopped."));
 }

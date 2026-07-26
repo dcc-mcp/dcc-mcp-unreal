@@ -13,9 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from typing import Any
-from typing import Dict
-from typing import Optional
+import urllib.error
+import urllib.parse
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class DccMcpBridge:
     """
 
     def __init__(self, bridge_url: Optional[str] = None, timeout: float = 30.0) -> None:
-        self._bridge_url = bridge_url or "http://127.0.0.1:19876"
+        self._bridge_url = self._normalize_bridge_url(bridge_url or "http://127.0.0.1:19876")
         self._timeout = timeout
         self._session: Any = None
         self._lock = threading.Lock()
@@ -47,7 +47,8 @@ class DccMcpBridge:
         if self._use_direct is None:
             try:
                 import unreal  # noqa: F401, PLC0415
-                self._use_direct = True
+
+                self._use_direct = hasattr(unreal, "load_object") and hasattr(unreal, "log")
             except ImportError:
                 self._use_direct = False
         return self._use_direct
@@ -74,9 +75,8 @@ class DccMcpBridge:
 
     def _call_direct(self, method: str, params: Dict[str, Any]) -> Any:
         """Route through the `unreal` module directly."""
-        from dcc_mcp_unreal.reflection import _call_unreal_direct  # noqa: PLC0415
-
         import unreal  # noqa: PLC0415
+        from dcc_mcp_unreal.reflection import _call_unreal_direct  # noqa: PLC0415
 
         return _call_unreal_direct(unreal, method, params)
 
@@ -84,6 +84,7 @@ class DccMcpBridge:
         """Send an HTTP POST to the C++ bridge endpoint."""
         import urllib.request  # noqa: PLC0415
 
+        method = str(payload.get("method", "<unknown>"))
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             self._bridge_url,
@@ -94,11 +95,31 @@ class DccMcpBridge:
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 body = resp.read().decode("utf-8")
-                return json.loads(body)
+                result = json.loads(body)
+                collection_fields = {
+                    "discover_objects": "objects",
+                    "get_properties": "properties",
+                    "set_properties": "properties",
+                }
+                collection_field = collection_fields.get(method)
+                if collection_field and isinstance(result, dict):
+                    if collection_field in result:
+                        return result[collection_field]
+                    error = result.get("error", "missing collection field")
+                    raise RuntimeError(f"Bridge call failed: {method} — {error}")
+                return result
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Bridge call failed: {method} — {exc}") from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Bridge response parse error: {exc}") from exc
+
+    @staticmethod
+    def _normalize_bridge_url(bridge_url: str) -> str:
+        """Add the native plugin endpoint when only an origin is provided."""
+        parsed = urllib.parse.urlsplit(bridge_url)
+        if parsed.path in ("", "/"):
+            return urllib.parse.urlunsplit(parsed._replace(path="/bridge"))
+        return bridge_url
 
 
 # ── Module-level singleton ───────────────────────────────────────────────────

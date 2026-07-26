@@ -3,12 +3,15 @@
 
 #include "DccMcpReflection.h"
 #include "DccMcpSecurity.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
 #include "Editor.h"
 #include "EditorActorFolders.h"
 #include "Subsystems/EditorActorSubsystem.h"
+#include "UObject/StructOnScope.h"
+#include "UObject/UnrealType.h"
 
 // ── Json helpers ────────────────────────────────────────────────────────────
 
@@ -25,6 +28,37 @@ static TSharedPtr<FJsonObject> MakeJsonSuccess()
     TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject());
     Obj->SetBoolField(TEXT("success"), true);
     return Obj;
+}
+
+static bool JsonValueToImportText(
+    const TSharedPtr<FJsonValue>& Value,
+    FString& OutText,
+    FString& OutError)
+{
+    if (!Value.IsValid())
+    {
+        OutError = TEXT("Property value is missing");
+        return false;
+    }
+
+    switch (Value->Type)
+    {
+    case EJson::String:
+        OutText = Value->AsString();
+        return true;
+    case EJson::Number:
+        OutText = FString::SanitizeFloat(Value->AsNumber());
+        return true;
+    case EJson::Boolean:
+        OutText = Value->AsBool() ? TEXT("True") : TEXT("False");
+        return true;
+    case EJson::Null:
+        OutText = TEXT("None");
+        return true;
+    default:
+        OutError = TEXT("Native property writes support only string, number, boolean, and null values");
+        return false;
+    }
 }
 
 // ── Property extraction ─────────────────────────────────────────────────────
@@ -219,12 +253,32 @@ TArray<FDccMcpObjectDescriptor> FDccMcpReflection::DiscoverObjects(
         AActor* Actor = *It;
         if (!Actor) continue;
 
+        const FString ClassPath = Actor->GetClass()->GetPathName();
+        const FString OuterPath = Actor->GetOuter() ? Actor->GetOuter()->GetPathName() : TEXT("");
+        FString DenyReason;
+        if (!FDccMcpSecurity::IsClassAllowed(ClassPath, &DenyReason))
+        {
+            continue;
+        }
+        if (!ClassFilter.IsEmpty() && !ClassPath.MatchesWildcard(ClassFilter, ESearchCase::IgnoreCase))
+        {
+            continue;
+        }
+        if (!OuterFilter.IsEmpty() && !OuterPath.MatchesWildcard(OuterFilter, ESearchCase::IgnoreCase))
+        {
+            continue;
+        }
+
         FDccMcpObjectDescriptor Desc;
         Desc.Name = Actor->GetName();
-        Desc.ClassPath = Actor->GetClass()->GetPathName();
-        Desc.OuterPath = Actor->GetOuter() ? Actor->GetOuter()->GetPathName() : TEXT("");
+        Desc.ClassPath = ClassPath;
+        Desc.OuterPath = OuterPath;
         Desc.Label = Actor->GetActorLabel();
-        Desc.Tags = Actor->Tags;
+        Desc.Tags.Reserve(Actor->Tags.Num());
+        for (const FName& Tag : Actor->Tags)
+        {
+            Desc.Tags.Add(Tag.ToString());
+        }
 
         TSharedPtr<FJsonObject> Meta = MakeShareable(new FJsonObject());
         Meta->SetBoolField(TEXT("is_temporarily_hidden_in_editor"), Actor->IsTemporarilyHiddenInEditor());
@@ -268,7 +322,11 @@ FDccMcpObjectDescriptor FDccMcpReflection::DescribeObject(
     if (AActor* Actor = Cast<AActor>(Obj))
     {
         Desc.Label = Actor->GetActorLabel();
-        Desc.Tags = Actor->Tags;
+        Desc.Tags.Reserve(Actor->Tags.Num());
+        for (const FName& Tag : Actor->Tags)
+        {
+            Desc.Tags.Add(Tag.ToString());
+        }
     }
 
     // Security check on class
@@ -396,9 +454,10 @@ TSharedPtr<FJsonObject> FDccMcpReflection::SetProperty(
     }
 
     FString ValueStr;
-    if (Value.IsValid())
+    FString ConversionError;
+    if (!JsonValueToImportText(Value, ValueStr, ConversionError))
     {
-        Value->TryGetString(ValueStr);
+        return MakeJsonError(ConversionError);
     }
 
     void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Obj);
@@ -407,11 +466,18 @@ TSharedPtr<FJsonObject> FDccMcpReflection::SetProperty(
         return MakeJsonError(TEXT("Cannot get property value pointer"));
     }
 
-    Property->ImportText_Direct(*ValueStr, ValuePtr, Obj, PPF_None);
-
-    // Mark the object as modified (for undo/redo and save detection)
 #if WITH_EDITOR
     Obj->Modify();
+#endif
+
+    if (Property->ImportText_Direct(*ValueStr, ValuePtr, Obj, PPF_None) == nullptr)
+    {
+        return MakeJsonError(FString::Printf(TEXT("Failed to import value for property %s"), *PropertyName));
+    }
+
+#if WITH_EDITOR
+    FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
+    Obj->PostEditChangeProperty(ChangedEvent);
 #endif
 
     TSharedPtr<FJsonObject> Result = MakeJsonSuccess();
@@ -429,7 +495,8 @@ TArray<TSharedPtr<FJsonValue>> FDccMcpReflection::SetProperties(
 
     for (const auto& Pair : Properties->Values)
     {
-        TSharedPtr<FJsonObject> Result = SetProperty(ObjectPath, Pair.Key, Pair.Value);
+        const FString PropertyName(Pair.Key.Len(), *Pair.Key);
+        TSharedPtr<FJsonObject> Result = SetProperty(ObjectPath, PropertyName, Pair.Value);
         Results.Add(MakeShareable(new FJsonValueObject(Result)));
     }
     return Results;
@@ -476,26 +543,51 @@ TSharedPtr<FJsonObject> FDccMcpReflection::CallFunction(
         return MakeJsonError(FString::Printf(TEXT("Function %s not found"), *FunctionName));
     }
 
-    // Build parameter struct
-    uint8* Params = (uint8*)FMemory::Malloc(Function->ParmsSize);
-    FMemory::Memzero(Params, Function->ParmsSize);
+    if (!Function->HasAnyFunctionFlags(FUNC_BlueprintCallable) && !Function->HasAnyFunctionFlags(FUNC_Exec))
+    {
+        return MakeJsonError(FString::Printf(TEXT("Function %s is not BlueprintCallable or Exec"), *FunctionName));
+    }
 
-    // TODO: Populate params from Args JSON -> property values
-    // For the initial contract, we support zero-argument functions;
-    // argument passing will be added in a follow-up iteration.
+    if ((Args.IsValid() && Args->Values.Num() > 0))
+    {
+        return MakeJsonError(TEXT("Native bridge function arguments are not supported; use Unreal Python direct mode"));
+    }
 
-    // Execute
+    for (TFieldIterator<FProperty> ParamIt(Function); ParamIt; ++ParamIt)
+    {
+        if (ParamIt->HasAnyPropertyFlags(CPF_Parm) && !ParamIt->HasAnyPropertyFlags(CPF_ReturnParm))
+        {
+            return MakeJsonError(TEXT("Native bridge supports only zero-argument UFunctions; use Unreal Python direct mode"));
+        }
+    }
+
+    if (TimeoutMs <= 0)
+    {
+        return MakeJsonError(TEXT("timeout_ms must be greater than zero"));
+    }
+
+    FStructOnScope FunctionParams(Function);
+    if (!FunctionParams.IsValid())
+    {
+        return MakeJsonError(TEXT("Failed to allocate UFunction parameters"));
+    }
+
     FDateTime StartTime = FDateTime::UtcNow();
-    Obj->ProcessEvent(Function, Params);
+    Obj->ProcessEvent(Function, FunctionParams.GetStructMemory());
 
-    // Read return value
     TSharedPtr<FJsonObject> Result = MakeJsonSuccess();
     Result->SetStringField(TEXT("function_name"), FunctionName);
 
+    if (FProperty* ReturnProperty = Function->GetReturnProperty())
+    {
+        const void* ReturnValue = ReturnProperty->ContainerPtrToValuePtr<void>(FunctionParams.GetStructMemory());
+        FString ReturnText;
+        ReturnProperty->ExportTextItem_Direct(ReturnText, ReturnValue, nullptr, Obj, PPF_None);
+        Result->SetStringField(TEXT("return_value"), ReturnText);
+    }
+
     FTimespan Elapsed = FDateTime::UtcNow() - StartTime;
     Result->SetNumberField(TEXT("execution_time_ms"), Elapsed.GetTotalMilliseconds());
-
-    FMemory::Free(Params);
     return Result;
 }
 

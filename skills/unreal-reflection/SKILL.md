@@ -1,3 +1,23 @@
+---
+name: unreal-reflection
+description: >-
+  Secure Unreal Editor UObject discovery, property inspection, policy-gated
+  scalar property writes, and policy-gated Blueprint-callable UFunction
+  invocation. Use for explicit Unreal reflection workflows, not general scene
+  authoring covered by higher-level Unreal skills.
+license: MIT
+compatibility: Unreal Engine 4.18+ with Python Plugin or Unreal Engine 5.1+ native HTTP bridge
+allowed-tools: Bash Read
+metadata:
+  dcc-mcp:
+    dcc: unreal
+    version: "0.1.0"
+    layer: adapter
+    search-hint: "Unreal UObject reflection, inspect properties, call UFunction, object discovery"
+    tags: "unreal, reflection, uobject, properties, ufunction"
+    tools: tools.yaml
+---
+
 # Unreal Reflection
 
 Secure UObject reflection for Unreal Engine Editor. Discover objects in the
@@ -15,6 +35,12 @@ Property writes and UFunction calls are **disabled by default**. Enable them
 with `DCC_MCP_UNREAL_ALLOW_WRITE=1` and `DCC_MCP_UNREAL_ALLOW_EXECUTE=1`.
 
 All mutating operations execute on the editor **main thread** (GameThread).
+
+The native C++ HTTP bridge accepts scalar property values and zero-argument
+UFunctions only. Calls that need structured values or function arguments must
+run through Unreal Python direct mode; the native bridge fails closed instead
+of discarding unsupported input. `timeout_ms` bounds the client request, but an
+already-running GameThread UFunction cannot be interrupted safely.
 
 ## Tools
 

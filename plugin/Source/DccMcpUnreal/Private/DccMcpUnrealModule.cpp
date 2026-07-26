@@ -7,6 +7,7 @@
 
 #include "Modules/ModuleManager.h"
 #include "Misc/CommandLine.h"
+#include "HAL/PlatformMisc.h"
 
 #if WITH_EDITOR
 #include "Editor.h"
@@ -20,6 +21,11 @@ static TUniquePtr<FDccMcpBridge> BridgeInstance;
 void FDccMcpUnrealModule::StartupModule()
 {
     UE_LOG(LogTemp, Log, TEXT("[DccMcpUnreal] Module starting..."));
+
+    FDccMcpSecurity::bAllowPropertyWrite =
+        FPlatformMisc::GetEnvironmentVariable(TEXT("DCC_MCP_UNREAL_ALLOW_WRITE")) == TEXT("1");
+    FDccMcpSecurity::bAllowFunctionCall =
+        FPlatformMisc::GetEnvironmentVariable(TEXT("DCC_MCP_UNREAL_ALLOW_EXECUTE")) == TEXT("1");
 
     // If the plugin was loaded via -dccmcpbridge=PORT on the command line,
     // auto-start the bridge server immediately.

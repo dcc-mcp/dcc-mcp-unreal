@@ -49,11 +49,9 @@ _remove_project_root_from_syspath()
 # Shared fixtures for dcc-mcp-unreal security and reflection tests
 # ---------------------------------------------------------------------------
 
-import pytest
+import pytest  # noqa: E402
 
-from dcc_mcp_unreal.security import ReflectionPolicy
-from dcc_mcp_unreal.security import default_full_policy
-from dcc_mcp_unreal.security import default_read_policy
+from dcc_mcp_unreal.security import ReflectionPolicy, default_full_policy, default_read_policy  # noqa: E402
 
 
 @pytest.fixture

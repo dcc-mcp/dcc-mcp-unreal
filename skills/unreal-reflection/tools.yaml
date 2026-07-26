@@ -102,7 +102,7 @@ tools:
           type: string
           description: "Name of the property to write."
         value:
-          description: "New value (JSON-serializable)."
+          description: "New value. The native HTTP bridge accepts scalar values; use direct mode for structured values."
       required: ["object_path", "property_name", "value"]
     source_file: unreal_set_property.py
     call_examples:
@@ -131,11 +131,11 @@ tools:
           description: "Name of the UFunction to call."
         args:
           type: object
-          description: "Optional keyword arguments for the function."
+          description: "Optional keyword arguments. Requires Unreal Python direct mode; the native HTTP bridge supports zero-argument calls only."
           default: {}
         timeout_ms:
           type: integer
-          description: "Maximum wait time in milliseconds."
+          description: "Client request timeout in milliseconds; an executing GameThread UFunction cannot be interrupted."
           default: 10000
       required: ["object_path", "function_name"]
     source_file: unreal_call_function.py

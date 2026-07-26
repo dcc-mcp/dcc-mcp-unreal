@@ -20,8 +20,6 @@ from dcc_mcp_unreal.security import (
     OperationKind,
     ReflectionPolicy,
     SecurityDeniedError,
-    default_full_policy,
-    default_read_policy,
 )
 
 
@@ -60,33 +58,39 @@ class TestFullPolicy:
 class TestDeniedPrefixes:
     """Properties and functions with denied prefixes should always be rejected."""
 
-    @pytest.mark.parametrize("name", [
-        "_internal",
-        "_private_field",
-        "bOverride_SomeSetting",
-        "K2Node_SomeNode",
-        "ExecuteUbergraph_SomeGraph",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "_internal",
+            "_private_field",
+            "bOverride_SomeSetting",
+            "K2Node_SomeNode",
+            "ExecuteUbergraph_SomeGraph",
+        ],
+    )
     def test_property_read_denied(self, full_policy, name):
         """Private prefixed properties should be denied even with full policy."""
         with pytest.raises(SecurityDeniedError):
             full_policy.check_property_read(name, "/Script/Engine.Actor")
 
-    @pytest.mark.parametrize("name", [
-        "Server_SomeRPC",
-        "Client_SomeRPC",
-        "OnRep_SomeRep",
-        "BeginPlay",
-        "ReceiveBeginPlay",
-        "EndPlay",
-        "ReceiveEndPlay",
-        "Tick",
-        "ReceiveTick",
-        "K2_DestroyActor",
-        "K2_DestroyComponent",
-        "BndEvt__SomeEvent",
-        "_private_function",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Server_SomeRPC",
+            "Client_SomeRPC",
+            "OnRep_SomeRep",
+            "BeginPlay",
+            "ReceiveBeginPlay",
+            "EndPlay",
+            "ReceiveEndPlay",
+            "Tick",
+            "ReceiveTick",
+            "K2_DestroyActor",
+            "K2_DestroyComponent",
+            "BndEvt__SomeEvent",
+            "_private_function",
+        ],
+    )
     def test_function_call_denied(self, full_policy, name):
         """Denied function patterns should be rejected even with full policy."""
         with pytest.raises(SecurityDeniedError):
@@ -96,15 +100,18 @@ class TestDeniedPrefixes:
 class TestDeniedClasses:
     """Classes matching denied patterns should be rejected."""
 
-    @pytest.mark.parametrize("class_path", [
-        "/Script/Engine.Default__SomeClass",
-        "/Script/CoreUObject.Package",
-        "/Script/CoreUObject.Class",
-        "/Script/Engine.PlayerController",
-        "/Script/Engine.GameModeBase",
-        "/Script/Engine.GameStateBase",
-        "/Script/Engine.WorldSettings",
-    ])
+    @pytest.mark.parametrize(
+        "class_path",
+        [
+            "/Script/Engine.Default__SomeClass",
+            "/Script/CoreUObject.Package",
+            "/Script/CoreUObject.Class",
+            "/Script/Engine.PlayerController",
+            "/Script/Engine.GameModeBase",
+            "/Script/Engine.GameStateBase",
+            "/Script/Engine.WorldSettings",
+        ],
+    )
     def test_denied_classes_blocked(self, full_policy, class_path):
         """Denied class patterns should be rejected."""
         with pytest.raises(SecurityDeniedError):

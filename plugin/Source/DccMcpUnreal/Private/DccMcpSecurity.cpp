@@ -25,14 +25,14 @@ TArray<FString> FDccMcpSecurity::GetDeniedPrefixes()
 TArray<FString> FDccMcpSecurity::GetDeniedClassPatterns()
 {
     return {
-        TEXT("*/Default__*"),
-        TEXT("*/Package*"),
-        TEXT("*/Class*"),
-        TEXT("*/MetaData*"),
-        TEXT("*/PlayerController*"),
-        TEXT("*/GameModeBase*"),
-        TEXT("*/GameStateBase*"),
-        TEXT("*/WorldSettings*"),
+        TEXT("*/Script/Engine.Default__*"),
+        TEXT("*/Script/CoreUObject.Package*"),
+        TEXT("*/Script/CoreUObject.Class*"),
+        TEXT("*/Script/CoreUObject.MetaData*"),
+        TEXT("*/Script/Engine.PlayerController*"),
+        TEXT("*/Script/Engine.GameModeBase*"),
+        TEXT("*/Script/Engine.GameStateBase*"),
+        TEXT("*/Script/Engine.WorldSettings*"),
     };
 }
 
@@ -213,7 +213,10 @@ bool FDccMcpSecurity::IsFunctionCallAllowed(const FString& FunctionName, const F
     FString FuncPath = FString::Printf(TEXT("%s::%s"), *ClassPath, *FunctionName);
     for (const FString& Pattern : GetDeniedFunctionPatterns())
     {
-        if (MatchesPattern(FuncPath, Pattern) || MatchesPattern(FunctionName, Pattern))
+        const FString BarePattern = Pattern.StartsWith(TEXT("*/")) ? Pattern.RightChop(2) : Pattern;
+        if (MatchesPattern(FuncPath, Pattern) ||
+            MatchesPattern(FunctionName, Pattern) ||
+            MatchesPattern(FunctionName, BarePattern))
         {
             if (OutReason) *OutReason = FString::Printf(TEXT("Function %s matches denied pattern %s"), *FunctionName, *Pattern);
             return false;

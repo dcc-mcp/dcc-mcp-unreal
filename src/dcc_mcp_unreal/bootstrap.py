@@ -40,9 +40,7 @@ def _resolve_env_port(default: int = 0) -> int:
 
 def _resolve_security_policy():
     """Build the initial security policy from environment variables."""
-    from dcc_mcp_unreal.security import ReflectionPolicy
-    from dcc_mcp_unreal.security import default_full_policy
-    from dcc_mcp_unreal.security import default_read_policy
+    from dcc_mcp_unreal.security import default_full_policy, default_read_policy
 
     allow_write = os.environ.get("DCC_MCP_UNREAL_ALLOW_WRITE", "") == "1"
     allow_execute = os.environ.get("DCC_MCP_UNREAL_ALLOW_EXECUTE", "") == "1"
@@ -91,6 +89,7 @@ def boot() -> dcc_mcp_unreal.UnrealMcpServer:
     # Log startup info
     try:
         import unreal  # noqa: PLC0415
+
         unreal.log(f"[dcc-mcp-unreal] Server started on port {server.port}")
         unreal.log(f"[dcc-mcp-unreal] Security: write={security.allow_write}, execute={security.allow_execute}")
     except ImportError:
@@ -105,9 +104,10 @@ def boot_standalone():
     Use this for testing and development workflows outside Unreal Editor.
     """
     from dcc_mcp_core.host import QueueDispatcher
+
     from dcc_mcp_unreal.host import UnrealHost
 
-    server = boot()
+    boot()
     dispatcher = QueueDispatcher()
 
     host = UnrealHost(dispatcher)

@@ -23,17 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
 
-from dcc_mcp_unreal.security import ReflectionPolicy
-from dcc_mcp_unreal.security import SecurityDeniedError
-from dcc_mcp_unreal.security import default_read_policy
+from dcc_mcp_unreal.security import ReflectionPolicy, default_read_policy
 
 logger = logging.getLogger(__name__)
 
@@ -177,14 +170,19 @@ class UObjectReflection:
         if class_filter and any(c in class_filter for c in ("*", "?")):
             # Pattern-based filter — perform via bridge
             pass
-        objects = self._call_bridge("discover_objects", {
-            "class_filter": class_filter or "",
-            "outer_filter": outer_filter or "",
-            "max_results": max_results,
-        })
+        objects = self._call_bridge(
+            "discover_objects",
+            {
+                "class_filter": class_filter or "",
+                "outer_filter": outer_filter or "",
+                "max_results": max_results,
+            },
+        )
         return [_dict_to_object_descriptor(o) for o in objects]
 
-    def describe_object(self, object_path: str, *, include_properties: bool = True, include_functions: bool = True) -> ObjectDescriptor:
+    def describe_object(
+        self, object_path: str, *, include_properties: bool = True, include_functions: bool = True
+    ) -> ObjectDescriptor:
         """Get detailed reflection info for a single UObject.
 
         Args:
@@ -198,11 +196,14 @@ class UObjectReflection:
         Raises:
             SecurityDeniedError: If the object's class is denied.
         """
-        result = self._call_bridge("describe_object", {
-            "object_path": object_path,
-            "include_properties": include_properties,
-            "include_functions": include_functions,
-        })
+        result = self._call_bridge(
+            "describe_object",
+            {
+                "object_path": object_path,
+                "include_properties": include_properties,
+                "include_functions": include_functions,
+            },
+        )
         desc = _dict_to_object_descriptor(result)
         # Strip denied properties/functions from the result
         desc.properties = [p for p in desc.properties if self._is_property_visible(p)]
@@ -228,10 +229,13 @@ class UObjectReflection:
         """
         class_path = self._resolve_class_path(object_path)
         self.policy.check_property_read(property_name, class_path)
-        result = self._call_bridge("get_property", {
-            "object_path": object_path,
-            "property_name": property_name,
-        })
+        result = self._call_bridge(
+            "get_property",
+            {
+                "object_path": object_path,
+                "property_name": property_name,
+            },
+        )
         return PropertyValue(
             name=property_name,
             value=result.get("value"),
@@ -259,10 +263,13 @@ class UObjectReflection:
         names = property_names or []
         for name in names:
             self.policy.check_property_read(name, class_path)
-        result = self._call_bridge("get_properties", {
-            "object_path": object_path,
-            "property_names": names,
-        })
+        result = self._call_bridge(
+            "get_properties",
+            {
+                "object_path": object_path,
+                "property_names": names,
+            },
+        )
         return [PropertyValue(**pv) for pv in result]
 
     def set_property(self, object_path: str, property_name: str, value: Any) -> PropertyValue:
@@ -283,11 +290,14 @@ class UObjectReflection:
         """
         class_path = self._resolve_class_path(object_path)
         self.policy.check_property_write(property_name, class_path, value)
-        result = self._call_bridge("set_property", {
-            "object_path": object_path,
-            "property_name": property_name,
-            "value": _sanitize_value(value),
-        })
+        result = self._call_bridge(
+            "set_property",
+            {
+                "object_path": object_path,
+                "property_name": property_name,
+                "value": _sanitize_value(value),
+            },
+        )
         return PropertyValue(
             name=property_name,
             value=value,
@@ -312,10 +322,13 @@ class UObjectReflection:
         class_path = self._resolve_class_path(object_path)
         for name, value in properties.items():
             self.policy.check_property_write(name, class_path, value)
-        result = self._call_bridge("set_properties", {
-            "object_path": object_path,
-            "properties": {k: _sanitize_value(v) for k, v in properties.items()},
-        })
+        result = self._call_bridge(
+            "set_properties",
+            {
+                "object_path": object_path,
+                "properties": {k: _sanitize_value(v) for k, v in properties.items()},
+            },
+        )
         return [PropertyValue(**pv) for pv in result]
 
     # ── UFunction invocation ────────────────────────────────────────────────
@@ -345,12 +358,15 @@ class UObjectReflection:
         """
         class_path = self._resolve_class_path(object_path)
         self.policy.check_function_call(function_name, class_path, args)
-        result = self._call_bridge("call_function", {
-            "object_path": object_path,
-            "function_name": function_name,
-            "args": args or {},
-            "timeout_ms": timeout_ms,
-        })
+        result = self._call_bridge(
+            "call_function",
+            {
+                "object_path": object_path,
+                "function_name": function_name,
+                "args": args or {},
+                "timeout_ms": timeout_ms,
+            },
+        )
         return FunctionResult(
             function_name=function_name,
             success=result.get("success", False),
@@ -393,23 +409,32 @@ class UObjectReflection:
         # Try the `unreal` module directly (available inside UE editor Python).
         try:
             import unreal  # noqa: PLC0415
-            return _call_unreal_direct(unreal, method, params)
         except ImportError:
             raise RuntimeError(
                 "No bridge client and `unreal` module not available. "
                 "The C++ plugin must be loaded inside Unreal Editor, "
                 "or a bridge client must be provided."
             )
+        if not hasattr(unreal, "load_object") or not hasattr(unreal, "log"):
+            raise RuntimeError(
+                "No bridge client and the imported `unreal` module is not the Unreal Editor Python API. "
+                "The C++ plugin must be loaded inside Unreal Editor, "
+                "or a bridge client must be provided."
+            )
+        return _call_unreal_direct(unreal, method, params)
 
     def _resolve_class_path(self, object_path: str) -> str:
         """Resolve the class path for an object path. Uses cached class info
         from the last describe/discover call, or queries the bridge."""
         # For now, return a sentinel — the bridge resolves the actual class.
-        result = self._call_bridge("describe_object", {
-            "object_path": object_path,
-            "include_properties": False,
-            "include_functions": False,
-        })
+        result = self._call_bridge(
+            "describe_object",
+            {
+                "object_path": object_path,
+                "include_properties": False,
+                "include_functions": False,
+            },
+        )
         return result.get("class_path", "")
 
     @staticmethod
@@ -521,18 +546,20 @@ def _unreal_discover_objects(unreal: Any, params: Dict[str, Any]) -> List[Dict[s
     results: List[Dict[str, Any]] = []
     for actor in actors[:max_results]:
         class_obj = actor.get_class()
-        results.append({
-            "name": actor.get_name(),
-            "class_path": class_obj.get_path_name() if class_obj else "",
-            "outer_path": actor.get_outer().get_path_name() if actor.get_outer() else "",
-            "label": actor.get_actor_label() if hasattr(actor, "get_actor_label") else actor.get_name(),
-            "property_count": 0,
-            "function_count": 0,
-            "properties": [],
-            "functions": [],
-            "tags": actor.get_tags() if hasattr(actor, "get_tags") else [],
-            "metadata": {},
-        })
+        results.append(
+            {
+                "name": actor.get_name(),
+                "class_path": class_obj.get_path_name() if class_obj else "",
+                "outer_path": actor.get_outer().get_path_name() if actor.get_outer() else "",
+                "label": actor.get_actor_label() if hasattr(actor, "get_actor_label") else actor.get_name(),
+                "property_count": 0,
+                "function_count": 0,
+                "properties": [],
+                "functions": [],
+                "tags": actor.get_tags() if hasattr(actor, "get_tags") else [],
+                "metadata": {},
+            }
+        )
     return results
 
 
@@ -568,16 +595,18 @@ def _unreal_describe_object(unreal: Any, params: Dict[str, Any]) -> Dict[str, An
             if prop.has_metadata("ToolTip"):
                 prop_metadata["tooltip"] = prop.get_metadata("ToolTip")
 
-            properties.append({
-                "name": prop.get_name(),
-                "type_name": prop.get_class().get_name() if prop.get_class() else "unknown",
-                "category": _guess_property_category(prop),
-                "flags": _extract_property_flags(prop),
-                "is_readable": True,
-                "is_writable": not bool(prop.has_any_property_flags(ue.PropertyFlags.BLUEPRINT_READ_ONLY)),
-                "is_editor_visible": bool(prop.has_any_property_flags(ue.PropertyFlags.EDIT_ANYWHERE)),
-                "metadata": prop_metadata,
-            })
+            properties.append(
+                {
+                    "name": prop.get_name(),
+                    "type_name": prop.get_class().get_name() if prop.get_class() else "unknown",
+                    "category": _guess_property_category(prop),
+                    "flags": _extract_property_flags(prop),
+                    "is_readable": True,
+                    "is_writable": not bool(prop.has_any_property_flags(ue.PropertyFlags.BLUEPRINT_READ_ONLY)),
+                    "is_editor_visible": bool(prop.has_any_property_flags(ue.PropertyFlags.EDIT_ANYWHERE)),
+                    "metadata": prop_metadata,
+                }
+            )
 
     if include_functions:
         for fn in class_obj.get_functions():
@@ -603,21 +632,25 @@ def _unreal_describe_object(unreal: Any, params: Dict[str, Any]) -> Dict[str, An
 
             param_list: List[Dict[str, str]] = []
             for param in fn.get_parameters():
-                param_list.append({
-                    "name": param.get_name(),
-                    "type": param.get_class().get_name() if param.get_class() else "unknown",
-                })
+                param_list.append(
+                    {
+                        "name": param.get_name(),
+                        "type": param.get_class().get_name() if param.get_class() else "unknown",
+                    }
+                )
 
-            functions.append({
-                "name": fn.get_name(),
-                "return_type": return_type,
-                "parameters": param_list,
-                "flags": func_flags,
-                "is_callable": "BlueprintCallable" in func_flags or "Exec" in func_flags,
-                "is_static": "Static" in func_flags,
-                "is_pure": "Pure" in func_flags,
-                "metadata": {},
-            })
+            functions.append(
+                {
+                    "name": fn.get_name(),
+                    "return_type": return_type,
+                    "parameters": param_list,
+                    "flags": func_flags,
+                    "is_callable": "BlueprintCallable" in func_flags or "Exec" in func_flags,
+                    "is_static": "Static" in func_flags,
+                    "is_pure": "Pure" in func_flags,
+                    "metadata": {},
+                }
+            )
 
     return {
         "name": obj.get_name(),
@@ -646,11 +679,22 @@ def _unreal_get_property(unreal: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         obj = None
 
     if obj is None:
-        return {"name": property_name, "value": None, "type_name": "unknown", "success": False, "error": "Object not found"}
+        return {
+            "name": property_name,
+            "value": None,
+            "type_name": "unknown",
+            "success": False,
+            "error": "Object not found",
+        }
 
     try:
         value = obj.get_editor_property(property_name)
-        return {"name": property_name, "value": _unreal_value_to_python(value), "type_name": type(value).__name__, "success": True}
+        return {
+            "name": property_name,
+            "value": _unreal_value_to_python(value),
+            "type_name": type(value).__name__,
+            "success": True,
+        }
     except Exception as exc:
         return {"name": property_name, "value": None, "type_name": "unknown", "success": False, "error": str(exc)}
 
@@ -679,7 +723,13 @@ def _unreal_set_property(unreal: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         obj = None
 
     if obj is None:
-        return {"name": property_name, "value": value, "type_name": "unknown", "success": False, "error": "Object not found"}
+        return {
+            "name": property_name,
+            "value": value,
+            "type_name": "unknown",
+            "success": False,
+            "error": "Object not found",
+        }
 
     try:
         obj.set_editor_property(property_name, value)
@@ -694,14 +744,17 @@ def _unreal_set_properties(unreal: Any, params: Dict[str, Any]) -> List[Dict[str
     properties: Dict[str, Any] = params.get("properties", {})
     results: List[Dict[str, Any]] = []
     for name, value in properties.items():
-        results.append(_unreal_set_property(unreal, {"object_path": object_path, "property_name": name, "value": value}))
+        results.append(
+            _unreal_set_property(unreal, {"object_path": object_path, "property_name": name, "value": value})
+        )
     return results
 
 
 def _unreal_call_function(unreal: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Call a UFunction via UE Python reflection."""
-    import unreal as ue  # type: ignore[import-not-found]
     import time as _time
+
+    import unreal as ue  # type: ignore[import-not-found]
 
     object_path: str = params.get("object_path", "")
     function_name: str = params.get("function_name", "")
@@ -719,7 +772,11 @@ def _unreal_call_function(unreal: Any, params: Dict[str, Any]) -> Dict[str, Any]
     try:
         fn = getattr(obj, function_name, None)
         if fn is None or not callable(fn):
-            return {"function_name": function_name, "success": False, "error": f"Function {function_name!r} not found or not callable"}
+            return {
+                "function_name": function_name,
+                "success": False,
+                "error": f"Function {function_name!r} not found or not callable",
+            }
         result = fn(**args) if args else fn()
         elapsed = (_time.monotonic() - start) * 1000.0
         return {
@@ -739,6 +796,7 @@ def _unreal_call_function(unreal: Any, params: Dict[str, Any]) -> Dict[str, Any]
 def _guess_property_category(prop: Any) -> str:
     """Guess the semantic category of a UE property."""
     import unreal as ue  # type: ignore[import-not-found]
+
     try:
         if isinstance(prop, ue.ObjectProperty):
             return "object"
@@ -770,6 +828,7 @@ def _guess_property_category(prop: Any) -> str:
 def _extract_property_flags(prop: Any) -> List[str]:
     """Extract human-readable property flags."""
     import unreal as ue  # type: ignore[import-not-found]
+
     flags: List[str] = []
     try:
         pf = ue.PropertyFlags

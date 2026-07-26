@@ -198,6 +198,7 @@ class TestUObjectReflectionConstruction:
 
     def test_policy_injection(self):
         from dcc_mcp_unreal.security import default_full_policy
+
         policy = default_full_policy()
         reflection = UObjectReflection(policy=policy)
         assert reflection.policy.allow_write is True
@@ -210,6 +211,6 @@ class TestUObjectReflectionConstruction:
     def test_missing_unreal_module_raises(self):
         """Without a bridge and without unreal module, operations should raise."""
         reflection = UObjectReflection(bridge=None)
-        # We can't easily test _call_bridge without mocking, but it should
-        # try to import unreal and fail gracefully.
-        pass
+
+        with pytest.raises(RuntimeError, match="No bridge client"):
+            reflection._call_bridge("discover_objects", {})

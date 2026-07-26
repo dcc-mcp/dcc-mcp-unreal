@@ -28,7 +28,8 @@ public class DccMcpUnreal : ModuleRules
         });
 
         // UE 5.1+ HTTP server module (optional — gated in code)
-        if (Target.Version.MajorVersion >= 5 && Target.Version.MinorVersion >= 1)
+        if (Target.Version.MajorVersion > 5 ||
+            (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 1))
         {
             PrivateDependencyModuleNames.Add("HTTPServer");
         }
