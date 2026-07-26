@@ -499,6 +499,22 @@ class TestPieJobWorkflow:
             assert poll_result["success"] is True
             assert poll_result["context"]["job_id"] == job_id
 
+    def test_poll_not_run_stays_pending(self):
+        """A discovered test that has not run is not a successful completion."""
+        helpers = _ensure_fresh_helpers()
+        job_id = helpers.create_job("automation_test", "DccMcp.Smoke")
+        fake = _fake_unreal_module()
+        fake.DccMcpAutomationLibrary = MagicMock()
+        fake.DccMcpAutomationLibrary.list_automation_tests_json.return_value = (
+            '{"tests": [{"name": "DccMcp.Smoke", "state": "NotRun"}]}'
+        )
+
+        with patch.dict(sys.modules, {"unreal": fake}):
+            mod = _import_script("pie_poll_test")
+            assert mod._check_native_completion(helpers.get_job(job_id)) is None
+
+        assert helpers.get_job(job_id)["status"] == "queued"
+
     def test_cancel_job_missing_job_id(self):
         """Returns error without job_id."""
         _ensure_fresh_helpers()

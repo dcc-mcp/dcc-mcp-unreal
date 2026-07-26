@@ -48,7 +48,7 @@ def _check_native_completion(job: dict) -> dict:
             test_items = tests.get("tests", [])
             if test_items:
                 # Check if all tests have a result state
-                all_done = all(t.get("state") in ("Success", "Fail", "Skipped", "NotRun") for t in test_items)
+                all_done = all(t.get("state") in ("Success", "Fail", "Skipped") for t in test_items)
                 if all_done and test_items:
                     has_failures = any(t.get("state") == "Fail" for t in test_items)
                     update_job(
