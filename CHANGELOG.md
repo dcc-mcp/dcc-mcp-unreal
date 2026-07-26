@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.8...v0.2.9) (2026-07-26)
+
+
+### Bug Fixes
+
+* use supported UE 5.8 PIE APIs ([#106](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/106)) ([7537bd8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7537bd81606af1102fb66863af80713ca6a44885))
+
 ## [0.2.8](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.7...v0.2.8) (2026-07-26)
 
 
