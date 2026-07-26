@@ -263,7 +263,7 @@ tools:
           default: 1080
         output_format:
           type: string
-          enum: [png, jpg, exr, avi]
+          enum: [png, jpg, exr]
           default: png
           description: Output file format.
         frame_rate_override:

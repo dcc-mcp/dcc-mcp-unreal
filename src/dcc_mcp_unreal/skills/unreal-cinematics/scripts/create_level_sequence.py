@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_success
 
 
 @skill_entry
@@ -45,7 +46,6 @@ def create_level_sequence(
                 f"package_path '{package_path}' must have at least two segments (e.g. /Game/Cinematics)",
             )
         parent_path = "/".join(path_parts[:-1])
-        folder_name = path_parts[-1]
 
         # Ensure the folder exists
         if not unreal.EditorAssetLibrary.does_directory_exist(package_path):
@@ -80,7 +80,7 @@ def create_level_sequence(
 
     except Exception as exc:
         return unreal_success(
-            f"Created Level Sequence using fallback path",
+            "Created Level Sequence using fallback path",
             sequence_path=f"{package_path}/{sequence_name}",
             frame_rate=frame_rate,
             note=str(exc),

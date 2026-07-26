@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_success
 
 
 @skill_entry
@@ -63,8 +64,8 @@ def add_actor_to_sequence(
                     "Actor not found",
                     f"No actor named '{actor_name}' in the current level.",
                     possible_solutions=[
-                        f"Spawn or select the actor first with unreal_actors__spawn_actor.",
-                        f"Check the actor label in the World Outliner.",
+                        "Spawn or select the actor first with unreal_actors__spawn_actor.",
+                        "Check the actor label in the World Outliner.",
                     ],
                 )
             actor = matches[0]
@@ -83,7 +84,7 @@ def add_actor_to_sequence(
         # Add a transform track if the actor has a root component
         root_component = actor.get_actor_root_component()
         if root_component is not None:
-            component_binding = sequence.add_possessable(root_component)
+            sequence.add_possessable(root_component)
 
         unreal.EditorAssetLibrary.save_loaded_asset(sequence)
 

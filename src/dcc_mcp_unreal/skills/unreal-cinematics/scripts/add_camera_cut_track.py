@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_success
 
 
 @skill_entry
@@ -70,7 +71,6 @@ def add_camera_cut_track(
         resolved_binding = binding_name or camera_name
 
         # Get or create the camera cut track
-        movie_scene = sequence.get_movie_scene()
         camera_cut_track = sequence.add_master_track(unreal.MovieSceneCameraCutTrack)
 
         # Bind the camera

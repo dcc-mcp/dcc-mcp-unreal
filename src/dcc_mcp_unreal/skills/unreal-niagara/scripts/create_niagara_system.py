@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
@@ -23,10 +24,17 @@ def create_niagara_system(
     Returns:
         ActionResultModel dict with the system path.
     """
+    package_path = package_path.rstrip("/")
     if not system_name or not package_path.startswith("/Game"):
         return unreal_error(
             "Invalid parameters",
             "system_name must be non-empty and package_path must start with /Game",
+        )
+    if emitter_template:
+        return unreal_error(
+            "Emitter templates are not supported",
+            "NiagaraSystemFactoryNew creates an empty system and cannot attach an emitter template. "
+            "Leave emitter_template empty until a verified Unreal editor API is available.",
         )
 
     try:
@@ -41,45 +49,13 @@ def create_niagara_system(
 
         asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 
-        # Try to create from template
-        if emitter_template:
-            template_asset = unreal.load_asset(emitter_template)
-            if template_asset is not None:
-                factory = unreal.NiagaraSystemFactoryNew()
-                system = asset_tools.create_asset_with_dialog(
-                    asset_name=system_name,
-                    package_path=package_path,
-                    asset_class=unreal.NiagaraSystem,
-                    factory=factory,
-                )
-                if system is None:
-                    # Fallback to direct creation
-                    system = asset_tools.create_asset(
-                        asset_name=system_name,
-                        package_path=package_path.rstrip("/").rsplit("/", 1)[0],
-                        asset_class=unreal.NiagaraSystem,
-                        factory=factory,
-                    )
-            else:
-                return unreal_error(
-                    "Template not found",
-                    f"Emitter template '{emitter_template}' could not be loaded.",
-                    possible_solutions=[
-                        "Leave emitter_template empty to create an empty system.",
-                        "Use built-in templates like /Niagara/DefaultTextures/Fountain.",
-                    ],
-                )
-        else:
-            # Create empty Niagara system
-            factory = unreal.NiagaraSystemFactoryNew()
-            parent_path = package_path.rstrip("/").rsplit("/", 1)
-            package_dir = parent_path[0] if len(parent_path) > 1 else "/Game"
-            system = asset_tools.create_asset(
-                asset_name=system_name,
-                package_path=package_dir,
-                asset_class=unreal.NiagaraSystem,
-                factory=factory,
-            )
+        factory = unreal.NiagaraSystemFactoryNew()
+        system = asset_tools.create_asset(
+            asset_name=system_name,
+            package_path=package_path,
+            asset_class=unreal.NiagaraSystem,
+            factory=factory,
+        )
 
         if system is None:
             return unreal_error(
@@ -94,15 +70,18 @@ def create_niagara_system(
             f"Created Niagara system '{full_path}'",
             system_path=full_path,
             system_name=system_name,
-            template_used=bool(emitter_template),
+            template_used=False,
             prompt="Spawn it with spawn_niagara_actor, then configure parameters.",
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Niagara system creation attempted for '{system_name}'",
+        return unreal_from_exception(
+            exc,
+            f"Failed to create Niagara system '{system_name}'",
             system_path=f"{package_path}/{system_name}",
             system_name=system_name,
-            note=str(exc),
-            prompt="Verify the asset in the Content Browser, then spawn with spawn_niagara_actor.",
+            possible_solutions=[
+                "Enable the Niagara plugin.",
+                "Verify that the package path is writable in the Content Browser.",
+            ],
         )

@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
+
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
+
+_OUTPUT_CLASSES = {
+    "png": "MoviePipelineImageSequenceOutput_PNG",
+    "jpg": "MoviePipelineImageSequenceOutput_JPG",
+    "jpeg": "MoviePipelineImageSequenceOutput_JPG",
+    "exr": "MoviePipelineImageSequenceOutput_EXR",
+}
 
 
 @skill_entry
@@ -23,7 +33,7 @@ def render_sequence_to_movie(
         output_path: Absolute output directory for rendered frames/video.
         resolution_x: Horizontal resolution in pixels.
         resolution_y: Vertical resolution in pixels.
-        output_format: Output format: png, jpg, exr, or avi.
+        output_format: Output format: png, jpg, or exr.
         frame_rate_override: Override frame rate; 0 = use sequence default.
 
     Returns:
@@ -39,11 +49,12 @@ def render_sequence_to_movie(
             "output_path is required",
             "Provide an absolute output directory for rendered frames.",
         )
-    valid_formats = {"png", "jpg", "jpeg", "exr", "avi"}
-    if output_format.lower() not in valid_formats:
+    normalized_format = output_format.lower()
+    if normalized_format not in _OUTPUT_CLASSES:
         return unreal_error(
             "Invalid output format",
-            f"output_format must be one of: {', '.join(sorted(valid_formats))}",
+            "output_format must be one of: exr, jpg, jpeg, png. "
+            "Video output requires a separately configured command-line encoder and is not supported by this tool.",
         )
 
     try:
@@ -51,6 +62,8 @@ def render_sequence_to_movie(
     except ImportError:
         return unreal_error("Unreal Engine not available", "ImportError: unreal module not found")
 
+    render_queue = None
+    job = None
     try:
         sequence = unreal.load_asset(sequence_path)
         if sequence is None:
@@ -71,6 +84,13 @@ def render_sequence_to_movie(
                 "Could not obtain the movie render queue.",
             )
 
+        output_class = getattr(unreal, _OUTPUT_CLASSES[normalized_format], None)
+        if output_class is None:
+            return unreal_error(
+                "Movie Render Queue output unavailable",
+                f"{_OUTPUT_CLASSES[normalized_format]} is unavailable. Enable the Movie Render Queue render passes plugin.",
+            )
+
         # Create a job for the sequence
         job = render_queue.allocate_new_job(unreal.MoviePipelineExecutorJob)
         if job is None:
@@ -81,27 +101,29 @@ def render_sequence_to_movie(
 
         # Configure output settings through the job's config
         job_config = job.get_configuration()
-        if job_config is not None:
-            # Set output resolution
-            output_setting = job_config.find_or_add_setting_by_class(
-                unreal.MoviePipelineOutputSetting
+        if job_config is None:
+            render_queue.delete_job(job)
+            return unreal_error("Render configuration unavailable", "Allocated job has no render configuration.")
+
+        output_setting = job_config.find_or_add_setting_by_class(unreal.MoviePipelineOutputSetting)
+        format_setting = job_config.find_or_add_setting_by_class(output_class)
+        if output_setting is None or format_setting is None:
+            render_queue.delete_job(job)
+            return unreal_error(
+                "Failed to configure render output",
+                f"Could not add {normalized_format} output settings to the render job.",
             )
-            if output_setting is not None:
-                output_setting.output_resolution = unreal.IntPoint(resolution_x, resolution_y)
-                output_setting.output_directory = unreal.DirectoryPath(output_path)
 
-                display_rate = sequence.get_display_rate()
-                fps = frame_rate_override if frame_rate_override > 0 else float(display_rate.numerator)
-                output_setting.output_frame_rate = unreal.FrameRate(numerator=int(fps), denominator=1)
-
-                if output_format.lower() == "png":
-                    output_setting.file_name_format = "{sequence_name}.{frame_number}"
-                elif output_format.lower() in ("jpg", "jpeg"):
-                    output_setting.file_name_format = "{sequence_name}.{frame_number}"
-                elif output_format.lower() == "exr":
-                    output_setting.file_name_format = "{sequence_name}.{frame_number}"
-                else:
-                    output_setting.file_name_format = "{sequence_name}"
+        output_setting.output_resolution = unreal.IntPoint(resolution_x, resolution_y)
+        output_setting.output_directory = unreal.DirectoryPath(output_path)
+        output_setting.file_name_format = "{sequence_name}.{frame_number}"
+        output_setting.use_custom_frame_rate = frame_rate_override > 0
+        if frame_rate_override > 0:
+            rate = Fraction(str(frame_rate_override)).limit_denominator(1001)
+            output_setting.output_frame_rate = unreal.FrameRate(
+                numerator=rate.numerator,
+                denominator=rate.denominator,
+            )
 
         # Save the job
         mrq_subsystem.save_queue()
@@ -110,21 +132,29 @@ def render_sequence_to_movie(
             "sequence_path": sequence_path,
             "output_path": output_path,
             "resolution": f"{resolution_x}x{resolution_y}",
-            "output_format": output_format,
+            "output_format": normalized_format,
             "job_status": "queued",
         }
 
         return unreal_success(
-            f"Queued render job for '{sequence_path}' ({resolution_x}x{resolution_y}, {output_format})",
+            f"Queued render job for '{sequence_path}' ({resolution_x}x{resolution_y}, {normalized_format})",
             **job_info,
             prompt="Open Window → Movie Render Queue to monitor and start the render. The job is queued but not yet started.",
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Render job queued for '{sequence_path}'",
+        if render_queue is not None and job is not None:
+            try:
+                render_queue.delete_job(job)
+            except Exception:
+                pass
+        return unreal_from_exception(
+            exc,
+            f"Failed to queue render job for '{sequence_path}'",
             sequence_path=sequence_path,
             output_path=output_path,
-            note=str(exc),
-            prompt="Open Window → Movie Render Queue in Unreal Editor and manually configure the render settings.",
+            possible_solutions=[
+                "Enable the Movie Render Queue and Movie Render Queue Additional Render Passes plugins.",
+                "Open Window → Movie Render Queue and verify the sequence and map manually.",
+            ],
         )

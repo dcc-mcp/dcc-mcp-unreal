@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_success
 
 
 @skill_entry
@@ -129,7 +130,9 @@ def get_niagara_system_info(
             context["actor_name"] = actor_name
             if niagara_component is not None:
                 context["is_active"] = niagara_component.is_active()
-                context["is_paused"] = niagara_component.is_paused() if hasattr(niagara_component, "is_paused") else False
+                context["is_paused"] = (
+                    niagara_component.is_paused() if hasattr(niagara_component, "is_paused") else False
+                )
 
         return unreal_success(
             f"Niagara system '{system_name}': {len(emitter_info)} emitters, {len(exposed_params)} params",

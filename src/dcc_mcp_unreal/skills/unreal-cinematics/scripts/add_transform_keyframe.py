@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Optional
 
 from dcc_mcp_core.skill import skill_entry
-from dcc_mcp_unreal.api import require_unreal, unreal_error, unreal_success
+
+from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
 
 
 @skill_entry
@@ -52,8 +53,6 @@ def add_transform_keyframe(
         if sequence is None:
             return unreal_error("Level Sequence not found", f"No asset at '{sequence_path}'.")
 
-        movie_scene = sequence.get_movie_scene()
-
         # Find the binding
         bindings = sequence.get_bindings()
         target_binding = None
@@ -89,7 +88,8 @@ def add_transform_keyframe(
         channels = transform_section.get_all_channels()
 
         # Set keyframes
-        key_time = unreal.FrameNumber(int(time * sequence.get_display_rate().numerator))
+        display_rate = sequence.get_display_rate()
+        key_time = unreal.FrameNumber(int(time * display_rate.numerator / display_rate.denominator))
 
         if location is not None and len(location) >= 3:
             for channel in channels:
@@ -135,11 +135,14 @@ def add_transform_keyframe(
         )
 
     except Exception as exc:
-        return unreal_success(
-            f"Keyframe addition attempted for '{binding_name}'",
+        return unreal_from_exception(
+            exc,
+            f"Failed to add a keyframe for '{binding_name}'",
             sequence_path=sequence_path,
             binding_name=binding_name,
             time=time,
-            note=str(exc),
-            prompt="Check that the binding has a transform track. Use get_sequence_info to inspect.",
+            possible_solutions=[
+                "Check that the binding has a transform track.",
+                "Use get_sequence_info to inspect the sequence bindings and tracks.",
+            ],
         )

@@ -1,8 +1,8 @@
 tools:
   - name: create_niagara_system
     description: >-
-      Create a new Niagara system asset from a template. Returns the
-      package path for use with other Niagara tools.
+      Create a new empty Niagara system asset. Returns the package path
+      for use with other Niagara tools.
     source_file: scripts/create_niagara_system.py
     execution: sync
     affinity: main
@@ -26,10 +26,8 @@ tools:
         emitter_template:
           type: string
           description: >-
-            Optional emitter template path. Common built-in templates:
-            /Niagara/DefaultTextures/Fountain,
-            /Niagara/DefaultTextures/SimpleSpriteBurst,
-            /Niagara/DefaultTextures/Smoke. Leave empty for empty system.
+            Reserved for future verified template support. Non-empty values
+            fail closed instead of creating a different system than requested.
     next-tools:
       on-success: [unreal_niagara__spawn_niagara_actor]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
