@@ -86,7 +86,9 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
     assert matrix[2]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
     assert matrix[3]["package_mode"] == "native"
     assert matrix[3]["artifact_suffix"] == "win64"
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in workflow["jobs"]["build-uplugin"]["if"]
+    assert (
+        "github.event.pull_request.head.repo.full_name == github.repository" in workflow["jobs"]["build-uplugin"]["if"]
+    )
     assert all("vctoolchain_version" not in entry for entry in matrix)
 
 
@@ -123,10 +125,11 @@ def test_build_workflow_vendors_the_base_core_wheel() -> None:
 def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> None:
     builder = BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
 
-    assert 'read_engine_tag(args.ue_root).startswith("ue4.")' in builder
+    assert 'engine_tag.startswith("ue4.")' in builder
+    assert '"ue5.5"' in builder
     assert 'cmd.append("-nocompile")' in builder
     assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
-    assert "with temporarily_clear_ue4_user_config(uat_dir.parent):" in builder
+    assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):" in builder
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
