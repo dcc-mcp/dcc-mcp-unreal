@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.10](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.9...v0.2.10) (2026-07-28)
+
+
+### Bug Fixes
+
+* align packaged core requirement ([449ea40](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/449ea405dc39a6ea28187ad019d0a81e0bfa3354))
+* bind UI Control to Unreal process ([d7f662b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d7f662b05606b5068ca5640283738e0a40b895e0))
+* isolate legacy Unreal toolchain config ([0e56daa](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0e56daae770ef71922b6d410e033b4e2092321cc))
+* migrate Fab skill to UI Control ([1e3eed6](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1e3eed694ab6756a3b69032a5a5208290a2e739c))
+* require core with UI Control resume ([397685e](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/397685e73f1cf763a85f95d9e7dfc41f4d55c2aa))
+* restore Unreal build coverage ([95aaa12](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/95aaa12d2909485a7d6fb39c41e9fec8df96f9de))
+* support UE 5.5 automation filter mask ([a260e9d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a260e9d3cfb3963f0bf4d66e8e5cd9c4a2496b24))
+
 ## [0.2.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.8...v0.2.9) (2026-07-26)
 
 
