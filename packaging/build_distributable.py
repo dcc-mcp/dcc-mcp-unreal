@@ -30,7 +30,7 @@ PLUGIN_SOURCE = REPO_ROOT / "unreal" / "plugin" / "DccMcpUnreal.uplugin"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.7"))
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 DEFAULT_CORE_WHEEL_URL = os.environ.get("DCC_MCP_CORE_WHEEL_URL")
-DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.18.7,<1.0.0")
+DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.19.77,<1.0.0")
 
 
 def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:

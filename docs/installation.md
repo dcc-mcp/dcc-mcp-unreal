@@ -282,7 +282,7 @@ Requires: dcc-mcp-core>=0.19.77,<1.0.0
 | `DCC_MCP_UNREAL_RUNTIME` | `auto` | Select `auto`, `python`, or `sidecar`; auto prefers an active `PythonScriptPlugin` |
 | `DCC_MCP_UNREAL_PYTHON_PLUGIN` | `PythonScriptPlugin` | Python plugin dependency name in `.uplugin` |
 | `UE_ROOT` | `C:\Program Files\Epic Games\UE_5.2` | Engine root (for `vx just package`) |
-| `DCC_MCP_CORE_SPEC` | `dcc-mcp-core>=0.18.7,<1.0.0` | Core version spec (for plugin builds) |
+| `DCC_MCP_CORE_SPEC` | `dcc-mcp-core>=0.19.77,<1.0.0` | Core version spec (for plugin builds) |
 
 Set environment variables before the editor starts. Example:
 
