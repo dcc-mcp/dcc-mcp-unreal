@@ -458,6 +458,43 @@ def test_server_instantiation():
     assert server.mcp_url is None
 
 
+def test_server_forces_current_windows_ui_control_scope(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    monkeypatch.setattr(server_module, "_IS_WINDOWS", True, raising=False)
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_BACKEND", "mock")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", "123")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", "456")
+
+    server_module.UnrealMcpServer(port=0)
+
+    assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+    assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in os.environ
+
+
+def test_server_start_repairs_ui_control_scope_drift(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    monkeypatch.setattr(server_module, "_IS_WINDOWS", True, raising=False)
+    server = server_module.UnrealMcpServer(port=0)
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_BACKEND", "mock")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", "123")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", "456")
+    captured = {}
+
+    def capture_start(_self, *, install_atexit_hook=True):
+        captured.update(os.environ)
+        return install_atexit_hook
+
+    monkeypatch.setattr(server_module.DccServerBase, "start", capture_start)
+
+    assert server.start(install_atexit_hook=False) is False
+    assert captured["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+    assert captured["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in captured
+
+
 def test_server_custom_name():
     """UnrealMcpServer accepts custom server_name and server_version."""
     from dcc_mcp_unreal import UnrealMcpServer
