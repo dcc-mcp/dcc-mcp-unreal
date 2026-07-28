@@ -19,6 +19,9 @@ STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
 STANDALONE_BUILDER = ROOT / "tools" / "build_binary.py"
 STANDALONE_README = ROOT / "packaging" / "standalone-README.md"
 BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
+BUILD_PACKAGE_SCRIPT = (
+    ROOT / "src" / "dcc_mcp_unreal" / "skills" / "unreal-build-package" / "scripts" / "_build_package.py"
+)
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -120,6 +123,13 @@ def test_build_workflow_vendors_the_base_core_wheel() -> None:
     assert "dcc-mcp-core==$($tag -replace" in text
     assert "dcc_mcp_core-*.whl" in text
     assert "dcc_mcp_core_semantic-" not in text
+
+
+def test_core_floor_includes_explicit_ui_control_resume_fix() -> None:
+    requirement = "dcc-mcp-core>=0.19.77,<1.0.0"
+
+    assert requirement in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert requirement in BUILD_PACKAGE_SCRIPT.read_text(encoding="utf-8")
 
 
 def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> None:

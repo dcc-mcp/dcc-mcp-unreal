@@ -268,7 +268,7 @@ Expected output includes:
 ```
 Name: dcc-mcp-unreal
 Version: 0.2.0
-Requires: dcc-mcp-core>=0.19.45,<1.0.0
+Requires: dcc-mcp-core>=0.19.77,<1.0.0
 ```
 
 ### Required Environment Variables
@@ -341,11 +341,11 @@ do not cross-deploy a UE 5.2 uplugin into UE 5.7.
 
 ### Python `dcc-mcp-core` version mismatch
 
-`dcc-mcp-unreal` pins `dcc-mcp-core>=0.19.45,<1.0.0`. If a newer core
+`dcc-mcp-unreal` pins `dcc-mcp-core>=0.19.77,<1.0.0`. If a newer core
 broke compatibility, pin the known-good version:
 
 ```bash
-"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install "dcc-mcp-core>=0.19.45,<0.20.0"
+"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install "dcc-mcp-core>=0.19.77,<0.20.0"
 ```
 
 ### Engine Python pip TLS / SSL errors
