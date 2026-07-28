@@ -125,8 +125,8 @@ FString UDccMcpAutomationLibrary::ListAutomationTestsJson(const FString& Filter)
 {
     FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
     Framework.LoadTestModules();
-#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7)
-    Framework.SetRequestedTestFilter(EAutomationTestFlags_FilterMask);
+#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5)
+    Framework.SetRequestedTestFilter(EAutomationTestFlags::FilterMask);
 #else
     Framework.SetRequestedTestFilter(EAutomationTestFlags_FilterMask);
 #endif

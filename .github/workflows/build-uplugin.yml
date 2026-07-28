@@ -38,12 +38,16 @@ jobs:
     # Unreal Engine is not installed on GitHub-hosted runners. Use a Windows
     # self-hosted runner with UE and VS Build Tools installed. The repository
     # runner `ue-builder` currently exposes the default labels below.
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64]
     strategy:
       fail-fast: false
       matrix:
         include:
+          - ue_version: "5.5"
+            ue_root: F:\UE\UE_5.5
+            package_mode: native
+            artifact_suffix: win64
           - ue_version: "5.7"
             ue_root: C:\Program Files\Epic Games\UE_5.7
             package_mode: native
