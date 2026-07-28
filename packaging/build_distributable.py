@@ -87,7 +87,7 @@ def resolve_uat(ue_root: Path) -> Path:
 
 
 @contextlib.contextmanager
-def temporarily_clear_ue4_user_config(work_dir: Path):
+def temporarily_clear_legacy_ubt_user_config(work_dir: Path):
     """Hide cross-version UBT settings while an old engine is running."""
     appdata = os.environ.get("APPDATA")
     if not appdata:
@@ -99,7 +99,7 @@ def temporarily_clear_ue4_user_config(work_dir: Path):
         yield
         return
 
-    backup_path = work_dir / "ue4-user-BuildConfiguration.xml.backup"
+    backup_path = work_dir / "legacy-ubt-user-BuildConfiguration.xml.backup"
     backup_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(config_path), str(backup_path))
     config_path.write_text(
@@ -192,7 +192,9 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
     uat = resolve_uat(args.ue_root)
     cmd = [str(uat)]
-    is_ue4 = read_engine_tag(args.ue_root).startswith("ue4.")
+    engine_tag = read_engine_tag(args.ue_root)
+    is_ue4 = engine_tag.startswith("ue4.")
+    uses_legacy_ubt_config = is_ue4 or engine_tag in {"ue5.0", "ue5.1", "ue5.2", "ue5.3", "ue5.4", "ue5.5", "ue5.6"}
     if is_ue4:
         cmd.append("-nocompile")
         # Installed UE4 builds default to an AutomationTool log directory under
@@ -248,8 +250,8 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
             os.environ["_CL_"] = "/wd4668"
     else:
         os.environ["_CL_"] = "/wd4668"
-    if is_ue4:
-        with temporarily_clear_ue4_user_config(uat_dir.parent):
+    if uses_legacy_ubt_config:
+        with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):
             run(cmd)
     else:
         run(cmd)

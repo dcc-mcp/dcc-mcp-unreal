@@ -74,7 +74,7 @@ def test_build_plugin_package_reuses_repository_build_script(tmp_path, monkeypat
     assert result["context"]["archive_path"].endswith("ue5.8-win64.zip")
 
 
-def test_ue4_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
+def test_legacy_ubt_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
     module = _load_build_distributable_module()
     appdata = tmp_path / "appdata"
     config = appdata / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
@@ -86,21 +86,21 @@ def test_ue4_user_config_is_restored_after_build_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(appdata))
 
     try:
-        with module.temporarily_clear_ue4_user_config(tmp_path / "work"):
+        with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work"):
             assert b"CompilerVersion" not in config.read_bytes()
             raise RuntimeError("simulated UAT failure")
     except RuntimeError:
         pass
 
     assert config.read_bytes() == original
-    assert not (tmp_path / "work" / "ue4-user-BuildConfiguration.xml.backup").exists()
+    assert not (tmp_path / "work" / "legacy-ubt-user-BuildConfiguration.xml.backup").exists()
 
 
-def test_ue4_config_guard_wraps_only_the_uat_subprocess():
+def test_legacy_ubt_config_guard_wraps_only_the_uat_subprocess():
     module = _load_build_distributable_module()
 
-    assert "temporarily_clear_ue4_user_config" in inspect.getsource(module.build_precompiled_plugin)
-    assert "temporarily_clear_ue4_user_config" not in inspect.getsource(module.build_python_payload)
+    assert "temporarily_clear_legacy_ubt_user_config" in inspect.getsource(module.build_precompiled_plugin)
+    assert "temporarily_clear_legacy_ubt_user_config" not in inspect.getsource(module.build_python_payload)
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):
