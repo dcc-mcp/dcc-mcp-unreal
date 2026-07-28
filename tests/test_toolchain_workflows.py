@@ -19,6 +19,7 @@ STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
 STANDALONE_BUILDER = ROOT / "tools" / "build_binary.py"
 STANDALONE_README = ROOT / "packaging" / "standalone-README.md"
 BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
+BUILD_PLUGIN = ROOT / "packaging" / "build_plugin.py"
 BUILD_PACKAGE_SCRIPT = (
     ROOT / "src" / "dcc_mcp_unreal" / "skills" / "unreal-build-package" / "scripts" / "_build_package.py"
 )
@@ -130,6 +131,8 @@ def test_core_floor_includes_explicit_ui_control_resume_fix() -> None:
 
     assert requirement in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert requirement in BUILD_PACKAGE_SCRIPT.read_text(encoding="utf-8")
+    assert requirement in BUILD_PLUGIN.read_text(encoding="utf-8")
+    assert requirement in BUILD_DISTRIBUTABLE.read_text(encoding="utf-8")
 
 
 def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> None:
