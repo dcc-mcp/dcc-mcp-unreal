@@ -76,7 +76,7 @@ tools:
           listing_id: a4882b5e-cfad-4830-a3dd-46a6c31a79b2
         note: Open Epic's free Paragon Sevarog listing for a realistic dark-fantasy enemy.
     next-tools:
-      on-success: [app_ui__snapshot]
+      on-success: [ui_control__snapshot]
 
   - name: prepare_free_asset_acquisition
     description: Prepare a safe, reproducible Fab search and verification plan for a free Unreal asset.
@@ -152,4 +152,4 @@ tools:
           rejected_traits: [cartoon, stylized, low-poly, modern vehicles, bright fantasy palette]
         note: Prepare a concept-gated dark-fantasy search for the survivor demo.
     next-tools:
-      on-success: [app_ui__snapshot]
+      on-success: [ui_control__snapshot]

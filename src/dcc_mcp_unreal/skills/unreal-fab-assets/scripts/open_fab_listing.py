@@ -25,7 +25,7 @@ def open_fab_listing(listing_id: str = "", **kwargs) -> dict:
             listing_id=listing_id,
             listing_url=url,
             authenticated=status["authenticated"],
-            next_tool="app_ui__snapshot",
+            next_tool="ui_control__snapshot",
             required_ui_action="Acquire the free listing or add the owned listing to this project.",
         )
     except ValueError as exc:
