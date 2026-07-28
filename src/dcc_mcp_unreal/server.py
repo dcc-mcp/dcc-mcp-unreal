@@ -10,6 +10,7 @@ small module-level start/stop helpers for ``init_unreal.py``.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 from pathlib import Path
@@ -26,6 +27,16 @@ _BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
 _DEFAULT_DCC_NAME = "unreal"
 _DEFAULT_SERVER_NAME = "unreal-mcp"
 _DEFAULT_SERVER_VERSION = "0.1.0"
+_IS_WINDOWS = os.name == "nt"
+
+
+def _configure_ui_control_for_process() -> None:
+    """Bind Windows UI Control to this Unreal Editor process."""
+    if not _IS_WINDOWS:
+        return
+    os.environ["DCC_MCP_UI_CONTROL_BACKEND"] = "windows-uia"
+    os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] = str(os.getpid())
+    os.environ.pop("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", None)
 
 
 class UnrealMainThreadDispatcher:
@@ -194,6 +205,7 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
 
         from dcc_mcp_core import DccServerOptions  # noqa: PLC0415
 
+        _configure_ui_control_for_process()
         self._main_thread_dispatcher, bridge = _make_execution_bridge(execution_timeout_secs)
         options = DccServerOptions.from_env(
             _DEFAULT_DCC_NAME,
@@ -210,6 +222,11 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
             execution_bridge=bridge,
         )
         super().__init__(options=options)
+
+    def start(self, *, install_atexit_hook: bool = True) -> Any:
+        """Start with UI Control scoped to the current Unreal process."""
+        _configure_ui_control_for_process()
+        return super().start(install_atexit_hook=install_atexit_hook)
 
     def stop(self) -> None:
         try:
