@@ -81,10 +81,12 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
     workflow = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
     matrix = workflow["jobs"]["build-uplugin"]["strategy"]["matrix"]["include"]
 
-    assert [entry["ue_version"] for entry in matrix] == ["5.7", "5.8", "4.18"]
-    assert matrix[1]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
-    assert matrix[2]["package_mode"] == "native"
-    assert matrix[2]["artifact_suffix"] == "win64"
+    assert [entry["ue_version"] for entry in matrix] == ["5.5", "5.7", "5.8", "4.18"]
+    assert matrix[0]["ue_root"] == r"F:\UE\UE_5.5"
+    assert matrix[2]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
+    assert matrix[3]["package_mode"] == "native"
+    assert matrix[3]["artifact_suffix"] == "win64"
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in workflow["jobs"]["build-uplugin"]["if"]
     assert all("vctoolchain_version" not in entry for entry in matrix)
 
 
