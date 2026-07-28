@@ -14,7 +14,7 @@ metadata:
     version: "0.2.0"
     layer: domain
     stage: interchange
-    depends: ["app-ui", "unreal-assets"]
+    depends: ["ui-control", "unreal-assets"]
     search-hint: "unreal fab marketplace free asset download add to project license content browser"
     tags: [unreal, fab, marketplace, assets, pipeline]
     tools: tools.yaml
@@ -29,7 +29,7 @@ client.
 
 ## Workflow
 
-1. Inventory the live Unreal instance and load `app-ui` plus `unreal-assets`.
+1. Inventory the live Unreal instance and load `ui-control` plus `unreal-assets`.
 2. Call `inspect_fab_session`. It reports only a boolean authentication state;
    access and refresh tokens never leave the Unreal process. Opening an
    approved listing triggers Fab's persistent Epic login. If it still requires
@@ -47,7 +47,7 @@ client.
    user approval.
 5. Call `open_fab_listing` with the approved listing UUID, then use the Fab
    integration's **Add to My Library** and **Add to Project** flow through
-   scoped `app-ui`.
+   scoped `ui-control`.
    Never enter credentials, solve a CAPTCHA, bypass region/account policy, or
    automate paid content. Stop on authentication or confirmation boundaries.
 6. Take a fresh snapshot after every UI action. When the download finishes,
@@ -57,7 +57,7 @@ client.
    material instances before replacing a prototype asset.
 7. Record a compact manifest containing the listing metadata, license, source
    URL, acquisition time, Content Browser paths, and verification result.
-8. Always finish with `app_ui__stop_computer_use`, including failure and user
+8. Always finish with `ui_control__stop_computer_use`, including failure and user
    interruption paths.
 
 Fab content may be incorporated into a packaged project under its listing
