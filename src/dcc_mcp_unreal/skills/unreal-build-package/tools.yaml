@@ -43,7 +43,7 @@ tools:
           description: Optional local dcc-mcp-core wheel to vendor instead of downloading one.
         core_spec:
           type: string
-          default: "dcc-mcp-core>=0.19.45,<1.0.0"
+          default: "dcc-mcp-core>=0.19.77,<1.0.0"
         vctoolchain_version:
           type: string
           default: ""
