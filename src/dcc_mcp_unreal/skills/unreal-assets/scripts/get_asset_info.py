@@ -73,6 +73,7 @@ def get_asset_info(
 
     # Try to get disk size via asset metadata
     disk_size = None
+    asset_obj = None
     try:
         asset_obj = unreal.load_asset(object_path)
         if asset_obj is not None:
@@ -90,6 +91,17 @@ def get_asset_info(
     }
     if disk_size is not None:
         info["disk_size_bytes"] = disk_size
+    if asset_obj is not None and isinstance(asset_obj, unreal.Texture):
+        color_settings = asset_obj.get_editor_property("source_color_settings")
+        info.update(
+            srgb=bool(asset_obj.get_editor_property("srgb")),
+            source_color_space=str(color_settings.get_editor_property("color_space"))
+            .rsplit(".", 1)[-1]
+            .split(":", 1)[0],
+            source_encoding_override=str(color_settings.get_editor_property("encoding_override"))
+            .rsplit(".", 1)[-1]
+            .split(":", 1)[0],
+        )
     if include_dependencies:
         info["dependencies"] = dependencies
         info["dependency_count"] = len(dependencies)

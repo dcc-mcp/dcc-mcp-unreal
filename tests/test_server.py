@@ -886,6 +886,10 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "MaterialExpressionTextureCoordinate" in script
     assert "MaterialExpressionMultiply" in script
     assert "MP_BASE_COLOR" in script
+    assert "MP_EMISSIVE_COLOR" in script
+    assert "MSM_UNLIT" in script
+    assert "SAMPLERTYPE_LINEAR_COLOR" in script
+    assert "SAMPLERTYPE_NORMAL" in script
     assert "MP_NORMAL" in script
     assert "MP_ROUGHNESS" in script
     assert "MP_AMBIENT_OCCLUSION" in script
@@ -896,6 +900,7 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "ambient_occlusion_texture_path:" in tools
     assert "metallic_texture_path:" in tools
     assert "base_color_scale:" in tools
+    assert "unlit:" in tools
 
 
 def test_blueprint_creation_skill_is_registered():

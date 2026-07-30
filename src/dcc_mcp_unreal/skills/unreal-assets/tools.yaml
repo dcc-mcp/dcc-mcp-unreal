@@ -82,6 +82,15 @@ tools:
           type: boolean
           description: For Alembic files, import an animated Geometry Cache instead of a Static Mesh.
           default: false
+        source_color_space:
+          type: string
+          enum: ["", srgb]
+          description: Optional source gamut for color textures. Use srgb to convert sRGB/Rec.709 primaries into the project working color space.
+          default: ""
+        non_color_texture:
+          type: boolean
+          description: Disable sRGB decoding and source-gamut conversion for data textures such as Normal, Roughness, Metallic, and AO.
+          default: false
     next-tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
@@ -151,6 +160,10 @@ tools:
           maximum: 1
           description: Constant dielectric specular value.
           default: 0.15
+        unlit:
+          type: boolean
+          description: Connect the texture to Emissive Color with the Unlit shading model for display-reference images.
+          default: false
         replace_existing:
           type: boolean
           description: Rebuild an existing material at the same path.

@@ -95,6 +95,70 @@ def test_geometry_cache_import_rejects_non_alembic_source(tmp_path: Path) -> Non
     assert "requires an Alembic (.abc)" in result["error"]
 
 
+def test_texture_import_can_declare_srgb_source_gamut(tmp_path: Path) -> None:
+    helper = _load_script("_asset_import", ASSET_SCRIPTS / "_asset_import.py")
+
+    class EditorProperties:
+        def __init__(self, **values) -> None:
+            self.values = values
+
+        def set_editor_property(self, name, value) -> None:
+            self.values[name] = value
+
+        def get_editor_property(self, name):
+            return self.values[name]
+
+    class AssetImportTask(EditorProperties):
+        pass
+
+    class Texture(EditorProperties):
+        pass
+
+    texture = Texture(source_color_settings=EditorProperties(color_space="none"), srgb=False)
+    editor_assets = MagicMock()
+    editor_assets.load_asset.return_value = texture
+    editor_assets.save_loaded_asset.return_value = True
+
+    def import_asset_tasks(tasks) -> None:
+        tasks[0].values["imported_object_paths"] = ["/Game/Chart/T_Chart.T_Chart"]
+
+    unreal = types.ModuleType("unreal")
+    unreal.AssetImportTask = AssetImportTask
+    unreal.Texture = Texture
+    unreal.TextureColorSpace = types.SimpleNamespace(TCS_NONE="none", TCS_S_RGB="srgb")
+    unreal.AssetToolsHelpers = types.SimpleNamespace(
+        get_asset_tools=lambda: types.SimpleNamespace(import_asset_tasks=import_asset_tasks)
+    )
+    unreal.EditorAssetLibrary = editor_assets
+
+    source = tmp_path / "chart.png"
+    source.write_bytes(b"png")
+    with patch.dict(sys.modules, {"_asset_import": helper, "unreal": unreal}):
+        module = _load_script("import_srgb_texture", ASSET_SCRIPTS / "import_asset.py")
+        result = module.import_asset(
+            source_path=str(source),
+            destination_path="/Game/Chart",
+            asset_name="T_Chart",
+            source_color_space="srgb",
+        )
+        color_space_after_srgb = texture.values["source_color_settings"].values["color_space"]
+        srgb_after_srgb = texture.values["srgb"]
+        non_color_result = module.import_asset(
+            source_path=str(source),
+            destination_path="/Game/Chart",
+            asset_name="T_Chart",
+            non_color_texture=True,
+        )
+
+    assert result["success"] is True
+    assert non_color_result["success"] is True
+    assert color_space_after_srgb == "srgb"
+    assert srgb_after_srgb is True
+    assert texture.values["source_color_settings"].values["color_space"] == "none"
+    assert texture.values["srgb"] is False
+    assert editor_assets.save_loaded_asset.call_count == 2
+
+
 def test_geometry_cache_material_assignment_updates_and_saves_asset() -> None:
     class MaterialInterface:
         pass
@@ -154,6 +218,8 @@ def test_geometry_cache_parameters_are_declared_in_tool_schemas() -> None:
         "description": "For Alembic files, import an animated Geometry Cache instead of a Static Mesh.",
         "default": False,
     }
+    assert import_schema["properties"]["source_color_space"]["enum"] == ["", "srgb"]
+    assert import_schema["properties"]["non_color_texture"]["default"] is False
 
     material_tools = yaml.safe_load((MATERIAL_SKILL / "tools.yaml").read_text(encoding="utf-8"))["tools"]
     assign_schema = next(tool for tool in material_tools if tool["name"] == "assign_material")["input_schema"]
