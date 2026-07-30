@@ -43,6 +43,20 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _resolve_bootstrap_runtime() -> str:
+    runtime_mode = os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower()
+    if runtime_mode != "auto":
+        return runtime_mode
+    try:
+        import unreal  # noqa: PLC0415
+
+        major = int(str(unreal.SystemLibrary.get_engine_version()).split(".", 1)[0])
+        return "python" if major >= 5 else "sidecar"
+    except Exception as exc:
+        logger.warning("[dcc-mcp-unreal] Runtime auto-detection failed; using embedded Python: %s", exc)
+        return "python"
+
+
 def _configure_app_ui() -> None:
     """Make the bundled app-ui skill target this Unreal Editor process."""
     if sys.platform == "win32":
@@ -109,7 +123,9 @@ def _add_sys_path(path: Path, *, prepend: bool = True) -> None:
             logger.debug("[dcc-mcp-unreal] Added %s to sys.path", path_str)
 
 
-_ensure_package_importable()
+_runtime_mode = _resolve_bootstrap_runtime()
+if _runtime_mode != "sidecar":
+    _ensure_package_importable()
 
 # ---------------------------------------------------------------------------
 # Module-level server handle and menu state
@@ -521,16 +537,7 @@ def _show_url_dialog() -> None:
 def _initialize() -> None:
     """Plugin initialisation: start server and register menus."""
     global _tick_handle
-    runtime_mode = os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower()
-    if runtime_mode == "auto":
-        try:
-            import unreal  # noqa: PLC0415
-            from dcc_mcp_unreal.compatibility import resolve_unreal_runtime  # noqa: PLC0415
-
-            runtime_mode = resolve_unreal_runtime(unreal.SystemLibrary.get_engine_version(), runtime_mode)
-        except Exception as exc:
-            logger.warning("[dcc-mcp-unreal] Runtime auto-detection failed; using embedded Python: %s", exc)
-    if runtime_mode == "sidecar":
+    if _runtime_mode == "sidecar":
         logger.info("[dcc-mcp-unreal] Standalone sidecar selected; skipping the embedded server")
         return
     try:

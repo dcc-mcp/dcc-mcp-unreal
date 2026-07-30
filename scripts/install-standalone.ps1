@@ -55,6 +55,8 @@ try {
 
     & $launcher --version | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Standalone launcher smoke test failed with exit code $LASTEXITCODE" }
+    & $launcher sidecar --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Standalone sidecar handoff failed with exit code $LASTEXITCODE" }
 
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
     if (Test-Path -LiteralPath $install) { Move-Item -LiteralPath $install -Destination $backup }

@@ -88,10 +88,16 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
     workflow = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
     matrix = workflow["jobs"]["build-uplugin"]["strategy"]["matrix"]["include"]
 
-    assert [entry["ue_version"] for entry in matrix] == ["5.5", "5.7", "5.8", "4.18"]
+    assert [entry["ue_version"] for entry in matrix] == [
+        "5.5",
+        "5.7",
+        "5.8",
+        "4.18",
+        "4.26",
+    ]
     assert all(entry["ue_root"] == rf"F:\UE\UE_{entry['ue_version']}" for entry in matrix)
-    assert matrix[3]["package_mode"] == "native"
-    assert matrix[3]["artifact_suffix"] == "win64"
+    assert all(entry["package_mode"] == "native" for entry in matrix)
+    assert all(entry["artifact_suffix"] == "win64" for entry in matrix)
     assert (
         "github.event.pull_request.head.repo.full_name == github.repository" in workflow["jobs"]["build-uplugin"]["if"]
     )
@@ -145,7 +151,7 @@ def test_smoke_script_validates_the_native_automation_report() -> None:
 def test_vx_exposes_a_native_ue426_package_target() -> None:
     config = VX_CONFIG.read_text(encoding="utf-8")
 
-    assert 'UE_4_26_ROOT = "C:\\\\Program Files\\\\Epic Games\\\\UE_4.26"' in config
+    assert 'UE_4_26_ROOT = "F:\\\\UE\\\\UE_4.26"' in config
     assert "build-ue4.26" in config
     assert "--mode native" in config
 
@@ -295,6 +301,8 @@ def test_standalone_archive_contains_installation_readme() -> None:
     assert 'shutil.copy2(README, OUTPUT / "README.md")' in builder
     assert "system\nPython installation is not required" in readme
     assert "DCC_MCP_SERVER_EXECUTABLE" in readme
+    assert "`dcc-mcp-unreal` launcher" in readme
+    assert "native tool discovery" in readme
     assert "SHA256SUMS" in readme
 
 
@@ -317,5 +325,6 @@ def test_pythonless_installer_is_fixed_to_official_assets_and_verifies_hashes() 
     assert '$repo = "dcc-mcp/dcc-mcp-unreal"' in installer
     assert "Get-FileHash" in installer
     assert "DCC_MCP_SERVER_EXECUTABLE" in installer
+    assert "& $launcher sidecar --help" in installer
     assert "python " not in installer.lower()
     assert "pip " not in installer.lower()

@@ -529,8 +529,8 @@ def test_unreal_bootstrap_skips_embedded_server_when_sidecar_is_selected():
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     source = script.read_text(encoding="utf-8")
 
-    assert 'runtime_mode = os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower()' in source
-    assert 'if runtime_mode == "sidecar":' in source
+    assert "_runtime_mode = _resolve_bootstrap_runtime()" in source
+    assert 'if _runtime_mode == "sidecar":' in source
 
 
 def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(monkeypatch):
