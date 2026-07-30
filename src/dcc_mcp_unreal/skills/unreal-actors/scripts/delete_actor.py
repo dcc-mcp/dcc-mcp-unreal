@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.api import find_level_actor
+
 
 @skill_entry
 def delete_actor(actor_name: str = "", **kwargs) -> dict:
@@ -25,8 +27,7 @@ def delete_actor(actor_name: str = "", **kwargs) -> dict:
             possible_solutions=["Pass 'actor_name' as a non-empty string"],
         )
 
-    all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-    target = next((a for a in all_actors if a.get_name() == actor_name), None)
+    target = find_level_actor(actor_name)
 
     if target is None:
         return skill_error(

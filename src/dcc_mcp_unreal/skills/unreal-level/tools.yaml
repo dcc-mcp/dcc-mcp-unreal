@@ -1,4 +1,26 @@
 tools:
+  - name: create_level
+    description: Create, open, and save a new empty level at a /Game asset path.
+    source_file: scripts/create_level.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [level_path]
+      properties:
+        level_path:
+          type: string
+          minLength: 7
+          description: New level asset path, such as /Game/Maps/Lookdev.
+    next-tools:
+      on-success: [unreal_level__get_level_info, unreal_actors__spawn_actor]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
   - name: get_level_info
     description: Get current level name, actor counts, world type, and streaming level state.
     source_file: scripts/get_level_info.py

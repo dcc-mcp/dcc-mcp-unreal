@@ -20,7 +20,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: spawn_actor
-    description: Spawn an actor from a class path at a world-space location.
+    description: Spawn an actor from a class path, optionally assigning a Static Mesh asset.
     source_file: scripts/spawn_actor.py
     execution: sync
     affinity: main
@@ -36,6 +36,10 @@ tools:
           type: string
           description: Unreal class path to spawn.
           default: /Script/Engine.StaticMeshActor
+        static_mesh_path:
+          type: string
+          description: Optional Static Mesh asset path assigned to the spawned actor.
+          default: ""
         location_x:
           type: number
           description: World X position in centimeters.
