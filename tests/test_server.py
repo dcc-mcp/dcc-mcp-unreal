@@ -595,6 +595,48 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     assert native_shutdown == [True]
 
 
+def test_scene_publisher_runs_immediately_then_once_per_second(monkeypatch):
+    from dcc_mcp_unreal.server import UnrealMainThreadDispatcher
+
+    callbacks = []
+    fake_unreal = types.SimpleNamespace(
+        register_slate_post_tick_callback=lambda callback: callbacks.append(callback) or "tick-handle",
+        unregister_slate_post_tick_callback=lambda _handle: None,
+    )
+    monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
+    dispatcher = UnrealMainThreadDispatcher()
+    published = []
+    dispatcher.attach_scene_publisher(lambda: published.append(True))
+
+    callbacks[0](0.0)
+    callbacks[0](0.5)
+    callbacks[0](0.5)
+
+    assert published == [True, True]
+
+
+def test_server_publishes_changed_scene_to_gateway_and_resource(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    server = server_module.UnrealMcpServer(port=0)
+    snapshot = {"scene": "/Game/Maps/LiveMap", "world_type": "Editor"}
+    monkeypatch.setattr(server_module, "_current_scene_snapshot", lambda: snapshot)
+    resources = []
+    gateway_scenes = []
+    monkeypatch.setattr(server, "set_scene_resource", resources.append)
+    monkeypatch.setattr(
+        server,
+        "update_gateway_metadata",
+        lambda **kwargs: gateway_scenes.append(kwargs["scene"]),
+    )
+
+    server._publish_scene_context()
+    server._publish_scene_context()
+
+    assert resources == [snapshot]
+    assert gateway_scenes == ["/Game/Maps/LiveMap"]
+
+
 def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkeypatch):
     """UE should expose one DCC MCP top-level menu, matching the other DCC hosts."""
     callbacks = []
