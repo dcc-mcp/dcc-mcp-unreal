@@ -164,6 +164,10 @@ tools:
           type: boolean
           description: Connect the texture to Emissive Color with the Unlit shading model for display-reference images.
           default: false
+        two_sided:
+          type: boolean
+          description: Render both faces for interior-facing display surfaces such as backdrop spheres.
+          default: false
         replace_existing:
           type: boolean
           description: Rebuild an existing material at the same path.

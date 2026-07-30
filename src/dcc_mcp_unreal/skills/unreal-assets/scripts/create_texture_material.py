@@ -35,8 +35,10 @@ def _build_material_graph(
     roughness: float,
     specular: float,
     unlit: bool,
+    two_sided: bool,
 ) -> None:
     unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+    material.set_editor_property("two_sided", two_sided)
     material.set_editor_property(
         "shading_model",
         unreal.MaterialShadingModel.MSM_UNLIT if unlit else unreal.MaterialShadingModel.MSM_DEFAULT_LIT,
@@ -155,6 +157,7 @@ def create_texture_material(
     roughness: float = 0.85,
     specular: float = 0.15,
     unlit: bool = False,
+    two_sided: bool = False,
     replace_existing: bool = False,
     **kwargs,
 ) -> dict:
@@ -246,6 +249,7 @@ def create_texture_material(
         roughness=float(roughness),
         specular=float(specular),
         unlit=unlit,
+        two_sided=two_sided,
     )
     if not unreal.EditorAssetLibrary.save_loaded_asset(material, only_if_is_dirty=False):
         return skill_error(
@@ -267,4 +271,5 @@ def create_texture_material(
         roughness=float(roughness),
         specular=float(specular),
         unlit=unlit,
+        two_sided=two_sided,
     )

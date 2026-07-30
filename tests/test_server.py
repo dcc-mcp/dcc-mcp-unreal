@@ -901,6 +901,8 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "metallic_texture_path:" in tools
     assert "base_color_scale:" in tools
     assert "unlit:" in tools
+    assert "two_sided:" in tools
+    assert 'set_editor_property("two_sided", two_sided)' in script
 
 
 def test_blueprint_creation_skill_is_registered():
