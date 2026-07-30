@@ -178,6 +178,13 @@ def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
         json.dumps({"MajorVersion": 4, "MinorVersion": 26}),
         encoding="utf-8",
     )
+    for project in ("AutomationTool", "AutomationToolLauncher"):
+        project_dir = engine / "Engine" / "Source" / "Programs" / project
+        project_dir.mkdir(parents=True)
+        (project_dir / "{}.csproj".format(project)).write_text("", encoding="utf-8")
+    automation_tool = engine / "Engine" / "Binaries" / "DotNET" / "AutomationTool.exe"
+    automation_tool.parent.mkdir(parents=True)
+    automation_tool.write_bytes(b"")
 
     observed = []
     monkeypatch.setattr(module, "run", lambda command: observed.append(command))

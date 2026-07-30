@@ -200,12 +200,8 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     is_ue4 = engine_tag.startswith("ue4.")
     uses_legacy_ubt_config = is_ue4 or engine_tag in {"ue5.0", "ue5.1", "ue5.2", "ue5.3", "ue5.4", "ue5.5", "ue5.6"}
     if is_ue4:
-        source_programs = args.ue_root / "Engine" / "Source" / "Programs"
-        can_compile_uat = all(
-            (source_programs / project / "{}.csproj".format(project)).is_file()
-            for project in ("AutomationTool", "AutomationToolLauncher")
-        )
-        if not can_compile_uat:
+        precompiled_uat = args.ue_root / "Engine" / "Binaries" / "DotNET" / "AutomationTool.exe"
+        if precompiled_uat.is_file():
             cmd.append("-nocompile")
         # Installed UE4 builds default to an AutomationTool log directory under
         # the engine installation. A service account may not own stale logs
