@@ -12,7 +12,7 @@ python = "3.12"
 UE_5_ROOT = "C:\\Program Files\\Epic Games\\UE_5.7"
 UE_5_2_ROOT = "C:\\Program Files\\Epic Games\\UE_5.2"
 UE_4_ROOT = "C:\\Program Files\\Epic Games\\UE_4.18"
-UE_4_26_ROOT = "C:\\Program Files\\Epic Games\\UE_4.26"
+UE_4_26_ROOT = "F:\\UE\\UE_4.26"
 VCTOOLCHAIN_VERSION = "14.36"
 MSVC_14_36_COMPONENT = "Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64"
 

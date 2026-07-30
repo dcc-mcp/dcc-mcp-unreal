@@ -18,6 +18,7 @@ def configure_light(
     attenuation_radius: float = -1.0,
     source_radius: float = -1.0,
     soft_source_radius: float = -1.0,
+    mobility: str = "unchanged",
     **kwargs,
 ) -> dict:
     """Set an allowlisted subset of physically useful light properties."""
@@ -30,6 +31,13 @@ def configure_light(
     color_values = (color_r, color_g, color_b)
     if any(value >= 0 for value in color_values) and not all(0 <= value <= 1 for value in color_values):
         return skill_error("Invalid light color", "Set all RGB values together in the 0..1 range")
+    mobility_values = {
+        "static": unreal.ComponentMobility.STATIC,
+        "stationary": unreal.ComponentMobility.STATIONARY,
+        "movable": unreal.ComponentMobility.MOVABLE,
+    }
+    if mobility not in {"unchanged", *mobility_values}:
+        return skill_error("Invalid light mobility", "mobility must be unchanged, static, stationary, or movable")
 
     actor = find_level_actor(actor_name)
     if actor is None:
@@ -44,6 +52,9 @@ def configure_light(
 
     applied = {}
     try:
+        if mobility != "unchanged":
+            component.set_editor_property("mobility", mobility_values[mobility])
+            applied["mobility"] = mobility
         if intensity >= 0:
             component.set_editor_property("intensity", float(intensity))
             applied["intensity"] = float(intensity)

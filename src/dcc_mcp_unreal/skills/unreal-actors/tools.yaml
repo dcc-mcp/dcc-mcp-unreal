@@ -251,6 +251,11 @@ tools:
         attenuation_radius: {type: number, minimum: -1, default: -1}
         source_radius: {type: number, minimum: -1, default: -1}
         soft_source_radius: {type: number, minimum: -1, default: -1}
+        mobility:
+          type: string
+          enum: [unchanged, static, stationary, movable]
+          default: unchanged
+          description: Light component mobility. Use movable when animating a lighting rig.
     next-tools:
       on-success: [unreal_level__save_level]
       on-failure: [unreal_actors__list_actors, dcc_diagnostics__screenshot]

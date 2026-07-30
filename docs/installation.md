@@ -142,9 +142,9 @@ vx just package-zip         # builds + creates ZIP archive
 vx just deploy "C:\Path\To\MyProject"
 ```
 
-CI builds native uplugin packages for UE 5.7, UE 5.8, and UE 4.18
-automatically on every release. The UE 4.18 package uses the standalone
-sidecar and does not require an engine or system Python installation.
+CI builds native uplugin packages for UE 4.18, UE 4.26, UE 5.5, UE 5.7, and UE 5.8
+automatically on every release. The UE 4.x packages use the standalone
+sidecar and do not require an engine or system Python installation.
 
 ---
 

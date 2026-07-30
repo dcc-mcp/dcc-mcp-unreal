@@ -22,7 +22,8 @@ unavailable.
 1. Extract the archive to a stable directory.
 2. Verify each file against `SHA256SUMS`.
 3. Set `DCC_MCP_SERVER_EXECUTABLE` to the absolute path of the bundled
-   `dcc-mcp-server` executable.
+   `dcc-mcp-unreal` launcher. It starts native tool discovery before handing
+   off to `dcc-mcp-server`.
 4. Install the matching `DccMcpUnreal` plugin release in your project or engine.
 5. Restart Unreal Editor.
 

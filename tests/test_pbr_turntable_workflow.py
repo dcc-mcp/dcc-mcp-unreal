@@ -187,6 +187,7 @@ def test_configure_light_sets_allowlisted_lookdev_properties(monkeypatch):
     unreal.log = MagicMock()
     unreal.LightComponentBase = type("LightComponentBase", (), {})
     unreal.Color = lambda **values: SimpleNamespace(**values)
+    unreal.ComponentMobility = SimpleNamespace(STATIC="static", STATIONARY="stationary", MOVABLE="movable")
     component = MagicMock()
     actor = MagicMock()
     actor.get_component_by_class.return_value = component
@@ -205,11 +206,13 @@ def test_configure_light_sets_allowlisted_lookdev_properties(monkeypatch):
         color_g=0.8,
         color_b=0.65,
         source_radius=35,
+        mobility="movable",
     )
 
     assert result["success"] is True
     component.set_editor_property.assert_any_call("intensity", 18000.0)
     component.set_editor_property.assert_any_call("source_radius", 35.0)
+    component.set_editor_property.assert_any_call("mobility", "movable")
     color_call = next(call for call in component.set_editor_property.call_args_list if call.args[0] == "light_color")
     assert color_call.args[1].r == 255
 

@@ -24,13 +24,14 @@ def test_ue426_auto_runtime_uses_the_standalone_sidecar():
     assert resolve_unreal_runtime("4.26.2", "auto") == "sidecar"
 
 
-def test_unreal_startup_uses_the_shared_runtime_resolution():
+def test_unreal_startup_resolves_runtime_before_importing_the_package():
     startup = (Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py").read_text(
         encoding="utf-8"
     )
 
-    assert "resolve_unreal_runtime" in startup
+    assert "_resolve_bootstrap_runtime()" in startup
     assert "SystemLibrary.get_engine_version()" in startup
+    assert 'if _runtime_mode != "sidecar":' in startup
 
 
 def test_ue58_can_compose_dcc_and_epic_mcp():
