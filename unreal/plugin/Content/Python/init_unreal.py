@@ -521,7 +521,16 @@ def _show_url_dialog() -> None:
 def _initialize() -> None:
     """Plugin initialisation: start server and register menus."""
     global _tick_handle
-    if os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower() == "sidecar":
+    runtime_mode = os.environ.get("DCC_MCP_UNREAL_RUNTIME", "auto").lower()
+    if runtime_mode == "auto":
+        try:
+            import unreal  # noqa: PLC0415
+            from dcc_mcp_unreal.compatibility import resolve_unreal_runtime  # noqa: PLC0415
+
+            runtime_mode = resolve_unreal_runtime(unreal.SystemLibrary.get_engine_version(), runtime_mode)
+        except Exception as exc:
+            logger.warning("[dcc-mcp-unreal] Runtime auto-detection failed; using embedded Python: %s", exc)
+    if runtime_mode == "sidecar":
         logger.info("[dcc-mcp-unreal] Standalone sidecar selected; skipping the embedded server")
         return
     try:

@@ -16,13 +16,16 @@ CONFIGURE_SCRIPT = ROOT / ".github" / "scripts" / "configure-ubt-toolchain.ps1"
 PLUGIN_MODULE = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpUnrealModule.cpp"
 PLUGIN_RULES = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs"
 STANDALONE_INSTALLER = ROOT / "scripts" / "install-standalone.ps1"
+SMOKE_SCRIPT = ROOT / "scripts" / "run_ue_smoke.ps1"
 STANDALONE_BUILDER = ROOT / "tools" / "build_binary.py"
 STANDALONE_README = ROOT / "packaging" / "standalone-README.md"
+PYOXIDIZER_CONFIG = ROOT / "pyoxidizer.bzl"
 BUILD_DISTRIBUTABLE = ROOT / "packaging" / "build_distributable.py"
 BUILD_PLUGIN = ROOT / "packaging" / "build_plugin.py"
 BUILD_PACKAGE_SCRIPT = (
     ROOT / "src" / "dcc_mcp_unreal" / "skills" / "unreal-build-package" / "scripts" / "_build_package.py"
 )
+VX_CONFIG = ROOT / "vx.toml"
 
 
 def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
@@ -116,6 +119,42 @@ def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
     assert all(
         dependency in rules for dependency in ('"AssetRegistry"', '"Json"', '"Networking"', '"Sockets"', '"UnrealEd"')
     )
+
+
+def test_smoke_script_supports_ue4_and_ue5_editor_commandlets() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert "UE4Editor-Cmd.exe" in script
+    assert "UnrealEditor-Cmd.exe" in script
+
+
+def test_smoke_script_does_not_promote_editor_stderr_to_a_terminating_error() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert '$ErrorActionPreference = "Continue"' in script
+    assert "$previousErrorActionPreference" in script
+
+
+def test_smoke_script_validates_the_native_automation_report() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert '$nativeReport = Join-Path $report "index.json"' in script
+    assert "$nativeData.failed" in script
+    assert "$nativeData.succeededWithWarnings" in script
+
+
+def test_vx_exposes_a_native_ue426_package_target() -> None:
+    config = VX_CONFIG.read_text(encoding="utf-8")
+
+    assert 'UE_4_26_ROOT = "C:\\\\Program Files\\\\Epic Games\\\\UE_4.26"' in config
+    assert "build-ue4.26" in config
+    assert "--mode native" in config
+
+
+def test_native_sidecar_participates_in_gateway_discovery() -> None:
+    source = PLUGIN_MODULE.read_text(encoding="utf-8")
+
+    assert "--no-ensure-gateway" not in source
 
 
 def test_build_workflow_vendors_the_base_core_wheel() -> None:
@@ -257,6 +296,12 @@ def test_standalone_archive_contains_installation_readme() -> None:
     assert "system\nPython installation is not required" in readme
     assert "DCC_MCP_SERVER_EXECUTABLE" in readme
     assert "SHA256SUMS" in readme
+
+
+def test_standalone_bundles_core_for_native_tool_discovery() -> None:
+    config = PYOXIDIZER_CONFIG.read_text(encoding="utf-8")
+
+    assert 'exe.pip_install(["."])' in config
 
 
 def test_ci_supports_python_39_and_newer() -> None:

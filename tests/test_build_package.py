@@ -4,6 +4,7 @@ import importlib.util
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_build_package_module():
@@ -101,6 +102,98 @@ def test_legacy_ubt_config_guard_wraps_only_the_uat_subprocess():
 
     assert "temporarily_clear_legacy_ubt_user_config" in inspect.getsource(module.build_precompiled_plugin)
     assert "temporarily_clear_legacy_ubt_user_config" not in inspect.getsource(module.build_python_payload)
+
+
+def test_ue4_native_payload_skips_incompatible_embedded_python_dependencies(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_4.26"
+    build_dir = engine / "Engine" / "Build"
+    build_dir.mkdir(parents=True)
+    (build_dir / "Build.version").write_text(
+        json.dumps({"MajorVersion": 4, "MinorVersion": 26}),
+        encoding="utf-8",
+    )
+    observed = []
+    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
+
+    module.build_python_payload(
+        SimpleNamespace(
+            core_wheel=None,
+            core_wheel_url=None,
+            work_dir=tmp_path / "work",
+            ue_root=engine,
+            python=None,
+            python_plugin_name="PythonScriptPlugin",
+            mode="native",
+            skip_core=False,
+            use_local_core=False,
+            core_root=tmp_path / "core",
+            core_spec="dcc-mcp-core>=0.19.77,<1.0.0",
+        ),
+        tmp_path / "payload",
+    )
+
+    assert "--skip-python-deps" in observed[0]
+
+
+def test_ue4_source_engine_allows_uat_to_compile(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_4.26"
+    batch_files = engine / "Engine" / "Build" / "BatchFiles"
+    batch_files.mkdir(parents=True)
+    (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
+    (engine / "Engine" / "Build" / "Build.version").write_text(
+        json.dumps({"MajorVersion": 4, "MinorVersion": 26}),
+        encoding="utf-8",
+    )
+    for project in ("AutomationTool", "AutomationToolLauncher"):
+        project_dir = engine / "Engine" / "Source" / "Programs" / project
+        project_dir.mkdir(parents=True)
+        (project_dir / "{}.csproj".format(project)).write_text("", encoding="utf-8")
+
+    observed = []
+    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    module.build_precompiled_plugin(
+        SimpleNamespace(
+            ue_root=engine,
+            vctoolchain_version="",
+            patched_headers_dir="",
+        ),
+        tmp_path / "uat" / "DccMcpUnreal",
+    )
+
+    assert "-nocompile" not in observed[0]
+
+
+def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_4.26"
+    batch_files = engine / "Engine" / "Build" / "BatchFiles"
+    batch_files.mkdir(parents=True)
+    (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
+    (engine / "Engine" / "Build" / "Build.version").write_text(
+        json.dumps({"MajorVersion": 4, "MinorVersion": 26}),
+        encoding="utf-8",
+    )
+
+    observed = []
+    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    module.build_precompiled_plugin(
+        SimpleNamespace(
+            ue_root=engine,
+            vctoolchain_version="",
+            patched_headers_dir="",
+        ),
+        tmp_path / "uat" / "DccMcpUnreal",
+    )
+
+    assert "-nocompile" in observed[0]
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):

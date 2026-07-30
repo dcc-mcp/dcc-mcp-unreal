@@ -104,7 +104,7 @@ private:
 		FString Executable = GetEnvironmentVariable(TEXT("DCC_MCP_SERVER_EXECUTABLE"));
 		if (Executable.IsEmpty()) Executable = TEXT("dcc-mcp-server.exe");
 		const FString Args = FString::Printf(
-			TEXT("sidecar --dcc unreal --host-rpc qtserver://127.0.0.1:%d --watch-pid %u --display-name UnrealEditor --adapter-version 0.2.0 --no-ensure-gateway"),
+			TEXT("sidecar --dcc unreal --host-rpc qtserver://127.0.0.1:%d --watch-pid %u --display-name UnrealEditor --adapter-version 0.2.0"),
 			BoundPort, FPlatformProcess::GetCurrentProcessId());
 		Sidecar = FPlatformProcess::CreateProc(*Executable, *Args, true, true, true, nullptr, 0, nullptr, nullptr);
 		if (!Sidecar.IsValid()) UE_LOG(LogDccMcpUnreal, Error, TEXT("Failed to launch %s"), *Executable);

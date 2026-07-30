@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from dcc_mcp_unreal.compatibility import parse_unreal_version, unreal_compatibility
+from dcc_mcp_unreal.compatibility import parse_unreal_version, resolve_unreal_runtime, unreal_compatibility
 
 
 @pytest.mark.parametrize(
@@ -16,6 +18,19 @@ def test_ue418_reports_native_baseline_without_python():
     assert compatibility["supported"] is True
     assert compatibility["integration_tier"] == "native-baseline"
     assert compatibility["official_mcp_bridge"] is False
+
+
+def test_ue426_auto_runtime_uses_the_standalone_sidecar():
+    assert resolve_unreal_runtime("4.26.2", "auto") == "sidecar"
+
+
+def test_unreal_startup_uses_the_shared_runtime_resolution():
+    startup = (Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "resolve_unreal_runtime" in startup
+    assert "SystemLibrary.get_engine_version()" in startup
 
 
 def test_ue58_can_compose_dcc_and_epic_mcp():

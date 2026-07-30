@@ -4,8 +4,10 @@
 This script creates a package suitable for users to drop into a project's
 ``Plugins/`` directory. It supports three modes:
 
-* ``native``: vendors Python, runs Unreal AutomationTool ``BuildPlugin``, and
-  writes ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``.
+* ``native``: vendors Python for UE5, runs Unreal AutomationTool
+  ``BuildPlugin``, and writes
+  ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``. UE4 native packages
+  use the standalone sidecar and omit the incompatible embedded dependencies.
 * ``source``: vendors Python and keeps the C++ source module for engines that
   should compile the plugin locally.
 * ``python-only``: vendors Python and strips the C++ module for legacy/internal
@@ -136,6 +138,8 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
     ]
     if args.mode == "python-only":
         cmd.append("--no-native")
+    if args.mode == "native" and read_engine_tag(args.ue_root).startswith("ue4."):
+        cmd.append("--skip-python-deps")
     if args.python:
         cmd += ["--python", str(args.python)]
     if core_wheel:
@@ -196,7 +200,13 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     is_ue4 = engine_tag.startswith("ue4.")
     uses_legacy_ubt_config = is_ue4 or engine_tag in {"ue5.0", "ue5.1", "ue5.2", "ue5.3", "ue5.4", "ue5.5", "ue5.6"}
     if is_ue4:
-        cmd.append("-nocompile")
+        source_programs = args.ue_root / "Engine" / "Source" / "Programs"
+        can_compile_uat = all(
+            (source_programs / project / "{}.csproj".format(project)).is_file()
+            for project in ("AutomationTool", "AutomationToolLauncher")
+        )
+        if not can_compile_uat:
+            cmd.append("-nocompile")
         # Installed UE4 builds default to an AutomationTool log directory under
         # the engine installation. A service account may not own stale logs
         # created there by another user, so keep all UAT writes job-scoped.
