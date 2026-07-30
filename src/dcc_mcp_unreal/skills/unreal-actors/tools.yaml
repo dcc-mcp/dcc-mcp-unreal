@@ -82,7 +82,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: get_actor_transform
-    description: Get world-space location, rotation, and scale for one actor.
+    description: Get world-space transform and bounds for one actor.
     source_file: scripts/get_actor_transform.py
     execution: sync
     affinity: main
@@ -102,6 +102,36 @@ tools:
     next-tools:
       on-success: [unreal_actors__set_actor_transform]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: attach_actor
+    description: Attach one level actor to another, optionally preserving its world transform.
+    source_file: scripts/attach_actor.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [child_actor_name, parent_actor_name]
+      properties:
+        child_actor_name:
+          type: string
+          minLength: 1
+          description: Exact actor object name or label for the child.
+        parent_actor_name:
+          type: string
+          minLength: 1
+          description: Exact actor object name or label for the parent.
+        keep_world_transform:
+          type: boolean
+          description: Preserve the child's current world transform while attaching.
+          default: true
+    next-tools:
+      on-success: [unreal_actors__get_actor_transform]
+      on-failure: [unreal_actors__list_actors, dcc_diagnostics__audit_log]
 
   - name: set_actor_transform
     description: Update selected transform components for one actor.

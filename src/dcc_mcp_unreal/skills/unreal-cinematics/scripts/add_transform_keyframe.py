@@ -18,6 +18,7 @@ def add_transform_keyframe(
     location: Optional[list] = None,
     rotation: Optional[list] = None,
     scale: Optional[list] = None,
+    interpolation: str = "default",
     **kwargs,
 ) -> dict:
     """Add a transform keyframe for a bound actor.
@@ -29,6 +30,7 @@ def add_transform_keyframe(
         location: [x, y, z] world location in Unreal units (cm).
         rotation: [pitch, yaw, roll] rotation in degrees.
         scale: [x, y, z] scale factor.
+        interpolation: Optional key interpolation mode: default, linear, or constant.
 
     Returns:
         ActionResultModel dict.
@@ -45,6 +47,11 @@ def add_transform_keyframe(
         )
     if not math.isfinite(time):
         return unreal_error("Invalid key time", "time must be a finite number")
+    if interpolation not in {"default", "linear", "constant"}:
+        return unreal_error(
+            "Invalid interpolation",
+            "interpolation must be one of: default, linear, constant",
+        )
     for field_name, values in (("location", location), ("rotation", rotation), ("scale", scale)):
         if values is None:
             continue
@@ -103,45 +110,55 @@ def add_transform_keyframe(
         if display_rate.numerator <= 0 or display_rate.denominator <= 0:
             return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
         key_time = unreal.FrameNumber(round(time * display_rate.numerator / display_rate.denominator))
+        interpolation_mode = {
+            "linear": unreal.RichCurveInterpMode.RCIM_LINEAR,
+            "constant": unreal.RichCurveInterpMode.RCIM_CONSTANT,
+        }.get(interpolation)
+
+        def add_key(channel, value: float) -> None:
+            key = channel.add_key(key_time, value)
+            if interpolation_mode is not None:
+                key.set_interpolation_mode(interpolation_mode)
+
         keys_added = 0
 
         if location is not None:
             for channel in channels:
                 channel_name = str(channel.get_name())
                 if "Location.X" in channel_name:
-                    channel.add_key(key_time, float(location[0]))
+                    add_key(channel, float(location[0]))
                     keys_added += 1
                 elif "Location.Y" in channel_name:
-                    channel.add_key(key_time, float(location[1]))
+                    add_key(channel, float(location[1]))
                     keys_added += 1
                 elif "Location.Z" in channel_name:
-                    channel.add_key(key_time, float(location[2]))
+                    add_key(channel, float(location[2]))
                     keys_added += 1
 
         if rotation is not None:
             for channel in channels:
                 channel_name = str(channel.get_name())
                 if "Rotation.X" in channel_name:
-                    channel.add_key(key_time, float(rotation[2]))
+                    add_key(channel, float(rotation[2]))
                     keys_added += 1
                 elif "Rotation.Y" in channel_name:
-                    channel.add_key(key_time, float(rotation[0]))
+                    add_key(channel, float(rotation[0]))
                     keys_added += 1
                 elif "Rotation.Z" in channel_name:
-                    channel.add_key(key_time, float(rotation[1]))
+                    add_key(channel, float(rotation[1]))
                     keys_added += 1
 
         if scale is not None:
             for channel in channels:
                 channel_name = str(channel.get_name())
                 if "Scale.X" in channel_name:
-                    channel.add_key(key_time, float(scale[0]))
+                    add_key(channel, float(scale[0]))
                     keys_added += 1
                 elif "Scale.Y" in channel_name:
-                    channel.add_key(key_time, float(scale[1]))
+                    add_key(channel, float(scale[1]))
                     keys_added += 1
                 elif "Scale.Z" in channel_name:
-                    channel.add_key(key_time, float(scale[2]))
+                    add_key(channel, float(scale[2]))
                     keys_added += 1
 
         if keys_added == 0:
@@ -157,6 +174,7 @@ def add_transform_keyframe(
             location=location,
             rotation=rotation,
             scale=scale,
+            interpolation=interpolation,
             keys_added=keys_added,
             prompt="Use add_transform_keyframe again for more keyframes, then queue_sequence_render.",
         )

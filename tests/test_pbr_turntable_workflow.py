@@ -71,6 +71,58 @@ def test_spawn_actor_assigns_static_mesh_and_reports_bounds(monkeypatch):
     assert result["context"]["bounds"]["extent"] == [4.0, 5.0, 6.0]
 
 
+def test_attach_actor_preserves_world_transform(monkeypatch):
+    unreal = ModuleType("unreal")
+    unreal.log = MagicMock()
+    unreal.AttachmentRule = SimpleNamespace(KEEP_WORLD="keep_world", KEEP_RELATIVE="keep_relative")
+    child = MagicMock()
+    parent = MagicMock()
+    child.get_attach_parent_actor.return_value = None
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+    import dcc_mcp_unreal.api
+
+    monkeypatch.setattr(
+        dcc_mcp_unreal.api,
+        "find_level_actor",
+        MagicMock(side_effect=lambda name: {"Gun": child, "TurntableRoot": parent}.get(name)),
+    )
+
+    result = _load(
+        "attach_actor",
+        "src/dcc_mcp_unreal/skills/unreal-actors/scripts/attach_actor.py",
+    ).attach_actor(child_actor_name="Gun", parent_actor_name="TurntableRoot")
+
+    assert result["success"] is True
+    child.attach_to_actor.assert_called_once_with(
+        parent,
+        "",
+        "keep_world",
+        "keep_world",
+        "keep_world",
+        False,
+    )
+
+
+def test_get_actor_transform_reports_bounds(monkeypatch):
+    actor = MagicMock()
+    actor.get_actor_location.return_value = SimpleNamespace(x=1.0, y=2.0, z=3.0)
+    actor.get_actor_rotation.return_value = SimpleNamespace(pitch=4.0, yaw=5.0, roll=6.0)
+    actor.get_actor_scale3d.return_value = SimpleNamespace(x=1.0, y=1.0, z=1.0)
+    actor.get_actor_bounds.return_value = (
+        SimpleNamespace(x=10.0, y=20.0, z=30.0),
+        SimpleNamespace(x=40.0, y=50.0, z=60.0),
+    )
+    import dcc_mcp_unreal.api
+
+    monkeypatch.setattr(dcc_mcp_unreal.api, "find_level_actor", MagicMock(return_value=actor))
+    result = _load(
+        "get_actor_transform_bounds",
+        "src/dcc_mcp_unreal/skills/unreal-actors/scripts/get_actor_transform.py",
+    ).get_actor_transform(actor_name="Gun")
+
+    assert result["context"]["bounds"]["origin"] == [10.0, 20.0, 30.0]
+
+
 def test_set_actor_transform_accepts_spawned_actor_label(monkeypatch):
     unreal = ModuleType("unreal")
     unreal.log = MagicMock()
@@ -258,3 +310,15 @@ def test_start_render_requires_a_queued_job(monkeypatch):
 
     assert result["success"] is False
     assert result["message"] == "Movie Render Queue is empty"
+
+
+def test_transform_keyframes_support_linear_interpolation():
+    script = (ROOT / "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/add_transform_keyframe.py").read_text(
+        encoding="utf-8"
+    )
+    tools = (ROOT / "src/dcc_mcp_unreal/skills/unreal-cinematics/tools.yaml").read_text(encoding="utf-8")
+
+    assert 'interpolation: str = "default"' in script
+    assert "RichCurveInterpMode.RCIM_LINEAR" in script
+    assert "key.set_interpolation_mode(interpolation_mode)" in script
+    assert "enum: [default, linear, constant]" in tools
