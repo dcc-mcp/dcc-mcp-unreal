@@ -178,6 +178,7 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
 
     assert 'engine_tag.startswith("ue4.")' in builder
     assert '"ue5.5"' in builder
+    assert '"AutomationTool.exe"' in builder
     assert 'cmd.append("-nocompile")' in builder
     assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
     assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):" in builder
