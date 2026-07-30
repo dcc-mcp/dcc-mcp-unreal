@@ -270,5 +270,61 @@ tools:
           minimum: 0
           default: 0.0
           description: Override frame rate; uses sequence default when omitted.
+        spatial_samples:
+          type: integer
+          minimum: 1
+          maximum: 64
+          default: 1
+        temporal_samples:
+          type: integer
+          minimum: 1
+          maximum: 64
+          default: 8
+          description: Temporal samples used for high-quality anti-aliasing and motion blur.
+        ocio_config_path:
+          type: string
+          default: ""
+          description: Optional absolute .ocio or .ocioz config applied by Movie Render Queue.
+        ocio_source_color_space:
+          type: string
+          default: ACEScg
+        ocio_display:
+          type: string
+          default: Rec.1886 Rec.709 - Display
+        ocio_view:
+          type: string
+          default: ACES 1.0 - SDR Video
     next-tools:
+      on-success: [unreal_cinematics__start_queued_render]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: start_queued_render
+    description: Start every configured job in the active Movie Render Queue with a PIE executor.
+    source_file: scripts/start_queued_render.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      properties: {}
+    next-tools:
+      on-success: [unreal_cinematics__get_render_status]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: get_render_status
+    description: Report whether Movie Render Queue is active and how many jobs remain configured.
+    source_file: scripts/get_render_status.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties: {}

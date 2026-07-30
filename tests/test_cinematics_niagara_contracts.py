@@ -27,9 +27,34 @@ def _render_unreal():
     unreal.MoviePipelineImageSequenceOutput_PNG = type("MoviePipelineImageSequenceOutput_PNG", (), {})
     unreal.MoviePipelineImageSequenceOutput_JPG = type("MoviePipelineImageSequenceOutput_JPG", (), {})
     unreal.MoviePipelineImageSequenceOutput_EXR = type("MoviePipelineImageSequenceOutput_EXR", (), {})
+    unreal.MoviePipelineDeferredPassBase = type("MoviePipelineDeferredPassBase", (), {})
+    unreal.MoviePipelineAntiAliasingSetting = type("MoviePipelineAntiAliasingSetting", (), {})
+    unreal.MoviePipelineGameOverrideSetting = type("MoviePipelineGameOverrideSetting", (), {})
+    unreal.MoviePipelineColorSetting = type("MoviePipelineColorSetting", (), {})
+    unreal.AntiAliasingMethod = types.SimpleNamespace(AAM_TSR="tsr")
+    unreal.MoviePipelineTextureStreamingMethod = types.SimpleNamespace(DISABLED="disabled")
+    unreal.OpenColorIOViewTransformDirection = types.SimpleNamespace(FORWARD="forward")
     unreal.SoftObjectPath = lambda value: value
     unreal.IntPoint = lambda x, y: (x, y)
     unreal.DirectoryPath = lambda value: value
+    unreal.FilePath = lambda **values: types.SimpleNamespace(**values)
+    unreal.OpenColorIOColorSpace = lambda **values: types.SimpleNamespace(**values)
+    unreal.OpenColorIODisplayView = lambda **values: types.SimpleNamespace(**values)
+    unreal.OpenColorIOColorConversionSettings = lambda **values: types.SimpleNamespace(**values)
+    unreal.OpenColorIODisplayConfiguration = lambda **values: types.SimpleNamespace(**values)
+
+    class OpenColorIOConfiguration:
+        def __init__(self, **_values):
+            self.properties = {}
+            self.reloaded = False
+
+        def set_editor_property(self, name, value):
+            self.properties[name] = value
+
+        def reload_existing_colorspaces(self, force):
+            self.reloaded = force
+
+    unreal.OpenColorIOConfiguration = OpenColorIOConfiguration
     unreal.FrameRate = lambda numerator, denominator: types.SimpleNamespace(
         numerator=numerator,
         denominator=denominator,
@@ -48,6 +73,10 @@ def _render_unreal():
 
     output_setting = types.SimpleNamespace()
     format_setting = object()
+    anti_aliasing = types.SimpleNamespace()
+    game_override = types.SimpleNamespace()
+    color_setting = types.SimpleNamespace()
+    unreal._test_color_setting = color_setting
     config = MagicMock()
 
     def find_or_add(setting_class):
@@ -55,6 +84,12 @@ def _render_unreal():
             return output_setting
         if setting_class is unreal.MoviePipelineImageSequenceOutput_PNG:
             return format_setting
+        if setting_class is unreal.MoviePipelineAntiAliasingSetting:
+            return anti_aliasing
+        if setting_class is unreal.MoviePipelineGameOverrideSetting:
+            return game_override
+        if setting_class is unreal.MoviePipelineColorSetting:
+            return color_setting
         return object()
 
     config.find_or_add_setting_by_class.side_effect = find_or_add
@@ -87,7 +122,33 @@ def test_queue_uses_real_output_setting_and_preserves_sequence_rate():
     assert result["context"]["job_status"] == "queued_not_started"
     assert result["context"]["render_started"] is False
     assert result["context"]["map_path"] == "/Game/Maps/TestMap"
+    assert result["context"]["temporal_samples"] == 8
     subsystem.save_queue.assert_not_called()
+
+
+def test_queue_configures_ocio_color_output(tmp_path):
+    ocio_path = tmp_path / "config.ocio"
+    ocio_path.write_text("ocio_profile_version: 2", encoding="utf-8")
+    unreal, _subsystem, _queue, _output_setting = _render_unreal()
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module = _load_script(
+            "queue_sequence_render_ocio",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/queue_sequence_render.py",
+        )
+        result = module.queue_sequence_render(
+            sequence_path="/Game/Sequences/Test",
+            output_path="C:/renders",
+            ocio_config_path=str(ocio_path),
+        )
+
+    assert result["success"] is True
+    assert result["context"]["ocio_enabled"] is True
+    assert unreal._test_color_setting.disable_tone_curve is True
+    assert unreal._test_color_setting.ocio_configuration.is_enabled is True
+    assert (
+        unreal._test_color_setting.ocio_configuration.color_configuration.source_color_space.color_space_name
+        == "ACEScg"
+    )
 
 
 def test_queue_absolute_path_validation_is_agent_platform_independent():

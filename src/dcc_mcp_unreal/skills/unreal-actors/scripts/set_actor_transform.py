@@ -6,6 +6,8 @@ from typing import Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.api import find_level_actor
+
 
 @skill_entry
 def set_actor_transform(
@@ -51,8 +53,7 @@ def set_actor_transform(
             possible_solutions=["Pass 'actor_name' as a non-empty string"],
         )
 
-    all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-    target = next((a for a in all_actors if a.get_name() == actor_name), None)
+    target = find_level_actor(actor_name)
 
     if target is None:
         return skill_error(
@@ -76,9 +77,9 @@ def set_actor_transform(
         location_z if location_z is not None else cur_loc.z,
     )
     new_rot = unreal.Rotator(
-        rotation_pitch if rotation_pitch is not None else cur_rot.pitch,
-        rotation_yaw if rotation_yaw is not None else cur_rot.yaw,
-        rotation_roll if rotation_roll is not None else cur_rot.roll,
+        pitch=rotation_pitch if rotation_pitch is not None else cur_rot.pitch,
+        yaw=rotation_yaw if rotation_yaw is not None else cur_rot.yaw,
+        roll=rotation_roll if rotation_roll is not None else cur_rot.roll,
     )
     new_scale = unreal.Vector(
         scale_x if scale_x is not None else cur_scale.x,

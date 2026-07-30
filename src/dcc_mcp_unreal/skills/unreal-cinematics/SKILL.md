@@ -35,7 +35,7 @@ this skill's current contract.
 4. Add camera cuts via `add_camera_cut_track` for shot switching.
 5. Set playback ranges with `set_playback_range`.
 6. Inspect sequence state with `get_sequence_info`.
-7. Add an MRQ job to the active editor queue with `queue_sequence_render`, then start and monitor it in Unreal.
+7. Add an MRQ job with `queue_sequence_render`, start it with `start_queued_render`, and poll `get_render_status`.
 
 When UE 5.8+ official MCP is available, the `unreal-official-mcp` skill
 provides additional Sequencer tools through Epic's toolset registry.
@@ -50,4 +50,6 @@ Prefer the official path for complex shot workflows.
 - `set_playback_range` — Set the sequence start and end frame
 - `get_sequence_info` — Inspect tracks, bindings, and playback range
 - `add_camera_cut_track` — Add a camera cut track for shot switching
-- `queue_sequence_render` — Configure an active-session MRQ job without starting a render
+- `queue_sequence_render` — Configure an active-session MRQ job, optionally with an OCIO display transform, without starting a render
+- `start_queued_render` — Start the active MRQ queue
+- `get_render_status` — Inspect active MRQ state
