@@ -17,6 +17,15 @@ def parse_unreal_version(value: str) -> Tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def resolve_unreal_runtime(engine_version: str, runtime_mode: str = "auto") -> str:
+    """Resolve ``auto`` to the supported embedded or sidecar runtime."""
+    mode = (runtime_mode or "auto").strip().lower()
+    if mode != "auto":
+        return mode
+    major, _ = parse_unreal_version(engine_version)
+    return "python" if major >= 5 else "sidecar"
+
+
 def unreal_compatibility(
     engine_version: str,
     has_embedded_python: bool,

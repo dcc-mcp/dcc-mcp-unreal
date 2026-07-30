@@ -37,9 +37,12 @@ if (-not (Test-Path -LiteralPath $scriptPath)) {
     throw "Smoke test script not found: $scriptPath"
 }
 
-$editorCmd = Join-Path $UERoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-if (-not (Test-Path -LiteralPath $editorCmd)) {
-    throw "UnrealEditor-Cmd.exe not found: $editorCmd"
+$editorCmd = @(
+    (Join-Path $UERoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"),
+    (Join-Path $UERoot "Engine\Binaries\Win64\UE4Editor-Cmd.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($editorCmd)) {
+    throw "Unreal editor commandlet not found under: $UERoot"
 }
 
 $resultDir = Join-Path $projectRoot "Saved\Automation"
@@ -86,24 +89,42 @@ if ($Mode -eq "native") {
     )
 }
 
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $editorCmd @ueArgs *> $log
 $exitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
 if ($exitCode -ne 0) {
     Get-Content -Path $log -Tail 120
     exit $exitCode
 }
 
-if (-not (Test-Path -LiteralPath $result)) {
-    Get-Content -Path $log -Tail 120
-    throw "Smoke test did not write result file: $result"
-}
-
-$jsonText = Get-Content -Path $result -Raw
-$jsonText
-$data = $jsonText | ConvertFrom-Json
-if (-not $data.success) {
-    Get-Content -Path $log -Tail 120
-    exit 1
+if ($Mode -eq "native") {
+    $nativeReport = Join-Path $report "index.json"
+    if (-not (Test-Path -LiteralPath $nativeReport)) {
+        Get-Content -Path $log -Tail 120
+        throw "Native smoke test did not write an automation report: $nativeReport"
+    }
+    $nativeJson = Get-Content -LiteralPath $nativeReport -Raw
+    $nativeJson
+    $nativeData = $nativeJson | ConvertFrom-Json
+    $nativePassed = [int]$nativeData.succeeded + [int]$nativeData.succeededWithWarnings
+    if ([int]$nativeData.failed -ne 0 -or $nativePassed -lt 1) {
+        Get-Content -Path $log -Tail 120
+        exit 1
+    }
+} else {
+    if (-not (Test-Path -LiteralPath $result)) {
+        Get-Content -Path $log -Tail 120
+        throw "Python smoke test did not write result file: $result"
+    }
+    $jsonText = Get-Content -LiteralPath $result -Raw
+    $jsonText
+    $data = $jsonText | ConvertFrom-Json
+    if (-not $data.success) {
+        Get-Content -Path $log -Tail 120
+        exit 1
+    }
 }
 
 Write-Output "[ue-smoke] log: $log"
