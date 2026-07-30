@@ -96,6 +96,151 @@ def test_set_actor_transform_accepts_spawned_actor_label(monkeypatch):
     actor.set_actor_transform.assert_called_once()
 
 
+def test_configure_sky_light_assigns_hdr_texture_cube(monkeypatch):
+    unreal = ModuleType("unreal")
+    unreal.log = MagicMock()
+    unreal.TextureCube = type("TextureCube", (), {})
+    unreal.SkyLightComponent = type("SkyLightComponent", (), {})
+    unreal.SkyLightSourceType = SimpleNamespace(SLS_SPECIFIED_CUBEMAP="specified")
+    cubemap = unreal.TextureCube()
+    unreal.EditorAssetLibrary = MagicMock()
+    unreal.EditorAssetLibrary.load_asset.return_value = cubemap
+    component = MagicMock()
+    actor = MagicMock()
+    actor.get_component_by_class.return_value = component
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+    import dcc_mcp_unreal.api
+
+    monkeypatch.setattr(dcc_mcp_unreal.api, "find_level_actor", MagicMock(return_value=actor))
+
+    result = _load(
+        "configure_sky_light",
+        "src/dcc_mcp_unreal/skills/unreal-actors/scripts/configure_sky_light.py",
+    ).configure_sky_light(
+        actor_name="Lookdev_SkyLight",
+        cubemap_path="/Game/Lookdev/T_Studio_HDRI",
+        intensity_scale=1.25,
+        source_cubemap_angle=390.0,
+    )
+
+    assert result["success"] is True
+    assert result["context"]["source_cubemap_angle"] == 30.0
+    component.set_editor_property.assert_any_call("source_type", "specified")
+    component.set_editor_property.assert_any_call("cubemap", cubemap)
+    component.set_editor_property.assert_any_call("intensity", 1.25)
+
+
+def test_configure_light_sets_allowlisted_lookdev_properties(monkeypatch):
+    unreal = ModuleType("unreal")
+    unreal.log = MagicMock()
+    unreal.LightComponentBase = type("LightComponentBase", (), {})
+    unreal.Color = lambda **values: SimpleNamespace(**values)
+    component = MagicMock()
+    actor = MagicMock()
+    actor.get_component_by_class.return_value = component
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+    import dcc_mcp_unreal.api
+
+    monkeypatch.setattr(dcc_mcp_unreal.api, "find_level_actor", MagicMock(return_value=actor))
+
+    result = _load(
+        "configure_light",
+        "src/dcc_mcp_unreal/skills/unreal-actors/scripts/configure_light.py",
+    ).configure_light(
+        actor_name="Lookdev_Key",
+        intensity=18000,
+        color_r=1.0,
+        color_g=0.8,
+        color_b=0.65,
+        source_radius=35,
+    )
+
+    assert result["success"] is True
+    component.set_editor_property.assert_any_call("intensity", 18000.0)
+    component.set_editor_property.assert_any_call("source_radius", 35.0)
+    color_call = next(call for call in component.set_editor_property.call_args_list if call.args[0] == "light_color")
+    assert color_call.args[1].r == 255
+
+
+def test_configure_camera_exposure_disables_eye_adaptation(monkeypatch):
+    unreal = ModuleType("unreal")
+    unreal.log = MagicMock()
+    unreal.CameraComponent = type("CameraComponent", (), {})
+    unreal.AutoExposureMethod = SimpleNamespace(AEM_MANUAL="manual")
+    settings = MagicMock()
+    component = MagicMock()
+    component.get_editor_property.return_value = settings
+    actor = MagicMock()
+    actor.get_component_by_class.return_value = component
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+    import dcc_mcp_unreal.api
+
+    monkeypatch.setattr(dcc_mcp_unreal.api, "find_level_actor", MagicMock(return_value=actor))
+
+    result = _load(
+        "configure_camera_exposure",
+        "src/dcc_mcp_unreal/skills/unreal-actors/scripts/configure_camera_exposure.py",
+    ).configure_camera_exposure(actor_name="Lookdev_Camera", exposure_compensation=-2.0)
+
+    assert result["success"] is True
+    settings.set_editor_property.assert_any_call("auto_exposure_method", "manual")
+    settings.set_editor_property.assert_any_call("auto_exposure_apply_physical_camera_exposure", False)
+    settings.set_editor_property.assert_any_call("auto_exposure_bias", -2.0)
+    component.set_editor_property.assert_called_once_with("post_process_settings", settings)
+
+
+def test_create_ocio_configuration_persists_valid_display_transform(monkeypatch):
+    unreal = ModuleType("unreal")
+    unreal.log = MagicMock()
+
+    class OpenColorIOConfiguration:
+        def __init__(self):
+            self.properties = {}
+
+        def set_editor_property(self, name, value):
+            self.properties[name] = value
+
+        def get_editor_property(self, name):
+            return self.properties[name]
+
+        def reload_existing_colorspaces(self, _force):
+            pass
+
+    asset = OpenColorIOConfiguration()
+    unreal.OpenColorIOConfiguration = OpenColorIOConfiguration
+    unreal.OpenColorIOConfigurationFactoryNew = type("OpenColorIOConfigurationFactoryNew", (), {})
+    unreal.OpenColorIOColorSpace = lambda **values: SimpleNamespace(**values)
+    unreal.OpenColorIODisplayView = lambda **values: SimpleNamespace(**values)
+    unreal.OpenColorIOColorConversionSettings = lambda **values: SimpleNamespace(**values)
+    unreal.OpenColorIODisplayConfiguration = lambda **values: SimpleNamespace(**values)
+    unreal.OpenColorIOViewTransformDirection = SimpleNamespace(FORWARD="forward")
+    unreal.OpenColorIOEditorBlueprintLibrary = MagicMock()
+    unreal.FilePath = lambda **values: SimpleNamespace(**values)
+    unreal.EditorAssetLibrary = MagicMock()
+    unreal.EditorAssetLibrary.load_asset.return_value = None
+    unreal.EditorAssetLibrary.save_loaded_asset.return_value = True
+    asset_tools = MagicMock()
+    asset_tools.create_asset.return_value = asset
+    unreal.AssetToolsHelpers = SimpleNamespace(get_asset_tools=lambda: asset_tools)
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+
+    result = _load(
+        "create_ocio_configuration",
+        "src/dcc_mcp_unreal/skills/unreal-assets/scripts/create_ocio_configuration.py",
+    ).create_ocio_configuration(
+        asset_path="/Game/Drawcall557/Color/OCIO_ACES13_CG",
+        configuration_path="ocio://cg-config-v2.2.0_aces-v1.3_ocio-v2.4",
+        apply_to_active_viewport=True,
+    )
+
+    assert result["success"] is True
+    assert result["context"]["transform_valid"] is True
+    assert result["context"]["active_viewport_configured"] is True
+    assert asset.properties["configuration_file"].file_path.startswith("ocio://cg-config-v2.2.0")
+    unreal.EditorAssetLibrary.save_loaded_asset.assert_called_once_with(asset, only_if_is_dirty=False)
+    unreal.OpenColorIOEditorBlueprintLibrary.set_active_viewport_configuration.assert_called_once()
+
+
 def test_start_render_requires_a_queued_job(monkeypatch):
     unreal = ModuleType("unreal")
     unreal.log = MagicMock()

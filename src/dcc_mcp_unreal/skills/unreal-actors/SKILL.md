@@ -30,6 +30,9 @@ Tools for actor-level operations in the active Unreal Editor level.
 - `delete_actor` - Delete an actor from the level by name.
 - `get_actor_transform` - Get the world-space location, rotation, and scale of an actor.
 - `set_actor_transform` - Set the world-space location, rotation, and/or scale of an actor.
+- `configure_sky_light` - Assign an imported HDR TextureCube to a level Sky Light.
+- `configure_light` - Set allowlisted intensity, color, temperature, and softness controls on a light.
+- `configure_camera_exposure` - Disable eye adaptation and lock a camera to a fixed manual exposure.
 
 ## Usage Examples
 
@@ -70,4 +73,22 @@ Tools for actor-level operations in the active Unreal Editor level.
 ```python
 # MCP tool call: unreal_actors__set_actor_transform
 # params: {"actor_name": "SM_Cube_1", "location_x": 100.0, "location_y": 200.0}
+```
+
+### Configure HDR image-based lighting
+
+```python
+# MCP tool call: unreal_actors__configure_sky_light
+# params: {
+#   "actor_name": "Lookdev_SkyLight",
+#   "cubemap_path": "/Game/Lookdev/T_Studio_HDRI",
+#   "intensity_scale": 1.0
+# }
+```
+
+### Lock a camera exposure
+
+```python
+# MCP tool call: unreal_actors__configure_camera_exposure
+# params: {"actor_name": "Lookdev_Camera", "exposure_compensation": -2.0}
 ```

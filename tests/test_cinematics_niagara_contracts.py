@@ -51,6 +51,9 @@ def _render_unreal():
         def set_editor_property(self, name, value):
             self.properties[name] = value
 
+        def get_editor_property(self, name):
+            return self.properties[name]
+
         def reload_existing_colorspaces(self, force):
             self.reloaded = force
 
@@ -151,6 +154,52 @@ def test_queue_configures_ocio_color_output(tmp_path):
     )
 
 
+def test_queue_can_clear_existing_jobs_before_adding_render():
+    unreal, _subsystem, queue, _output_setting = _render_unreal()
+    previous_job = object()
+    queue.get_jobs.side_effect = [[previous_job], [queue.allocate_new_job.return_value]]
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module = _load_script(
+            "queue_sequence_render_clear",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/queue_sequence_render.py",
+        )
+        result = module.queue_sequence_render(
+            sequence_path="/Game/Sequences/Test",
+            output_path="C:/renders",
+            clear_existing_jobs=True,
+        )
+
+    assert result["success"] is True
+    assert result["context"]["cleared_jobs"] == 1
+    queue.delete_job.assert_called_once_with(previous_job)
+
+
+def test_queue_rejects_ocio_transform_missing_after_reload(tmp_path):
+    ocio_path = tmp_path / "config.ocio"
+    ocio_path.write_text("ocio_profile_version: 2", encoding="utf-8")
+    unreal, _subsystem, queue, _output_setting = _render_unreal()
+
+    def drop_requested_transforms(config, _force):
+        config.properties["desired_color_spaces"] = []
+        config.properties["desired_display_views"] = []
+
+    unreal.OpenColorIOConfiguration.reload_existing_colorspaces = drop_requested_transforms
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module = _load_script(
+            "queue_sequence_render_invalid_ocio",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/queue_sequence_render.py",
+        )
+        result = module.queue_sequence_render(
+            sequence_path="/Game/Sequences/Test",
+            output_path="C:/renders",
+            ocio_config_path=str(ocio_path),
+        )
+
+    assert result["success"] is False
+    assert result["message"] == "Invalid OCIO transform"
+    queue.delete_job.assert_called_once()
+
+
 def test_queue_absolute_path_validation_is_agent_platform_independent():
     module = _load_script(
         "queue_sequence_render_path_contract",
@@ -216,6 +265,27 @@ def test_queue_fails_cleanly_when_movie_render_queue_plugin_is_disabled():
     assert result["success"] is False
     assert result["message"] == "Movie Render Queue unavailable"
     queue.allocate_new_job.assert_not_called()
+
+
+def test_cancel_render_uses_active_executor():
+    unreal = types.ModuleType("unreal")
+    unreal.log = MagicMock()
+    unreal.MoviePipelineQueueSubsystem = type("MoviePipelineQueueSubsystem", (), {})
+    executor = MagicMock()
+    subsystem = MagicMock()
+    subsystem.get_active_executor.return_value = executor
+    subsystem.is_rendering.return_value = True
+    unreal.get_editor_subsystem = MagicMock(return_value=subsystem)
+
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        result = _load_script(
+            "cancel_queued_render",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/cancel_queued_render.py",
+        ).cancel_queued_render()
+
+    assert result["success"] is True
+    assert result["context"]["cancellation_requested"] is True
+    executor.cancel_all_jobs.assert_called_once_with()
 
 
 def test_create_level_sequence_uses_requested_package_and_fractional_rate():

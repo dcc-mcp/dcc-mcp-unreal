@@ -33,6 +33,7 @@ def queue_sequence_render(
     frame_rate_override: float = 0.0,
     spatial_samples: int = 1,
     temporal_samples: int = 8,
+    clear_existing_jobs: bool = False,
     ocio_config_path: str = "",
     ocio_source_color_space: str = "ACEScg",
     ocio_display: str = "Rec.1886 Rec.709 - Display",
@@ -115,6 +116,12 @@ def queue_sequence_render(
         render_queue = mrq_subsystem.get_queue()
         if render_queue is None:
             return unreal_error("Render queue is null", "Could not obtain the movie render queue.")
+        cleared_jobs = 0
+        if clear_existing_jobs:
+            existing_jobs = list(render_queue.get_jobs())
+            for existing_job in existing_jobs:
+                render_queue.delete_job(existing_job)
+            cleared_jobs = len(existing_jobs)
 
         output_class = getattr(unreal, _OUTPUT_CLASSES[normalized_format], None)
         if output_class is None:
@@ -220,6 +227,20 @@ def queue_sequence_render(
             ocio_config.set_editor_property("desired_color_spaces", [source])
             ocio_config.set_editor_property("desired_display_views", [display_view])
             ocio_config.reload_existing_colorspaces(True)
+            loaded_sources = ocio_config.get_editor_property("desired_color_spaces")
+            loaded_views = ocio_config.get_editor_property("desired_display_views")
+            if not any(item.color_space_name == ocio_source_color_space for item in loaded_sources) or not any(
+                item.display == ocio_display and item.view == ocio_view for item in loaded_views
+            ):
+                render_queue.delete_job(job)
+                job = None
+                return unreal_error(
+                    "Invalid OCIO transform",
+                    "The OCIO configuration did not retain the requested source color space and display-view",
+                    ocio_source_color_space=ocio_source_color_space,
+                    ocio_display=ocio_display,
+                    ocio_view=ocio_view,
+                )
             conversion = unreal.OpenColorIOColorConversionSettings(
                 configuration_source=ocio_config,
                 source_color_space=source,
@@ -254,6 +275,7 @@ def queue_sequence_render(
             "render_started": False,
             "spatial_samples": spatial_samples,
             "temporal_samples": temporal_samples,
+            "cleared_jobs": cleared_jobs,
             "ocio_enabled": ocio_path is not None,
         }
         if ocio_path is not None:
