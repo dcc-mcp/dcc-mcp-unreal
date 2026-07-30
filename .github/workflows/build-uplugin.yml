@@ -49,7 +49,7 @@ jobs:
             package_mode: native
             artifact_suffix: win64
           - ue_version: "5.7"
-            ue_root: C:\Program Files\Epic Games\UE_5.7
+            ue_root: F:\UE\UE_5.7
             package_mode: native
             artifact_suffix: win64
           - ue_version: "5.8"
@@ -57,7 +57,7 @@ jobs:
             package_mode: native
             artifact_suffix: win64
           - ue_version: "4.18"
-            ue_root: C:\Program Files\Epic Games\UE_4.18
+            ue_root: F:\UE\UE_4.18
             package_mode: native
             artifact_suffix: win64
     env:

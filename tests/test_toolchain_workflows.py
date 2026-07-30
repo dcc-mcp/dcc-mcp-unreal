@@ -90,7 +90,9 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
 
     assert [entry["ue_version"] for entry in matrix] == ["5.5", "5.7", "5.8", "4.18"]
     assert matrix[0]["ue_root"] == r"F:\UE\UE_5.5"
+    assert matrix[1]["ue_root"] == r"F:\UE\UE_5.7"
     assert matrix[2]["ue_root"] == r"C:\Program Files\Epic Games\UE_5.8"
+    assert matrix[3]["ue_root"] == r"F:\UE\UE_4.18"
     assert matrix[3]["package_mode"] == "native"
     assert matrix[3]["artifact_suffix"] == "win64"
     assert (
