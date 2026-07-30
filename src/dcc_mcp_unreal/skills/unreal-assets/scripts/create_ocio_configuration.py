@@ -27,10 +27,15 @@ def create_ocio_configuration(
         return skill_error("Invalid OCIO settings", "Configuration and transform names must be non-empty")
     if not configuration_path.startswith("ocio://"):
         config_file = Path(configuration_path).expanduser()
-        if not config_file.is_absolute() or not config_file.is_file() or config_file.suffix.lower() not in {
-            ".ocio",
-            ".ocioz",
-        }:
+        if (
+            not config_file.is_absolute()
+            or not config_file.is_file()
+            or config_file.suffix.lower()
+            not in {
+                ".ocio",
+                ".ocioz",
+            }
+        ):
             return skill_error(
                 "Invalid OCIO configuration",
                 "configuration_path must be a built-in ocio:// URL or an existing absolute .ocio/.ocioz file",
