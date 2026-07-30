@@ -41,6 +41,7 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
     loc = target.get_actor_location()
     rot = target.get_actor_rotation()
     scale = target.get_actor_scale3d()
+    bounds_origin, bounds_extent = target.get_actor_bounds(False)
 
     return skill_success(
         f"Got transform for actor '{actor_name}'",
@@ -49,4 +50,8 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
         location=[float(loc.x), float(loc.y), float(loc.z)],
         rotation=[float(rot.pitch), float(rot.yaw), float(rot.roll)],
         scale=[float(scale.x), float(scale.y), float(scale.z)],
+        bounds={
+            "origin": [float(bounds_origin.x), float(bounds_origin.y), float(bounds_origin.z)],
+            "extent": [float(bounds_extent.x), float(bounds_extent.y), float(bounds_extent.z)],
+        },
     )

@@ -34,8 +34,15 @@ def _build_material_graph(
     base_color_scale: float,
     roughness: float,
     specular: float,
+    unlit: bool,
+    two_sided: bool,
 ) -> None:
     unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+    material.set_editor_property("two_sided", two_sided)
+    material.set_editor_property(
+        "shading_model",
+        unreal.MaterialShadingModel.MSM_UNLIT if unlit else unreal.MaterialShadingModel.MSM_DEFAULT_LIT,
+    )
 
     coordinates = unreal.MaterialEditingLibrary.create_material_expression(
         material,
@@ -79,8 +86,11 @@ def _build_material_graph(
     unreal.MaterialEditingLibrary.connect_material_property(
         base_color_expression,
         base_color_output,
-        unreal.MaterialProperty.MP_BASE_COLOR,
+        unreal.MaterialProperty.MP_EMISSIVE_COLOR if unlit else unreal.MaterialProperty.MP_BASE_COLOR,
     )
+    if unlit:
+        unreal.MaterialEditingLibrary.recompile_material(material)
+        return
 
     texture_properties = (
         (normal_texture, unreal.MaterialProperty.MP_NORMAL, "RGB", 120),
@@ -98,6 +108,12 @@ def _build_material_graph(
             y,
         )
         pbr_sample.set_editor_property("texture", pbr_texture)
+        pbr_sample.set_editor_property(
+            "sampler_type",
+            unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL
+            if material_property == unreal.MaterialProperty.MP_NORMAL
+            else unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
+        )
         unreal.MaterialEditingLibrary.connect_material_expressions(
             coordinates,
             "",
@@ -140,6 +156,8 @@ def create_texture_material(
     base_color_scale: float = 1.0,
     roughness: float = 0.85,
     specular: float = 0.15,
+    unlit: bool = False,
+    two_sided: bool = False,
     replace_existing: bool = False,
     **kwargs,
 ) -> dict:
@@ -230,6 +248,8 @@ def create_texture_material(
         base_color_scale=float(base_color_scale),
         roughness=float(roughness),
         specular=float(specular),
+        unlit=unlit,
+        two_sided=two_sided,
     )
     if not unreal.EditorAssetLibrary.save_loaded_asset(material, only_if_is_dirty=False):
         return skill_error(
@@ -250,4 +270,6 @@ def create_texture_material(
         base_color_scale=float(base_color_scale),
         roughness=float(roughness),
         specular=float(specular),
+        unlit=unlit,
+        two_sided=two_sided,
     )

@@ -135,6 +135,11 @@ tools:
           items:
             type: number
           description: '[x, y, z] scale factor.'
+        interpolation:
+          type: string
+          enum: [default, linear, constant]
+          default: default
+          description: Optional interpolation applied to the created keys.
     next-tools:
       on-failure: [dcc_diagnostics__screenshot]
 
@@ -281,6 +286,10 @@ tools:
           maximum: 64
           default: 8
           description: Temporal samples used for high-quality anti-aliasing and motion blur.
+        clear_existing_jobs:
+          type: boolean
+          default: false
+          description: Remove existing jobs from the active Movie Render Queue before adding this job.
         ocio_config_path:
           type: string
           default: ""
@@ -328,3 +337,20 @@ tools:
     input_schema:
       type: object
       properties: {}
+
+  - name: cancel_queued_render
+    description: Request cancellation of the active Movie Render Queue executor and skip remaining jobs.
+    source_file: scripts/cancel_queued_render.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties: {}
+    next-tools:
+      on-success: [unreal_cinematics__get_render_status]
+      on-failure: [unreal_cinematics__get_render_status, dcc_diagnostics__audit_log]
