@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.13](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.12...v0.2.13) (2026-08-01)
+
+
+### Features
+
+* add automotive rain film skill ([a807e5f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a807e5fc94fe10af519027a633e074ab1dbdf1c4))
+* auto-layout Unreal Blueprint graphs ([7a97f03](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7a97f038dd13f0b96cd6157459486924367f9c06))
+
+
+### Bug Fixes
+
+* attach standalone installer to releases ([32f1256](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/32f12561bd4c40f7bf754dc7fbe27dfe6c9be8b0))
+* bound official MCP calls by one deadline ([b628fde](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b628fde7c52b2b7a8b226f7f799b9bbdae2f01c6))
+
 ## [0.2.12](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.11...v0.2.12) (2026-08-01)
 
 
