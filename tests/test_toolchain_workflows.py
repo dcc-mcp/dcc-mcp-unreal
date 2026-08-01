@@ -280,8 +280,12 @@ def test_manual_tag_recovery_rebuilds_assets_without_republishing_pypi() -> None
 
 def test_release_checks_out_installer_before_attaching_assets() -> None:
     steps = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["attach-release-assets"]["steps"]
-    checkout_index = next(index for index, step in enumerate(steps) if str(step.get("uses", "")).startswith("actions/checkout@"))
-    attach_index = next(index for index, step in enumerate(steps) if step.get("name") == "Attach wheels to GitHub Release")
+    checkout_index = next(
+        index for index, step in enumerate(steps) if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    attach_index = next(
+        index for index, step in enumerate(steps) if step.get("name") == "Attach wheels to GitHub Release"
+    )
 
     assert checkout_index < attach_index
     assert "scripts/install-standalone.ps1" in steps[attach_index]["with"]["files"]
