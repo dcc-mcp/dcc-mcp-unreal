@@ -52,7 +52,7 @@ def save_level(
         try:
             dirty_packages = unreal.EditorLoadingAndSavingUtils.get_dirty_content_packages()
             if dirty_packages:
-                unreal.EditorLoadingAndSavingUtils.save_packages(dirty_packages, only_if_is_dirty=True)
+                unreal.EditorLoadingAndSavingUtils.save_packages(dirty_packages, True)
                 saved_packages.extend([str(p.get_name()) for p in dirty_packages])
         except Exception as exc:
             # Non-fatal — level was saved, only dirty packages failed

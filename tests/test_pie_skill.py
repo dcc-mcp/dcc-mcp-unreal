@@ -663,6 +663,8 @@ class TestSkillMetadata:
             "pie_cancel_job",
         ]
         assert tool_names == expected
+        screenshot_tool = next(tool for tool in data["tools"] if tool["name"] == "pie_capture_screenshot")
+        assert screenshot_tool["enforce_thread_affinity"] is True
 
     def test_all_scripts_exist(self):
         """Every source_file in tools.yaml points to an existing script."""
