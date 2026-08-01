@@ -4,6 +4,20 @@
   <img src="docs/assets/dcc-mcp-unreal.svg" alt="DCC-MCP · UNREAL" width="600">
 </p>
 
+<!-- Badges -->
+[![PyPI](https://img.shields.io/pypi/v/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
+[![Python](https://img.shields.io/pypi/pyversions/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
+[![License](https://img.shields.io/github/license/dcc-mcp/dcc-mcp-unreal)](LICENSE)
+
+Open-source Unreal Engine adapter for the **DCC Model Context Protocol (MCP)**
+ecosystem. It connects Unreal through an embedded Python server or a native
+standalone sidecar, both built on
+[dcc-mcp-core](https://github.com/dcc-mcp/dcc-mcp-core).
+
+MCP-compatible agents (Claude Desktop, Cursor, OpenClaw, …) can use typed tools
+to inspect scenes, author assets and Blueprints, control cinematics and effects,
+and validate results through PIE and Unreal Automation.
+
 ## Agent workflow
 
 AI agents should use the shared gateway through `dcc-mcp-cli`; IDE users may
@@ -46,24 +60,6 @@ tool belongs to an inactive progressive skill, call `dcc-mcp-cli load-skill <ski
 attach a stable session id with `--meta-json`, query `dcc-mcp-cli stats --range 24h --session-id <task-id>`, then pass the bounded evidence to the
 `review_skill_improvement` prompt from `dcc-mcp-skills-creator`.
 
-
-> **Status**: Pre-Alpha — placeholder / scaffold. Core skill authoring API is
-> functional; full Unreal Engine integration requires iterative testing inside UE5.
-
-<!-- Badges -->
-[![PyPI](https://img.shields.io/pypi/v/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
-[![Python](https://img.shields.io/pypi/pyversions/dcc-mcp-unreal)](https://pypi.org/project/dcc-mcp-unreal/)
-[![License](https://img.shields.io/github/license/dcc-mcp/dcc-mcp-unreal)](LICENSE)
-
-Unreal Engine plugin for the **DCC Model Context Protocol (MCP)** ecosystem.
-Embeds a standards-compliant MCP Streamable HTTP server (2025-03-26 spec)
-directly inside Unreal Engine using the current
-[dcc-mcp-core](https://github.com/dcc-mcp/dcc-mcp-core).
-
-MCP-compatible agents (Claude Desktop, Cursor, OpenClaw, …) can call Unreal
-Editor operations as **tools** — list actors, spawn blueprints, batch-process
-assets, run Python scripts — all through a single HTTP endpoint.
-
 ---
 
 ## Overview
@@ -73,17 +69,60 @@ assets, run Python scripts — all through a single HTTP endpoint.
 
 ```
 Agent (Claude / Cursor)
-    │  MCP tools/call  (HTTP POST /mcp)
+    │  dcc-mcp-cli or MCP
     ▼
-UnrealMcpServer  ←  dcc-mcp-core DccServerBase  ←  SkillCatalog
+Shared gateway  →  Unreal MCP instance  ←  SkillCatalog
     │
-    ▼  in-process HostExecutionBridge
-Python skill scripts  →  Unreal main-thread dispatcher  →  Unreal Editor API
+    ▼
+Embedded Python | native sidecar | optional Epic MCP bridge
+    │
+    ▼
+Unreal main thread  →  Unreal Editor API / Toolset Registry
 ```
 
 Each skill script is a standalone Python file that uses Unreal Engine's
 `unreal` Python module. Scripts are discovered from `SKILL.md` plus sibling
 `tools.yaml` metadata and exposed as MCP tools automatically.
+
+---
+
+## Why DCC MCP when Unreal already has an official MCP?
+
+MCP is a protocol, not a complete automation product. It standardizes how an
+AI client discovers context and invokes tools; it does not decide which editor
+operations exist, how extensions are packaged, how multiple DCC instances are
+discovered, or how tools are routed and operated safely. This separation is a
+core part of [MCP's extensible architecture](https://modelcontextprotocol.io/specification/2025-11-25#architecture).
+
+Epic's [Unreal MCP](https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor)
+is valuable: it is an engine-native, experimental MCP server in Unreal Engine
+5.8+, and its Toolset Registry lets teams add Python and C++ tools. DCC MCP is
+not a competing wire protocol or a fork of that server. It is the broader,
+open-source control and extension layer around Unreal and the rest of a DCC
+pipeline.
+
+| Capability | Epic Unreal MCP | DCC MCP Unreal |
+| --- | --- | --- |
+| Primary role | Expose one Unreal instance through MCP | Discover, extend, and operate Unreal through the shared DCC MCP ecosystem |
+| Engine coverage | Experimental in Unreal Engine 5.8+ | Capability-gated support from Unreal Engine 4.18+, including Python and standalone sidecar paths |
+| Extension model | Unreal Toolset Registry with Python or C++ toolsets | Portable `SKILL.md` + `tools.yaml` packages, built-in and external skill paths, plus the Epic Toolset Registry bridge |
+| Discovery and routing | Clients connect to the editor's local endpoint | Progressive search/load/call, stable gateway routing, CLI access, and multiple live-instance discovery |
+| Execution contract | Unreal-native tool schemas and game-thread execution | Typed schemas plus affinity, timeout, read-only, destructive, and idempotency metadata |
+| Pipeline scope | Unreal Engine | The same gateway and skill contract across Unreal and other DCC adapters |
+
+On Unreal Engine 5.8+, DCC MCP can discover and call the installed Epic
+endpoint through the `unreal-official-mcp` skill while preserving Epic's tool
+names and schemas. It does not copy or redistribute Epic's `NoRedist` plugin.
+The resulting capability set is therefore:
+
+> **DCC MCP native skills + optional Epic toolsets + shared gateway/CLI +
+> cross-DCC integrations.**
+
+That is why DCC MCP has a larger system-level capability surface. "Larger"
+does not mean every DCC MCP tool is better than its engine-native equivalent;
+it means you keep the official tools where they are strongest and gain the
+version reach, extension packaging, routing, and pipeline composition around
+them.
 
 ---
 
@@ -93,17 +132,16 @@ Each skill script is a standalone Python file that uses Unreal Engine's
   and it becomes MCP tools automatically
 - **Zero boilerplate** — use `@skill_entry`, `unreal_success()`, `unreal_error()`
   helpers identical in spirit to `dcc-mcp-maya`'s `@with_maya`, `maya_success()`
-- **Hot-reload** — `SkillWatcher` detects `SKILL.md` changes without restart
-  (future iteration)
-- **Thread-safe singleton** — `start_server()` / `stop_server()` module helpers
-  for easy use from Unreal's Python console
-- **Collision-free instances** — the OS assigns a free MCP instance port by default
-- **Built-in actor skill** — `unreal-actors` ships out of the box (list, spawn,
-  delete, transform actors)
-- **Game-destruction path** — typed `unreal-chaos` converts imported Static
-  Meshes into clustered Geometry Collections and spawns them for Chaos physics
-- **Lookdev and runtime validation** — typed material-instance binding and
-  Simulation-in-Editor controls keep destruction tests reproducible
+- **Broad typed coverage** — actors, assets, Blueprints, levels, materials,
+  cinematics, Niagara, MetaSound, Chaos, Fab, PIE, automation, and packaging
+- **Cross-version runtime** — embedded Python where available and a native
+  standalone sidecar for legacy or Pythonless engines
+- **Progressive discovery** — search, load, and call only the skills needed for
+  the task through the shared gateway and CLI
+- **Contract-aware execution** — schemas declare thread affinity, timeouts,
+  mutability, destructiveness, and idempotency
+- **Official MCP composition** — bridge installed UE 5.8+ Epic toolsets without
+  copying or redistributing Epic's plugin
 
 ---
 
@@ -113,7 +151,7 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 |-------------|---------|
 | Unreal Engine | 4.18+ (capability-gated) |
 | Unreal Python Editor Script Plugin | optional; required for in-editor Python skills |
-| Python (embedded in UE) | version supplied by the installed engine |
+| Python | 3.9+ for Python skills; optional for the native sidecar path |
 | dcc-mcp-core | >= 0.19.77, < 1.0.0 |
 
 See the [Unreal version compatibility contract](docs/unreal-version-compatibility.md)
@@ -144,9 +182,9 @@ irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/instal
 
 For Python-enabled engines, pick the one-liner for your engine version:
 
-```bash
+```powershell
 # UE 5.5 / 5.4 / 5.3 (Python 3.11)
-"C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
+& "C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
 
 # UE versions whose embedded Python is older than 3.9 use the standalone
 # sidecar command above instead of pip installation.
@@ -156,7 +194,9 @@ Enable the **Python Editor Script Plugin** in Unreal Editor (**Edit → Plugins 
 
 ### Uplugin (from GitHub Releases)
 
-Download `DccMcpUnreal-0.2.0-ue5.7.zip` from [Releases](https://github.com/dcc-mcp/dcc-mcp-unreal/releases), extract into `<project>/Plugins/DccMcpUnreal/`, enable in Editor.
+Download the matching `DccMcpUnreal-<version>-ue<engine>-win64.zip` from
+[Releases](https://github.com/dcc-mcp/dcc-mcp-unreal/releases), extract it into
+`<project>/Plugins/DccMcpUnreal/`, and enable the plugin in Unreal Editor.
 
 ### Development Install
 
@@ -168,8 +208,8 @@ pip install -e ".[dev]"
 
 ### Build Plugin Package
 
-```bash
-set UE_ROOT=C:\Program Files\Epic Games\UE_5.7
+```powershell
+$env:UE_ROOT = "C:\Program Files\Epic Games\UE_5.7"
 vx just package          # Output: dist/DccMcpUnreal/
 vx just deploy "C:\Path\To\MyUnrealProject"
 ```
@@ -199,7 +239,7 @@ handle.shutdown()
 Agents normally connect to the stable gateway at `http://127.0.0.1:9765/mcp`.
 Use `dcc-mcp-cli list` when a direct instance URL is needed.
 
-### Available tools (built-in)
+### Representative built-in tools
 
 | Tool name | Description |
 |-----------|-------------|
@@ -209,7 +249,7 @@ Use `dcc-mcp-cli list` when a direct instance URL is needed.
 | `unreal_automation__list_automation_tests` | List native Unreal Automation tests |
 | `unreal_automation__queue_automation_tests` | Queue native Unreal Automation tests from MCP |
 | `unreal_fab_assets__prepare_free_asset_acquisition` | Prepare a license- and visual-gated Fab acquisition plan for the official UI workflow |
-| `unreal_official_mcp__official_mcp` | Discover and call an installed UE 5.8+ Epic MCP endpoint without redistributing it |
+| `unreal_official_mcp__official_mcp_bridge` | Discover and call an installed UE 5.8+ Epic MCP endpoint without redistributing it |
 
 ---
 
@@ -352,67 +392,17 @@ set DCC_MCP_UNREAL_SKILL_PATHS=C:\my\studio\unreal-skills;C:\shared\skills
 ## Architecture Overview
 
 ```
-dcc-mcp-unreal
-├── src/dcc_mcp_unreal/
-│   ├── __init__.py          ← Public API: start_server, stop_server, helpers
-│   ├── server.py            ← DccServerBase adapter, dispatcher, start/stop
-│   ├── api.py               ← unreal_success/error/from_exception, with_unreal
-│   └── skills/              ← Built-in skill packages
-│       └── unreal-actors/
-│           ├── SKILL.md
-│           ├── tools.yaml
-│           └── scripts/
-│               ├── list_actors.py
-│               └── spawn_actor.py
-└── tests/
-    └── test_server.py       ← Unit tests (no real UE required)
+dcc-mcp-core        protocol, gateway, discovery, and dispatch
+    └── dcc-mcp-unreal
+        ├── Unreal plugin and lifecycle
+        ├── Python and native host bridges
+        ├── Built-in and external skills
+        └── Optional Epic Unreal MCP bridge
 ```
 
-### Layered architecture
-
-```
-dcc-mcp-unreal          (this package)
-    └── dcc-mcp-core    (Rust core: HTTP server, skill discovery, dispatch)
-            └── unreal  (Unreal Engine Python API — only available inside UE)
-```
-
-`dcc-mcp-core` handles all MCP protocol plumbing. `dcc-mcp-unreal` only
-provides:
-1. Unreal-specific path resolution for the skills directory
-2. Unreal main-thread dispatch for in-process skill execution
-3. Convenience helpers (`unreal_success`, `@with_unreal`, etc.)
-4. Built-in skills for common Unreal operations
-
----
-
-## Roadmap
-
-### v0.1.0 — Scaffold (current)
-- [x] Project structure mirroring `dcc-mcp-maya`
-- [x] `unreal_success` / `unreal_error` / `unreal_from_exception` helpers
-- [x] `@with_unreal` decorator
-- [x] `UnrealMcpServer` adapter built on `DccServerBase`
-- [x] `unreal-actors` skill (list, spawn)
-- [x] Unit tests (no real UE required)
-
-### v0.2.0 — Core skills
-- [ ] `unreal-assets` — Content Browser operations (import, export, list)
-- [ ] `unreal-materials` — Material instance management
-- [ ] `unreal-blueprints` — Blueprint variable get/set
-- [ ] `unreal-level` — Level streaming, world settings
-- [ ] `unreal-rendering` — Movie Render Queue integration
-
-### v0.3.0 — Editor integration
-- [ ] Unreal Editor toolbar button to start/stop MCP server
-- [ ] UE5 plugin wrapper (`.uplugin`) for one-click installation
-- [ ] Auto-start on editor startup via `EditorStartupScript`
-- [ ] Level Sequence / Sequencer tools
-
-### v1.0.0 — Production ready
-- [ ] Full test suite with `unreal` mock
-- [ ] CI via GitHub Actions (headless UE testing)
-- [ ] PyPI release
-- [ ] Comprehensive documentation
+`dcc-mcp-core` owns the shared MCP and routing contracts. `dcc-mcp-unreal`
+owns Unreal lifecycle integration, main-thread dispatch, compatibility gates,
+skill packages, and structured Unreal results.
 
 ---
 
@@ -422,10 +412,8 @@ provides:
 2. Create a feature branch: `git checkout -b feat/my-skill`
 3. Add your skill under `src/dcc_mcp_unreal/skills/`
 4. Add tests under `tests/`
-5. Run `ruff check . && pytest`
+5. Run `vx just check`
 6. Open a Pull Request
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
@@ -440,6 +428,4 @@ MIT — see [LICENSE](LICENSE) for details.
 | Project | Description |
 |---------|-------------|
 | [dcc-mcp-core](https://github.com/dcc-mcp/dcc-mcp-core) | Core MCP infrastructure (Rust + PyO3) |
-| [dcc-mcp-maya](https://github.com/dcc-mcp/dcc-mcp-maya) | Maya MCP adapter |
-| [dcc-mcp-photoshop](https://github.com/dcc-mcp/dcc-mcp-photoshop) | Photoshop MCP adapter (bridge) |
-| [dcc-mcp-zbrush](https://github.com/dcc-mcp/dcc-mcp-zbrush) | ZBrush MCP adapter (HTTP bridge) |
+| [DCC MCP organization](https://github.com/dcc-mcp) | DCC adapters, shared tools, and extension ecosystem |
