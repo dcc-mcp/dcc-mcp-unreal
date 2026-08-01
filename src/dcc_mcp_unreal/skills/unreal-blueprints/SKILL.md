@@ -32,6 +32,7 @@ Blueprint node graph editing abstractions.
 - `add_event_node` - Add an event node (BeginPlay, Tick, etc.) to a Blueprint graph.
 - `add_function_node` - Add a function call node to a Blueprint graph.
 - `connect_nodes` - Connect two nodes in a Blueprint graph.
+- `layout_blueprint_graph` - Automatically arrange graph nodes by connection depth.
 - `add_variable` - Add a member variable to a Blueprint.
 - `compile_blueprint` - Compile a Blueprint.
 - `find_nodes` - Find nodes in a Blueprint graph by type or event.
@@ -58,6 +59,9 @@ Blueprint node graph editing abstractions.
 # MCP tool call: unreal_blueprints__compile_blueprint
 # params: {"blueprint_name": "BP_MyActor"}
 ```
+
+Nodes created without an explicit `node_position` are laid out automatically.
+`connect_nodes` also reapplies the graph layout after wiring nodes together.
 
 ### Connect nodes in a graph
 

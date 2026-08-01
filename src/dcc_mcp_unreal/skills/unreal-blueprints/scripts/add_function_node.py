@@ -28,9 +28,6 @@ def add_function_node(
     """
     import unreal  # noqa: PLC0415
 
-    if node_position is None:
-        node_position = [0, 0]
-
     # Load the Blueprint
     blueprint_path = f"/Game/Blueprints/{blueprint_name}"
     blueprint = unreal.EditorAssetLibrary.load_asset(blueprint_path)
@@ -41,41 +38,46 @@ def add_function_node(
             prompt="Create the Blueprint first with create_blueprint_class.",
         )
 
-    # Get the event graph
-    event_graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
-    if not event_graphs:
+    from _blueprint_graph_api import get_graph, get_graph_editor, get_node_id  # noqa: PLC0415
+
+    event_graph = get_graph(blueprint)
+    graph_editor = get_graph_editor(blueprint)
+    if event_graph is None or graph_editor is None:
         return skill_error(
             f"No event graph found in '{blueprint_name}'",
-            "No event graphs returned",
+            "No Blueprint graphs returned",
             prompt="Ensure the Blueprint has a valid event graph.",
         )
 
-    event_graph = event_graphs[0]
-
     # Create the function call node
-    function_node = unreal.K2Node_CallFunction()
-    event_graph.add_node(function_node)
+    function_path = function_name
+    if not function_path.startswith("/"):
+        parent_class = unreal.BlueprintEditorLibrary.get_blueprint_parent_class(blueprint)
+        function_path = f"{parent_class.get_path_name()}.{function_name}"
+    function_node = graph_editor.add_call_function_node(function_path)
+    if function_node is None:
+        return skill_error(
+            f"Function not found: {function_name}",
+            f"BlueprintGraphEditor.add_call_function_node failed for '{function_path}'",
+            prompt="Use a native function path such as /Script/Engine.KismetSystemLibrary.PrintString.",
+        )
 
-    function_node.set_editor_property("node_pos_x", int(node_position[0]))
-    function_node.set_editor_property("node_pos_y", int(node_position[1]))
+    initial_position = node_position or [0, 0]
+    unreal.BlueprintEditorLibrary.set_node_pos(
+        function_node,
+        unreal.IntPoint(int(initial_position[0]), int(initial_position[1])),
+    )
 
-    # Try to resolve the function reference
-    if target.lower() == "self":
-        # Look for the function on the Blueprint's parent class
-        parent_class = blueprint.get_editor_property("parent_class")
-        if parent_class is not None:
-            try:
-                func_ref = unreal.EdGraphSchema_K2.find_function_by_name(parent_class, function_name)
-                if func_ref is not None:
-                    function_node.set_editor_property("function_reference", func_ref)
-            except Exception:
-                pass
-    else:
-        # Component target - try to find the function on the component's class
-        # This is a best-effort resolution; the node may need manual configuration
-        pass
+    node_guid = get_node_id(function_node)
+    layout_applied = node_position is None
+    if layout_applied:
+        from _blueprint_graph_api import layout_graph  # noqa: PLC0415
 
-    node_guid = str(function_node.get_node_guid())
+        layout_graph(event_graph)
+        node_position = [
+            unreal.BlueprintEditorLibrary.get_node_pos(function_node).x,
+            unreal.BlueprintEditorLibrary.get_node_pos(function_node).y,
+        ]
 
     return skill_success(
         f"Added function node '{function_name}' to '{blueprint_name}'",
@@ -85,4 +87,5 @@ def add_function_node(
         target=target,
         node_id=node_guid,
         node_position=node_position,
+        layout_applied=layout_applied,
     )

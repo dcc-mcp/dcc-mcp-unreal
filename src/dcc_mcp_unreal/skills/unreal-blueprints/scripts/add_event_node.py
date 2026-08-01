@@ -26,9 +26,6 @@ def add_event_node(
     """
     import unreal  # noqa: PLC0415
 
-    if node_position is None:
-        node_position = [0, 0]
-
     # Load the Blueprint
     blueprint_path = f"/Game/Blueprints/{blueprint_name}"
     blueprint = unreal.EditorAssetLibrary.load_asset(blueprint_path)
@@ -39,20 +36,25 @@ def add_event_node(
             prompt="Create the Blueprint first with create_blueprint_class.",
         )
 
-    # Get the event graph
-    event_graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
-    if not event_graphs:
+    from _blueprint_graph_api import get_graph, get_graph_editor, get_node_id  # noqa: PLC0415
+
+    event_graph = get_graph(blueprint)
+    graph_editor = get_graph_editor(blueprint)
+    if event_graph is None or graph_editor is None:
         return skill_error(
             f"No event graph found in '{blueprint_name}'",
-            "No event graphs returned",
+            "No Blueprint graphs returned",
             prompt="Ensure the Blueprint has a valid event graph.",
         )
 
-    event_graph = event_graphs[0]
-
     # Create the event node
     # Map event names to Unreal event types
-    event_node = _create_event_node_by_name(event_graph, event_name, node_position)
+    event_node = _create_event_node_by_name(
+        blueprint,
+        graph_editor,
+        event_name,
+        node_position or [0, 0],
+    )
 
     if event_node is None:
         return skill_error(
@@ -65,7 +67,18 @@ def add_event_node(
             ],
         )
 
-    node_guid = str(event_node.get_node_guid())
+    node_guid = get_node_id(event_node)
+    layout_applied = node_position is None
+    if layout_applied:
+        from _blueprint_graph_api import layout_graph  # noqa: PLC0415
+
+        layout_graph(event_graph)
+        node_position = [
+            unreal.BlueprintEditorLibrary.get_node_pos(event_node).x,
+            unreal.BlueprintEditorLibrary.get_node_pos(event_node).y,
+        ]
+
+    unreal.BlueprintEditorLibrary.refresh_open_editors_for_blueprint(blueprint)
 
     return skill_success(
         f"Added event node '{event_name}' to '{blueprint_name}'",
@@ -74,11 +87,13 @@ def add_event_node(
         event_name=event_name,
         node_id=node_guid,
         node_position=node_position,
+        layout_applied=layout_applied,
     )
 
 
 def _create_event_node_by_name(
-    event_graph: "unreal.EdGraph",  # noqa: F821
+    blueprint: "unreal.Blueprint",  # noqa: F821
+    graph_editor: "unreal.BlueprintGraphEditor",  # noqa: F821
     event_name: str,
     node_position: List[float],
 ) -> "unreal.EdGraphNode":  # noqa: F821
@@ -87,29 +102,19 @@ def _create_event_node_by_name(
 
     # Standard K2Node_Event for common events
     if event_name in ("ReceiveBeginPlay", "ReceiveTick", "ReceiveEndPlay", "ReceiveDestroyed"):
-        event_node = unreal.K2Node_Event()
-        event_graph.add_node(event_node)
-
-        # Find the function reference
-        event_node.event_reference.set_external_member(event_name, None)
-
-        event_node.set_editor_property("node_pos_x", int(node_position[0]))
-        event_node.set_editor_property("node_pos_y", int(node_position[1]))
-
-        # Post-creation init
-        unreal.BlueprintEditorLibrary.refresh_open_blueprint_nodes(blueprint=None)
-
-        return event_node
+        return unreal.BlueprintEditorLibrary.add_event_override(
+            blueprint,
+            event_name,
+            unreal.IntPoint(int(node_position[0]), int(node_position[1])),
+        )
 
     # Custom event
     try:
-        custom_event_node = unreal.K2Node_CustomEvent()
-        event_graph.add_node(custom_event_node)
-
-        custom_event_node.set_editor_property("node_pos_x", int(node_position[0]))
-        custom_event_node.set_editor_property("node_pos_y", int(node_position[1]))
-        custom_event_node.set_editor_property("custom_function_name", event_name)
-
+        custom_event_node = graph_editor.add_custom_event_node(event_name)
+        unreal.BlueprintEditorLibrary.set_node_pos(
+            custom_event_node,
+            unreal.IntPoint(int(node_position[0]), int(node_position[1])),
+        )
         return custom_event_node
     except Exception:
         return None

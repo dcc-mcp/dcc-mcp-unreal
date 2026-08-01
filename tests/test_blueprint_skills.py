@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
@@ -16,6 +17,71 @@ def _load_module(name: str, path: str):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     return module, spec
+
+
+def test_blueprint_layout_orders_connected_nodes_and_avoids_overlap():
+    class Node:
+        def __init__(self, guid):
+            self.guid = guid
+            self.position = {"node_pos_x": 0, "node_pos_y": 0}
+            self.outputs = []
+
+        def get_node_guid(self):
+            return self.guid
+
+        def get_editor_property(self, name):
+            return self.position[name]
+
+        def set_editor_property(self, name, value):
+            self.position[name] = value
+
+    class Pin:
+        def __init__(self, owner):
+            self.owner = owner
+            self.links = []
+
+    first, second, loose = Node("first"), Node("second"), Node("loose")
+    output_pin, input_pin = Pin(first), Pin(second)
+    output_pin.links.append(input_pin)
+    first.outputs.append(output_pin)
+    graph = SimpleNamespace(get_all_nodes=lambda: [first, second, loose])
+    unreal = SimpleNamespace(
+        IntPoint=lambda x, y: SimpleNamespace(x=x, y=y),
+        BlueprintEditorLibrary=SimpleNamespace(
+            list_output_pins=lambda node: node.outputs,
+            set_node_pos=lambda node, pos: node.position.update(node_pos_x=pos.x, node_pos_y=pos.y),
+        ),
+        BlueprintGraphPinLibrary=SimpleNamespace(
+            list_connected_pins=lambda pin: pin.links,
+            get_owning_node=lambda pin: pin.owner,
+        ),
+    )
+
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module, spec = _load_module(
+            "_blueprint_graph_api",
+            "src/dcc_mcp_unreal/skills/unreal-blueprints/scripts/_blueprint_graph_api.py",
+        )
+        spec.loader.exec_module(module)
+        result = module.layout_graph(graph)
+
+    positions = {(node.position["node_pos_x"], node.position["node_pos_y"]) for node in (first, second, loose)}
+    assert result == {"node_count": 3, "column_count": 2}
+    assert second.position["node_pos_x"] > first.position["node_pos_x"]
+    assert len(positions) == 3
+
+
+def test_blueprint_graph_lookup_uses_unreal_58_list_graphs():
+    event_graph = SimpleNamespace(get_name=lambda: "EventGraph")
+    unreal = SimpleNamespace(BlueprintEditorLibrary=SimpleNamespace(list_graphs=lambda _blueprint: [event_graph]))
+
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module, spec = _load_module(
+            "_blueprint_graph_api",
+            "src/dcc_mcp_unreal/skills/unreal-blueprints/scripts/_blueprint_graph_api.py",
+        )
+        spec.loader.exec_module(module)
+        assert module.get_graph(object()) is event_graph
 
 
 class TestCreateBlueprintClass:
@@ -151,6 +217,24 @@ class TestCompileBlueprint:
 
         assert result["success"] is False
         assert "Blueprint not found" in result["message"]
+
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_uses_blueprint_editor_library(self):
+        import unreal
+
+        blueprint = object()
+        unreal.EditorAssetLibrary.load_asset.return_value = blueprint
+        unreal.BlueprintEditorLibrary.compile_blueprint.return_value = True
+        module, spec = _load_module(
+            "compile_blueprint_success",
+            "src/dcc_mcp_unreal/skills/unreal-blueprints/scripts/compile_blueprint.py",
+        )
+        spec.loader.exec_module(module)
+
+        result = module.compile_blueprint(blueprint_name="BP_Test")
+
+        assert result["success"] is True
+        unreal.BlueprintEditorLibrary.compile_blueprint.assert_called_once_with(blueprint)
 
 
 class TestFindNodes:

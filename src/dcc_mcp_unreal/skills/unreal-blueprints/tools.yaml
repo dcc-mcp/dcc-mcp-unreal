@@ -149,6 +149,37 @@ tools:
           description: Name of the input pin on the target node
       required: ["blueprint_name", "source_node_id", "source_pin", "target_node_id", "target_pin"]
 
+  - name: layout_blueprint_graph
+    description: >-
+      Automatically lay out a Blueprint graph from left to right. Connected
+      nodes are grouped by dependency depth and unconnected nodes never overlap.
+    source_file: scripts/layout_blueprint_graph.py
+    execution: sync
+    affinity: main
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        blueprint_name:
+          type: string
+          description: Name of the target Blueprint
+        graph_name:
+          type: string
+          description: Name of the graph to lay out
+          default: EventGraph
+        horizontal_spacing:
+          type: integer
+          description: Horizontal distance between dependency columns
+          default: 400
+        vertical_spacing:
+          type: integer
+          description: Vertical distance between nodes in one column
+          default: 220
+      required: ["blueprint_name"]
+
   - name: add_variable
     description: >-
       Add a member variable to a Blueprint with specified type
