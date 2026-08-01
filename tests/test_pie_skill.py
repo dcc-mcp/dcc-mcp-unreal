@@ -624,6 +624,29 @@ class TestPieCaptureScreenshot:
         assert result is not None
         assert "success" in result
 
+    def test_automation_capture_reports_pending(self, tmp_path):
+        """AutomationLibrary queues capture instead of completing it inline."""
+        with _patch_unreal():
+            mod = _import_script("pie_capture_screenshot")
+            result = mod.pie_capture_screenshot(filepath=str(tmp_path / "automation.png"))
+
+        assert result["success"] is True
+        assert result["context"]["method"] == "automation_library"
+        assert result["context"]["capture_pending"] is True
+        assert "requested" in result["message"].lower()
+
+    def test_console_capture_reports_pending(self, tmp_path):
+        """HighResShot fallback queues capture instead of completing it inline."""
+        with _patch_unreal():
+            del sys.modules["unreal"].AutomationLibrary
+            mod = _import_script("pie_capture_screenshot")
+            result = mod.pie_capture_screenshot(filepath=str(tmp_path / "console.png"))
+
+        assert result["success"] is True
+        assert result["context"]["method"] == "console_command"
+        assert result["context"]["capture_pending"] is True
+        assert "requested" in result["message"].lower()
+
 
 # ---------------------------------------------------------------------------
 # Tests: SKILL.md and tools.yaml existence
