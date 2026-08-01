@@ -86,7 +86,7 @@ tools:
     source_file: scripts/pie_capture_screenshot.py
     execution: sync
     affinity: main
-    enforce_thread_affinity: false
+    enforce_thread_affinity: true
     timeout_hint_secs: 30
     read_only: false
     destructive: false
