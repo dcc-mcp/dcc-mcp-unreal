@@ -32,7 +32,7 @@ def compile_blueprint(
 
     # Compile
     try:
-        result = unreal.KismetEditorUtilities.compile_blueprint(blueprint)
+        result = unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
     except Exception as e:
         return skill_error(
             f"Compilation failed for '{blueprint_name}': {e}",
