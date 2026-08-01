@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.11](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.10...v0.2.11) (2026-08-01)
+
+
+### Features
+
+* add high-quality turntable rendering ([4918cf5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4918cf540b017bd00bf7d554c22c5e01750c7eed))
+* add ue 4.26 lookdev coverage ([6470622](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/647062202bdd3380f8065ff7c5ff4f6cb245bb96))
+* add UE 4.26 native sidecar support ([58986f5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/58986f5e54385ad71229c05269d4f4b255293c61))
+* add Unreal plugin branding ([ee23a7f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/ee23a7ffc32432561765e5f4940f79023ad5ec94))
+* publish live Unreal scene context ([122331d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/122331df6ce305e0765f23be58401156778d6204))
+
+
+### Bug Fixes
+
+* reuse precompiled UE4 automation tool ([6bca232](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6bca23225af1f682b0a196c1d788374c48411d7a))
+* use available Unreal CI installations ([6e7594b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6e7594bf4ea653276ed31492ed5065c52f96f9bc))
+
+
+### Documentation
+
+* explain DCC MCP scope and refresh README ([07388e0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/07388e0d9a2076d8467af6a87741b3718e28c5ec))
+
 ## [0.2.10](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.9...v0.2.10) (2026-07-28)
 
 

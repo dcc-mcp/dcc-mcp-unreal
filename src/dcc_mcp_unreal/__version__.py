@@ -1,3 +1,3 @@
 """Version information for dcc-mcp-unreal."""
 
-__version__ = "0.2.10"  # x-release-please-version
+__version__ = "0.2.11"  # x-release-please-version
