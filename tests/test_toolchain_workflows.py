@@ -278,6 +278,19 @@ def test_manual_tag_recovery_rebuilds_assets_without_republishing_pypi() -> None
     assert download_step["with"]["pattern"] == "DccMcpUnreal-*"
 
 
+def test_release_checks_out_installer_before_attaching_assets() -> None:
+    steps = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["attach-release-assets"]["steps"]
+    checkout_index = next(
+        index for index, step in enumerate(steps) if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    attach_index = next(
+        index for index, step in enumerate(steps) if step.get("name") == "Attach wheels to GitHub Release"
+    )
+
+    assert checkout_index < attach_index
+    assert "scripts/install-standalone.ps1" in steps[attach_index]["with"]["files"]
+
+
 def test_release_builds_pythonless_standalone_sidecars() -> None:
     jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     standalone = jobs["standalone"]
