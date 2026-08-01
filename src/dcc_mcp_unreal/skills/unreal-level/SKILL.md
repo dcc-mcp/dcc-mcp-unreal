@@ -25,6 +25,7 @@ Tools for active level inspection, map loading/saving, and world settings.
 
 ## Scripts
 
+- `create_level`
 - `get_level_info`
 - `load_level`
 - `save_level`

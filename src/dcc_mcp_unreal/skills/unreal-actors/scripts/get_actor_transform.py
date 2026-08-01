@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.api import find_level_actor
+
 
 @skill_entry
 def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
@@ -15,8 +17,6 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
     Returns:
         dict: ActionResultModel with location, rotation, and scale as float lists.
     """
-    import unreal  # noqa: PLC0415
-
     if not actor_name:
         return skill_error(
             "actor_name is required",
@@ -25,8 +25,7 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
             possible_solutions=["Pass 'actor_name' as a non-empty string"],
         )
 
-    all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
-    target = next((a for a in all_actors if a.get_name() == actor_name), None)
+    target = find_level_actor(actor_name)
 
     if target is None:
         return skill_error(
@@ -42,6 +41,7 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
     loc = target.get_actor_location()
     rot = target.get_actor_rotation()
     scale = target.get_actor_scale3d()
+    bounds_origin, bounds_extent = target.get_actor_bounds(False)
 
     return skill_success(
         f"Got transform for actor '{actor_name}'",
@@ -50,4 +50,8 @@ def get_actor_transform(actor_name: str = "", **kwargs) -> dict:
         location=[float(loc.x), float(loc.y), float(loc.z)],
         rotation=[float(rot.pitch), float(rot.yaw), float(rot.roll)],
         scale=[float(scale.x), float(scale.y), float(scale.z)],
+        bounds={
+            "origin": [float(bounds_origin.x), float(bounds_origin.y), float(bounds_origin.z)],
+            "extent": [float(bounds_extent.x), float(bounds_extent.y), float(bounds_extent.z)],
+        },
     )

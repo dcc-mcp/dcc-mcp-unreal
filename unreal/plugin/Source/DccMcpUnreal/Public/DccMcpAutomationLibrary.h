@@ -21,4 +21,22 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static bool OpenFabListing(const FString& ListingUrl);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Chaos")
+    static FString CreateGeometryCollectionFromStaticMesh(
+        const FString& StaticMeshPath,
+        const FString& DestinationPath,
+        const FString& AssetName,
+        float DamageThreshold
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Chaos")
+    static FString SpawnGeometryCollectionActor(
+        const FString& GeometryCollectionPath,
+        float LocationX,
+        float LocationY,
+        float LocationZ,
+        float DamageThreshold,
+        const FString& Label
+    );
 };

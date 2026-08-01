@@ -1,0 +1,243 @@
+tools:
+  - name: pie_control
+    description: >-
+      Control the Play-In-Editor (PIE) session lifecycle: enter, pause, resume,
+      or exit PIE. Does not depend on OS-level input — all PIE transitions use
+      Unreal Engine's editor subsystem or in-process console commands.
+    source_file: scripts/pie_control.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 60
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [enter, pause, resume, exit, stop]
+          description: >-
+            PIE lifecycle action. "enter" starts a PIE session. "pause" freezes
+            the simulation. "resume" continues after pause. "exit" or "stop"
+            ends the PIE session and returns to editor mode.
+    next-tools:
+      on-success: [unreal_pie__get_status]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_inject_input
+    description: >-
+      Inject controlled keyboard or mouse input into the active PIE viewport
+      using Unreal Engine's internal input subsystem. Never uses OS-level APIs
+      like SendInput or pyautogui.
+    source_file: scripts/pie_inject_input.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [input_type]
+      properties:
+        input_type:
+          type: string
+          enum: [key_press, key_release, key_tap, mouse_button, mouse_move, mouse_scroll]
+          description: Type of input to inject.
+        key:
+          type: string
+          description: >-
+            Key name (e.g. "W", "SpaceBar", "LeftMouseButton") for keyboard/
+            mouse button events. Uses Unreal Engine key names.
+        button:
+          type: string
+          enum: [left, right, middle, thumb, thumb2]
+          description: Mouse button name (used with mouse_button input_type).
+          default: left
+        delta_x:
+          type: number
+          description: Horizontal mouse movement delta (used with mouse_move).
+          default: 0.0
+        delta_y:
+          type: number
+          description: Vertical mouse movement delta (used with mouse_move).
+          default: 0.0
+        scroll_delta:
+          type: number
+          description: Scroll wheel delta (used with mouse_scroll).
+          default: 0.0
+        duration:
+          type: number
+          description: Hold duration in seconds for key_tap (0.0 = instant).
+          default: 0.0
+    next-tools:
+      on-success: [unreal_pie__capture_screenshot]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_capture_screenshot
+    description: >-
+      Request an asynchronous PNG screenshot of the active Unreal viewport.
+      The result reports capture_pending until the specified file appears.
+      Falls back to HighResShot when AutomationLibrary is unavailable.
+    source_file: scripts/pie_capture_screenshot.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      properties:
+        filepath:
+          type: string
+          description: >-
+            Absolute path for the output PNG file. Directory is created if
+            missing. Defaults to "<ProjectSaved>/Screenshots/pie_<timestamp>.png".
+        resolution_x:
+          type: integer
+          description: Viewport width override (0 = current viewport size).
+          default: 0
+        resolution_y:
+          type: integer
+          description: Viewport height override (0 = current viewport size).
+          default: 0
+    next-tools:
+      on-success: [unreal_pie__get_status]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_snapshot_log
+    description: >-
+      Read recent entries from the Unreal Engine Output Log. Supports optional
+      substring filter and line count limit. Useful for capturing playtest
+      warnings, errors, and Automation Test output between agent actions.
+    source_file: scripts/pie_snapshot_log.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        max_lines:
+          type: integer
+          description: Maximum number of log lines to return.
+          default: 200
+        filter:
+          type: string
+          description: >-
+            Optional substring filter applied to log category and message.
+            Empty string returns all recent lines.
+          default: ""
+        include_verbosity:
+          type: boolean
+          description: Whether to include verbosity tags (Error, Warning, Log) in output.
+          default: true
+    next-tools:
+      on-success: []
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_get_status
+    description: >-
+      Query the current PIE session state (playing/paused/stopped) and collect
+      performance counters: FPS, frame time, game thread time, render thread
+      time, GPU time, and memory usage where available.
+    source_file: scripts/pie_get_status.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties: {}
+    next-tools:
+      on-success: [unreal_pie__control, unreal_pie__capture_screenshot]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_run_test
+    description: >-
+      Queue a native Unreal Automation Test run by filter string. Returns a
+      job_id that can be polled via pie_poll_test and cancelled via
+      pie_cancel_job. The test runs asynchronously; use pie_snapshot_log or
+      pie_poll_test to monitor progress.
+    source_file: scripts/pie_run_test.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [filter]
+      properties:
+        filter:
+          type: string
+          minLength: 1
+          description: >-
+            Automation test name or filter string, e.g. "DccMcp.Smoke" or
+            "Project.Functional.Tests".
+    next-tools:
+      on-success: [unreal_pie__poll_test]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_poll_test
+    description: >-
+      Poll the status and results of a previously queued Automation Test job.
+      Returns the job's current state (queued/running/completed/failed/cancelled)
+      and, when complete, the test outcome details.
+    source_file: scripts/pie_poll_test.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [job_id]
+      properties:
+        job_id:
+          type: string
+          minLength: 1
+          description: The job_id returned by pie_run_test.
+    next-tools:
+      on-success: [unreal_pie__pie_poll_test, unreal_pie__pie_cancel_job]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_cancel_job
+    description: >-
+      Cancel a previously queued Automation Test or PIE job. Marks the job as
+      cancelled in the job registry. Does not force-kill the Unreal process.
+    source_file: scripts/pie_cancel_job.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [job_id]
+      properties:
+        job_id:
+          type: string
+          minLength: 1
+          description: The job_id to cancel.
+    next-tools:
+      on-success: [unreal_pie__pie_get_status]
+      on-failure: [dcc_diagnostics__audit_log]

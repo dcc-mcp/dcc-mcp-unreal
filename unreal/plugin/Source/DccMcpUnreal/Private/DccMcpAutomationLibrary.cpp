@@ -1,11 +1,28 @@
 #include "DccMcpAutomationLibrary.h"
 
+#include "Runtime/Launch/Resources/Version.h"
+#if ENGINE_MAJOR_VERSION >= 5
+#include "AssetRegistry/AssetRegistryModule.h"
+#else
+#include "AssetRegistryModule.h"
+#endif
+#include "Editor.h"
 #include "Dom/JsonObject.h"
+#include "Engine/StaticMesh.h"
+#if ENGINE_MAJOR_VERSION >= 5
+#include "GeometryCollection/GeometryCollectionActor.h"
+#include "GeometryCollection/GeometryCollectionAlgo.h"
+#include "GeometryCollection/GeometryCollectionClusteringUtility.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
+#include "GeometryCollection/GeometryCollectionEngineConversion.h"
+#include "GeometryCollection/GeometryCollectionObject.h"
+#endif
 #include "Interfaces/IPluginManager.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
-#include "Runtime/Launch/Resources/Version.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
@@ -108,7 +125,7 @@ FString UDccMcpAutomationLibrary::ListAutomationTestsJson(const FString& Filter)
 {
     FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
     Framework.LoadTestModules();
-#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 7)
+#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 5)
     Framework.SetRequestedTestFilter(EAutomationTestFlags::FilterMask);
 #else
     Framework.SetRequestedTestFilter(EAutomationTestFlags_FilterMask);
@@ -178,4 +195,148 @@ bool UDccMcpAutomationLibrary::OpenFabListing(const FString& ListingUrl)
         return false;
     }
     return InvokeFabString(NewFabApi(), TEXT("OpenInNewTab"), ListingUrl);
+}
+
+FString UDccMcpAutomationLibrary::CreateGeometryCollectionFromStaticMesh(
+    const FString& StaticMeshPath,
+    const FString& DestinationPath,
+    const FString& AssetName,
+    float DamageThreshold
+)
+{
+#if ENGINE_MAJOR_VERSION < 5
+    UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos requires Unreal Engine 5 or newer"));
+    return FString();
+#else
+    if (!FPackageName::IsValidLongPackageName(DestinationPath) || !DestinationPath.StartsWith(TEXT("/Game")))
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: destination_path must be a valid /Game package path"));
+        return FString();
+    }
+    if (AssetName.IsEmpty() || AssetName != FPackageName::GetShortName(AssetName))
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: asset_name must be a simple Unreal asset name"));
+        return FString();
+    }
+    if (DamageThreshold <= 0.0f)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: damage_threshold must be greater than zero"));
+        return FString();
+    }
+
+    UStaticMesh* StaticMesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshPath);
+    if (!StaticMesh)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: StaticMesh not found: %s"), *StaticMeshPath);
+        return FString();
+    }
+
+    const FString PackagePath = DestinationPath / AssetName;
+    const FString AssetPath = PackagePath + TEXT(".") + AssetName;
+    if (FindObject<UGeometryCollection>(nullptr, *AssetPath) || FPackageName::DoesPackageExist(PackagePath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: Geometry Collection already exists: %s"), *AssetPath);
+        return FString();
+    }
+
+    UPackage* Package = CreatePackage(*PackagePath);
+    UGeometryCollection* GeometryCollection = NewObject<UGeometryCollection>(
+        Package,
+        UGeometryCollection::StaticClass(),
+        FName(*AssetName),
+        RF_Public | RF_Standalone | RF_Transactional
+    );
+    if (!GeometryCollection)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: Unreal failed to create the Geometry Collection asset"));
+        return FString();
+    }
+
+    TArray<UMaterialInterface*> Materials;
+    for (const FStaticMaterial& StaticMaterial : StaticMesh->GetStaticMaterials())
+    {
+        Materials.Add(StaticMaterial.MaterialInterface);
+    }
+    if (!FGeometryCollectionEngineConversion::AppendStaticMesh(
+            StaticMesh,
+            Materials,
+            FTransform::Identity,
+            GeometryCollection,
+            true,
+            true,
+            true
+        ))
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: Failed to convert StaticMesh: %s"), *StaticMeshPath);
+        return FString();
+    }
+
+    TSharedPtr<FGeometryCollection, ESPMode::ThreadSafe> CollectionData = GeometryCollection->GetGeometryCollection();
+    if (FGeometryCollectionClusteringUtility::ContainsMultipleRootBones(CollectionData.Get()))
+    {
+        FGeometryCollectionClusteringUtility::ClusterAllBonesUnderNewRoot(CollectionData.Get());
+    }
+    GeometryCollection->EnableClustering = true;
+    GeometryCollection->DamageThreshold = {DamageThreshold};
+    GeometryCollection->InitializeMaterials();
+    GeometryCollectionAlgo::PrepareForSimulation(GeometryCollection->GetGeometryCollection().Get());
+    GeometryCollection->PostEditChange();
+    GeometryCollection->MarkPackageDirty();
+    FAssetRegistryModule::AssetCreated(GeometryCollection);
+    return AssetPath;
+#endif
+}
+
+FString UDccMcpAutomationLibrary::SpawnGeometryCollectionActor(
+    const FString& GeometryCollectionPath,
+    float LocationX,
+    float LocationY,
+    float LocationZ,
+    float DamageThreshold,
+    const FString& Label
+)
+{
+#if ENGINE_MAJOR_VERSION < 5
+    UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos requires Unreal Engine 5 or newer"));
+    return FString();
+#else
+    if (DamageThreshold <= 0.0f)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: damage_threshold must be greater than zero"));
+        return FString();
+    }
+
+    UGeometryCollection* GeometryCollection = LoadObject<UGeometryCollection>(nullptr, *GeometryCollectionPath);
+    if (!GeometryCollection)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: Geometry Collection not found: %s"), *GeometryCollectionPath);
+        return FString();
+    }
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: No editor world is available"));
+        return FString();
+    }
+
+    AGeometryCollectionActor* Actor = World->SpawnActor<AGeometryCollectionActor>(
+        AGeometryCollectionActor::StaticClass(),
+        FVector(LocationX, LocationY, LocationZ),
+        FRotator::ZeroRotator
+    );
+    UGeometryCollectionComponent* Component = Actor ? Actor->GetGeometryCollectionComponent() : nullptr;
+    if (!Component)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DCC MCP Chaos: Unreal failed to spawn a Geometry Collection actor"));
+        return FString();
+    }
+    Component->SetRestCollection(GeometryCollection);
+    Component->SetDamageThreshold({DamageThreshold});
+    if (!Label.IsEmpty())
+    {
+        Actor->SetActorLabel(Label);
+    }
+    Actor->Modify();
+    return Actor->GetName();
+#endif
 }

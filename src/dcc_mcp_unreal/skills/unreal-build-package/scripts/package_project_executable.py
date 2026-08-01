@@ -13,6 +13,13 @@ def package_project_executable(
     ue_root: str = "",
     configuration: str = "Shipping",
     target_platform: str = "Win64",
+    release_profile: str = "archive",
+    product_name: str = "",
+    product_version: str = "1.0.0",
+    publisher: str = "",
+    installer_compiler_path: str = "",
+    steam_app_id: str = "",
+    steam_depot_id: str = "",
     **kwargs,
 ) -> dict:
     return package_project_executable_impl(
@@ -21,4 +28,11 @@ def package_project_executable(
         ue_root=ue_root,
         configuration=configuration,
         target_platform=target_platform,
+        release_profile=release_profile,
+        product_name=product_name,
+        product_version=product_version,
+        publisher=publisher,
+        installer_compiler_path=installer_compiler_path,
+        steam_app_id=steam_app_id,
+        steam_depot_id=steam_depot_id,
     )

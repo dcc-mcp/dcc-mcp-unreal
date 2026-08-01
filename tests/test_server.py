@@ -458,6 +458,43 @@ def test_server_instantiation():
     assert server.mcp_url is None
 
 
+def test_server_forces_current_windows_ui_control_scope(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    monkeypatch.setattr(server_module, "_IS_WINDOWS", True, raising=False)
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_BACKEND", "mock")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", "123")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", "456")
+
+    server_module.UnrealMcpServer(port=0)
+
+    assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+    assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in os.environ
+
+
+def test_server_start_repairs_ui_control_scope_drift(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    monkeypatch.setattr(server_module, "_IS_WINDOWS", True, raising=False)
+    server = server_module.UnrealMcpServer(port=0)
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_BACKEND", "mock")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", "123")
+    monkeypatch.setenv("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", "456")
+    captured = {}
+
+    def capture_start(_self, *, install_atexit_hook=True):
+        captured.update(os.environ)
+        return install_atexit_hook
+
+    monkeypatch.setattr(server_module.DccServerBase, "start", capture_start)
+
+    assert server.start(install_atexit_hook=False) is False
+    assert captured["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+    assert captured["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in captured
+
+
 def test_server_custom_name():
     """UnrealMcpServer accepts custom server_name and server_version."""
     from dcc_mcp_unreal import UnrealMcpServer
@@ -486,6 +523,14 @@ def test_unreal_bootstrap_delegates_instance_port_resolution_to_core(script_name
     source = script.read_text(encoding="utf-8")
     assert 'os.environ.get("DCC_MCP_UNREAL_PORT"' not in source
     assert "start_server(port=" not in source
+
+
+def test_unreal_bootstrap_skips_embedded_server_when_sidecar_is_selected():
+    script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
+    source = script.read_text(encoding="utf-8")
+
+    assert "_runtime_mode = _resolve_bootstrap_runtime()" in source
+    assert 'if _runtime_mode == "sidecar":' in source
 
 
 def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(monkeypatch):
@@ -548,6 +593,48 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     dispatcher.close()
     assert unregistered == ["tick-handle"]
     assert native_shutdown == [True]
+
+
+def test_scene_publisher_runs_immediately_then_once_per_second(monkeypatch):
+    from dcc_mcp_unreal.server import UnrealMainThreadDispatcher
+
+    callbacks = []
+    fake_unreal = types.SimpleNamespace(
+        register_slate_post_tick_callback=lambda callback: callbacks.append(callback) or "tick-handle",
+        unregister_slate_post_tick_callback=lambda _handle: None,
+    )
+    monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
+    dispatcher = UnrealMainThreadDispatcher()
+    published = []
+    dispatcher.attach_scene_publisher(lambda: published.append(True))
+
+    callbacks[0](0.0)
+    callbacks[0](0.5)
+    callbacks[0](0.5)
+
+    assert published == [True, True]
+
+
+def test_server_publishes_changed_scene_to_gateway_and_resource(monkeypatch):
+    import dcc_mcp_unreal.server as server_module
+
+    server = server_module.UnrealMcpServer(port=0)
+    snapshot = {"scene": "/Game/Maps/LiveMap", "world_type": "Editor"}
+    monkeypatch.setattr(server_module, "_current_scene_snapshot", lambda: snapshot)
+    resources = []
+    gateway_scenes = []
+    monkeypatch.setattr(server, "set_scene_resource", resources.append)
+    monkeypatch.setattr(
+        server,
+        "update_gateway_metadata",
+        lambda **kwargs: gateway_scenes.append(kwargs["scene"]),
+    )
+
+    server._publish_scene_context()
+    server._publish_scene_context()
+
+    assert resources == [snapshot]
+    assert gateway_scenes == ["/Game/Maps/LiveMap"]
 
 
 def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkeypatch):
@@ -627,18 +714,18 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         unregister_slate_post_tick_callback=lambda handle: unregistered.append(handle),
     )
     monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
-    monkeypatch.delenv("DCC_MCP_APP_UI_BACKEND", raising=False)
-    monkeypatch.delenv("DCC_MCP_APP_UI_UIA_PROCESS_ID", raising=False)
+    monkeypatch.delenv("DCC_MCP_UI_CONTROL_BACKEND", raising=False)
+    monkeypatch.delenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", raising=False)
 
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
     assert len(callbacks) == 1
     if sys.platform == "win32":
-        assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
-        assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+        assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
+        assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
     else:
-        assert "DCC_MCP_APP_UI_BACKEND" not in os.environ
-        assert "DCC_MCP_APP_UI_UIA_PROCESS_ID" not in os.environ
+        assert "DCC_MCP_UI_CONTROL_BACKEND" not in os.environ
+        assert "DCC_MCP_UI_CONTROL_UIA_PROCESS_ID" not in os.environ
 
     callbacks[0](0.0)
 
@@ -652,9 +739,12 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         }
     ]
     assert entries == [
+        ("DccMcpInstance", "DccMcp.CopyInstanceId"),
+        ("DccMcpInstance", "DccMcp.ServerInfo"),
         ("DccMcpServer", "DccMcp.ShowUrl"),
-        ("DccMcpServer", "DccMcp.Restart"),
-        ("DccMcpServer", "DccMcp.Stop"),
+        ("DccMcpControl", "DccMcp.Restart"),
+        ("DccMcpControl", "DccMcp.Stop"),
+        ("DccMcpAbout", "DccMcp.About"),
     ]
     assert unregistered == ["tick-handle"]
 
@@ -796,6 +886,10 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "MaterialExpressionTextureCoordinate" in script
     assert "MaterialExpressionMultiply" in script
     assert "MP_BASE_COLOR" in script
+    assert "MP_EMISSIVE_COLOR" in script
+    assert "MSM_UNLIT" in script
+    assert "SAMPLERTYPE_LINEAR_COLOR" in script
+    assert "SAMPLERTYPE_NORMAL" in script
     assert "MP_NORMAL" in script
     assert "MP_ROUGHNESS" in script
     assert "MP_AMBIENT_OCCLUSION" in script
@@ -806,6 +900,9 @@ def test_texture_material_skill_is_registered_and_builds_complete_graph():
     assert "ambient_occlusion_texture_path:" in tools
     assert "metallic_texture_path:" in tools
     assert "base_color_scale:" in tools
+    assert "unlit:" in tools
+    assert "two_sided:" in tools
+    assert 'set_editor_property("two_sided", two_sided)' in script
 
 
 def test_blueprint_creation_skill_is_registered():

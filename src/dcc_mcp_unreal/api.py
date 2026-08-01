@@ -622,6 +622,37 @@ def actor_to_dict(actor: Any) -> Dict[str, Any]:
     }
 
 
+def find_level_actor(actor_name: str) -> Optional[Any]:
+    """Return the first current-level actor matching an exact label or object name.
+
+    UE 5.8 removed ``EditorLevelLibrary.find_actor_by_label_in_level``. Prefer
+    ``EditorActorSubsystem`` and retain the older list API only as a fallback
+    for supported UE 5.0-era hosts.
+    """
+    if not actor_name:
+        return None
+
+    unreal = require_unreal()
+    actors = []
+    get_subsystem = getattr(unreal, "get_editor_subsystem", None)
+    subsystem_class = getattr(unreal, "EditorActorSubsystem", None)
+    if callable(get_subsystem) and subsystem_class is not None:
+        subsystem = get_subsystem(subsystem_class)
+        if subsystem is not None:
+            actors = list(subsystem.get_all_level_actors())
+
+    if not actors:
+        editor_level_library = getattr(unreal, "EditorLevelLibrary", None)
+        get_all = getattr(editor_level_library, "get_all_level_actors", None)
+        if callable(get_all):
+            actors = list(get_all())
+
+    for actor in actors:
+        if actor.get_actor_label() == actor_name or actor.get_name() == actor_name:
+            return actor
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Convenience re-exports so callers only need one import
 # ---------------------------------------------------------------------------
@@ -652,6 +683,7 @@ __all__ = [
     "vector_to_list",
     "rotator_to_list",
     "actor_to_dict",
+    "find_level_actor",
     # DCC capabilities
     "unreal_capabilities",
 ]

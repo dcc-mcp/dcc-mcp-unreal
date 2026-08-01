@@ -30,3 +30,4 @@ Tools for Content Browser asset discovery, import, export, inspection, and delet
 - `export_asset`
 - `get_asset_info`
 - `delete_asset`
+- `create_ocio_configuration`

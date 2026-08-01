@@ -244,7 +244,7 @@ from dcc_mcp_unreal.api import (
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| `dcc-mcp-core` | >=0.18.7,<1.0.0 | MCP server, skill system, result types |
+| `dcc-mcp-core` | >=0.19.77,<1.0.0 | MCP server, skill system, result types |
 | `unreal` | bundled with UE5 | Unreal Engine Python API (runtime only) |
 
 Dev dependencies:

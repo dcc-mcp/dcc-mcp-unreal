@@ -1,0 +1,83 @@
+tools:
+  - name: import_geojson_to_pcg_table
+    description: Import one attributed GeoJSON semantic layer into a georeferenced Unreal DataTable of native PCGPoint rows.
+    source_file: scripts/import_geojson_to_pcg_table.py
+    execution: async
+    job_strategy: monolithic
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 600
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [geojson_path, asset_path, layer]
+      properties:
+        geojson_path:
+          type: string
+          minLength: 1
+          description: Absolute GeoJSON path under the Unreal project Content or Saved directory.
+        asset_path:
+          type: string
+          pattern: ^/Game/.+
+          description: Destination DataTable path, such as /Game/PCG/Manhattan/DT_OSM_Manhattan_Roads.
+        layer:
+          type: string
+          enum: [roads, pedestrian, buildings, railways, water, landuse]
+          description: One semantic layer to import. Use a separate table for each PCG branch.
+        road_spacing_m:
+          type: number
+          minimum: 1
+          maximum: 500
+          default: 25
+          description: Distance between sampled road, pedestrian, and railway points.
+        max_points:
+          type: integer
+          minimum: 1
+          maximum: 500000
+          default: 100000
+          description: Hard bound on generated PCG points for this asset.
+        cesium_georeference_label:
+          type: string
+          description: Optional exact actor label when more than one CesiumGeoreference exists.
+        origin_longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+          description: Fallback projection origin longitude when no CesiumGeoreference is available.
+        origin_latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+          description: Fallback projection origin latitude when no CesiumGeoreference is available.
+        attribution:
+          type: string
+          default: OpenStreetMap contributors, ODbL 1.0
+          description: Source attribution preserved in asset metadata and the result.
+        replace_existing:
+          type: boolean
+          default: false
+          description: Replace the rows of an existing DataTable at asset_path instead of failing.
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          geojson_path: C:/Project/Content/PCG/Manhattan/SourceData/openstreetmap-city.geojson
+          asset_path: /Game/PCG/Manhattan/DT_OSM_Manhattan_Roads
+          layer: roads
+          road_spacing_m: 25
+          max_points: 50000
+          attribution: OpenStreetMap contributors, ODbL 1.0
+        note: Import Manhattan roads aligned to the active CesiumGeoreference.
+      - arguments:
+          geojson_path: C:/Project/Content/PCG/Manhattan/SourceData/openstreetmap-pedestrian.geojson
+          asset_path: /Game/PCG/Manhattan/DT_OSM_Manhattan_Pedestrian
+          layer: pedestrian
+          road_spacing_m: 3
+          attribution: OpenStreetMap contributors, ODbL 1.0
+        note: Import walkable ways separately from drivable roads.
+    next-tools:
+      on-success: [unreal_official_mcp__official_mcp_bridge]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

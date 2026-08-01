@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from _asset_import import configure_fbx_options, primary_object_path
+from _asset_import import configure_alembic_geometry_cache_options, configure_fbx_options, primary_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -19,13 +19,17 @@ def import_asset(
     import_textures: bool = True,
     import_as_skeletal: bool = False,
     import_animations: bool = True,
+    import_as_geometry_cache: bool = False,
+    source_color_space: str = "",
+    non_color_texture: bool = False,
     **kwargs,
 ) -> dict:
     """Import a file from disk into the Content Browser.
 
     Supports any format Unreal's ``AssetTools`` can handle:
-    FBX (static mesh / skeletal mesh / animation), PNG/TGA/JPEG (texture),
-    WAV (sound), CSV (data table), and more.
+    FBX (static mesh / skeletal mesh / animation), Alembic (static mesh /
+    Geometry Cache), PNG/TGA/JPEG (texture), WAV (sound), CSV (data table),
+    and more.
 
     Args:
         source_path: Absolute path to the source file on disk
@@ -42,6 +46,13 @@ def import_asset(
         import_as_skeletal: For FBX files, import a skeletal mesh instead of a
             static mesh.
         import_animations: For skeletal FBX files, also import embedded animation.
+        import_as_geometry_cache: For Alembic files, import an animated
+            Geometry Cache instead of the default Static Mesh.
+        source_color_space: Optional source gamut for color textures. Use
+            ``"srgb"`` to convert sRGB/Rec.709 primaries into the project
+            working color space while retaining Unreal's normal sRGB decode.
+        non_color_texture: Disable sRGB decoding and source-gamut conversion
+            for data textures such as Normal, Roughness, Metallic, and AO.
 
     Returns:
         dict: ActionResultModel with the imported asset's object path.
@@ -49,6 +60,17 @@ def import_asset(
     import unreal  # noqa: PLC0415
 
     # --- validation ---
+    if source_color_space not in {"", "srgb"}:
+        return skill_error(
+            f"Unsupported source color space: {source_color_space}",
+            "source_color_space must be empty or 'srgb'",
+        )
+    if source_color_space and non_color_texture:
+        return skill_error(
+            "Conflicting texture color settings",
+            "source_color_space and non_color_texture cannot be used together",
+        )
+
     if not source_path:
         return skill_error(
             "Missing required parameter: 'source_path'",
@@ -78,7 +100,13 @@ def import_asset(
     task.set_editor_property("replace_existing", replace_existing)
     task.set_editor_property("automated", True)
     task.set_editor_property("save", True)
-    if os.path.splitext(source_path)[1].lower() == ".fbx":
+    extension = os.path.splitext(source_path)[1].lower()
+    if import_as_geometry_cache and extension != ".abc":
+        return skill_error(
+            "Invalid Geometry Cache source",
+            "import_as_geometry_cache requires an Alembic (.abc) source file",
+        )
+    if extension == ".fbx":
         task.set_editor_property(
             "options",
             configure_fbx_options(
@@ -90,6 +118,9 @@ def import_asset(
                 import_animations=import_animations,
             ),
         )
+    elif extension == ".abc" and import_as_geometry_cache:
+        task.set_editor_property("factory", unreal.AlembicImportFactory())
+        task.set_editor_property("options", configure_alembic_geometry_cache_options(unreal))
 
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     asset_tools.import_asset_tasks([task])
@@ -113,6 +144,26 @@ def import_asset(
         asset_name,
         import_as_skeletal=import_as_skeletal,
     )
+    if source_color_space or non_color_texture:
+        asset = unreal.EditorAssetLibrary.load_asset(object_path)
+        if asset is None or not isinstance(asset, unreal.Texture):
+            return skill_error(
+                "Source color space is only supported for texture imports",
+                f"Imported object is not a Texture: {object_path}",
+            )
+        settings = asset.get_editor_property("source_color_settings")
+        settings.set_editor_property(
+            "color_space",
+            unreal.TextureColorSpace.TCS_NONE if non_color_texture else unreal.TextureColorSpace.TCS_S_RGB,
+        )
+        asset.set_editor_property("source_color_settings", settings)
+        asset.set_editor_property("srgb", not non_color_texture)
+        if not unreal.EditorAssetLibrary.save_loaded_asset(asset, only_if_is_dirty=False):
+            return skill_error(
+                f"Failed to save texture color settings: {object_path}",
+                "EditorAssetLibrary.save_loaded_asset returned False",
+            )
+
     return skill_success(
         f"Imported '{asset_name}' to {destination_path}",
         prompt=f"Use get_asset_info to inspect the imported asset at '{object_path}'.",
@@ -121,4 +172,6 @@ def import_asset(
         destination_path=destination_path,
         source_path=source_path,
         imported_object_paths=imported_paths,
+        source_color_space=source_color_space or None,
+        non_color_texture=non_color_texture,
     )

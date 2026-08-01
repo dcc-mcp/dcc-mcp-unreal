@@ -10,6 +10,7 @@ small module-level start/stop helpers for ``init_unreal.py``.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 from pathlib import Path
@@ -26,6 +27,17 @@ _BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills"
 _DEFAULT_DCC_NAME = "unreal"
 _DEFAULT_SERVER_NAME = "unreal-mcp"
 _DEFAULT_SERVER_VERSION = "0.1.0"
+_IS_WINDOWS = os.name == "nt"
+_SCENE_REFRESH_SECS = 1.0
+
+
+def _configure_ui_control_for_process() -> None:
+    """Bind Windows UI Control to this Unreal Editor process."""
+    if not _IS_WINDOWS:
+        return
+    os.environ["DCC_MCP_UI_CONTROL_BACKEND"] = "windows-uia"
+    os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] = str(os.getpid())
+    os.environ.pop("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", None)
 
 
 class UnrealMainThreadDispatcher:
@@ -44,6 +56,8 @@ class UnrealMainThreadDispatcher:
         self._tick_handle: Any = None
         self._unregister_tick: Optional[Callable[[Any], Any]] = None
         self._http_dispatcher: Any = None
+        self._scene_publisher: Optional[Callable[[], Any]] = None
+        self._scene_elapsed = 0.0
         self._inside_unreal = False
 
         try:
@@ -68,6 +82,11 @@ class UnrealMainThreadDispatcher:
 
     def is_host_thread(self) -> bool:
         return threading.get_ident() == self.main_thread_id
+
+    def attach_scene_publisher(self, publisher: Callable[[], Any]) -> None:
+        """Run a lightweight scene publisher on the Unreal main thread."""
+        self._scene_publisher = publisher
+        self._scene_elapsed = _SCENE_REFRESH_SECS
 
     def dispatch_callable(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run ``func`` inline or on the next Unreal Slate tick."""
@@ -114,6 +133,14 @@ class UnrealMainThreadDispatcher:
         if http_dispatcher is not None and http_dispatcher.pending() > 0:
             http_dispatcher.tick(16)
 
+        self._scene_elapsed += max(float(_delta), 0.0)
+        if self._scene_publisher is not None and self._scene_elapsed >= _SCENE_REFRESH_SECS:
+            self._scene_elapsed = 0.0
+            try:
+                self._scene_publisher()
+            except Exception:
+                logger.debug("Unable to publish Unreal scene context", exc_info=True)
+
         while True:
             try:
                 task = self._pending.get_nowait()
@@ -147,6 +174,7 @@ class UnrealMainThreadDispatcher:
     def _unregister_tick_callback(self) -> None:
         handle = self._tick_handle
         self._tick_handle = None
+        self._scene_publisher = None
         if handle is not None and self._unregister_tick is not None:
             self._unregister_tick(handle)
         http_dispatcher = self._http_dispatcher
@@ -194,6 +222,7 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
 
         from dcc_mcp_core import DccServerOptions  # noqa: PLC0415
 
+        _configure_ui_control_for_process()
         self._main_thread_dispatcher, bridge = _make_execution_bridge(execution_timeout_secs)
         options = DccServerOptions.from_env(
             _DEFAULT_DCC_NAME,
@@ -210,6 +239,24 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
             execution_bridge=bridge,
         )
         super().__init__(options=options)
+        self._last_scene_snapshot: Optional[Dict[str, Any]] = None
+
+    def start(self, *, install_atexit_hook: bool = True) -> Any:
+        """Start with UI Control scoped to the current Unreal process."""
+        _configure_ui_control_for_process()
+        handle = super().start(install_atexit_hook=install_atexit_hook)
+        self._main_thread_dispatcher.attach_scene_publisher(self._publish_scene_context)
+        return handle
+
+    def _publish_scene_context(self) -> None:
+        snapshot = _current_scene_snapshot()
+        if snapshot is None or snapshot == self._last_scene_snapshot:
+            return
+        previous_scene = (self._last_scene_snapshot or {}).get("scene")
+        self._last_scene_snapshot = snapshot
+        self.set_scene_resource(snapshot)
+        if snapshot.get("scene") != previous_scene:
+            self.update_gateway_metadata(scene=str(snapshot.get("scene") or ""))
 
     def stop(self) -> None:
         try:
@@ -287,6 +334,22 @@ def _summary_value(summary: Any, key: str) -> Any:
     if isinstance(summary, dict):
         return summary.get(key)
     return None
+
+
+def _current_scene_snapshot() -> Optional[Dict[str, Any]]:
+    from dcc_mcp_unreal.api import get_unreal  # noqa: PLC0415
+
+    unreal = get_unreal()
+    editor_level_library = getattr(unreal, "EditorLevelLibrary", None) if unreal is not None else None
+    if editor_level_library is None:
+        return None
+    world = editor_level_library.get_editor_world()
+    if world is None:
+        return {"scene": None, "world_type": None}
+    package = world.get_outer()
+    scene = package.get_name() if package is not None else world.get_name()
+    world_type = str(world.world_type) if hasattr(world, "world_type") else None
+    return {"scene": str(scene), "world_type": world_type}
 
 
 def _is_unreal_skill(server: UnrealMcpServer, summary: Any, skill_name: str) -> bool:

@@ -38,24 +38,32 @@ jobs:
     # Unreal Engine is not installed on GitHub-hosted runners. Use a Windows
     # self-hosted runner with UE and VS Build Tools installed. The repository
     # runner `ue-builder` currently exposes the default labels below.
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64]
     strategy:
       fail-fast: false
       matrix:
         include:
+          - ue_version: "5.5"
+            ue_root: F:\UE\UE_5.5
+            package_mode: native
+            artifact_suffix: win64
           - ue_version: "5.7"
-            ue_root: C:\Program Files\Epic Games\UE_5.7
+            ue_root: F:\UE\UE_5.7
             package_mode: native
             artifact_suffix: win64
           - ue_version: "5.8"
-            ue_root: C:\Program Files\Epic Games\UE_5.8
+            ue_root: F:\UE\UE_5.8
             package_mode: native
             artifact_suffix: win64
           - ue_version: "4.18"
-            ue_root: C:\Program Files\Epic Games\UE_4.18
-            package_mode: python-only
-            artifact_suffix: python-only
+            ue_root: F:\UE\UE_4.18
+            package_mode: native
+            artifact_suffix: win64
+          - ue_version: "4.26"
+            ue_root: F:\UE\UE_4.26
+            package_mode: native
+            artifact_suffix: win64
     env:
       UE_VERSION: ${{ matrix.ue_version }}
       UE_ROOT: ${{ matrix.ue_root }}
@@ -114,34 +122,19 @@ jobs:
           & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
           & "$env:PYTHON_HOME\python.exe" -m pytest
 
-      - name: Download dcc-mcp-core wheel from release
+      - name: Download dcc-mcp-core wheel
         id: core
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           New-Item -ItemType Directory -Force -Path dist/core-wheel | Out-Null
           $tag = "${env:CORE_VERSION}"
-          if ($tag -eq "" -or $tag -eq "latest") {
-            gh release download --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
-          } else {
-            gh release download $tag --repo "${env:CORE_REPO}" --pattern "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" --dir dist/core-wheel --clobber
+          $requirement = "dcc-mcp-core"
+          if ($tag -ne "" -and $tag -ne "latest") {
+            $requirement = "dcc-mcp-core==$($tag -replace '^v', '')"
           }
-          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          # PyPI fallback when GitHub Release doesn't have the wheel yet (timing race)
-          if ($null -eq $wheel) {
-            Write-Host "::warning::dcc-mcp-core wheel not found in GitHub Release; falling back to PyPI"
-            $requirement = "dcc-mcp-core-semantic"
-            if ($tag -ne "" -and $tag -ne "latest") {
-              $pipVersion = $tag -replace "^v", ""
-              $requirement = "dcc-mcp-core-semantic==$pipVersion"
-            } else {
-              Write-Host "Using the newest core wheel currently available on PyPI"
-            }
-            & "$env:PYTHON_HOME\python.exe" -m pip download $requirement --only-binary=:all: --platform win_amd64 --python-version 3.8 --dest dist/core-wheel
-            $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core_semantic-*-cp38-abi3-win_amd64.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          }
-          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded from GitHub Release or PyPI" }
+          & "$env:PYTHON_HOME\python.exe" -m pip download $requirement --only-binary=:all: --platform win_amd64 --python-version 3.8 --no-deps --dest dist/core-wheel
+          $wheel = Get-ChildItem dist/core-wheel -Filter "dcc_mcp_core-*.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -eq $wheel) { throw "dcc-mcp-core wheel was not downloaded from PyPI" }
           "wheel=$($wheel.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "Using core wheel: $($wheel.FullName)"
       - name: Configure job-scoped UnrealBuildTool toolchain
@@ -154,6 +147,7 @@ jobs:
         run: |
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
+            --python "$env:PYTHON_HOME\python.exe" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
             --core-wheel "${{ steps.core.outputs.wheel }}"
 

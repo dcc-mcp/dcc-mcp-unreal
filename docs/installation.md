@@ -10,8 +10,8 @@ Choose the path that matches your Unreal Engine version and workflow.
 ```
 
 The plugin auto-detects the running engine and activates the correct capability
-tier. For older engines without a bundled Python, install a sidecar Python
-environment (see [UE 4.18](#ue-418-native-baseline)).
+tier. Engines whose bundled Python is older than 3.9 use the self-contained
+standalone sidecar below.
 
 ---
 
@@ -19,21 +19,21 @@ environment (see [UE 4.18](#ue-418-native-baseline)).
 
 | UE Version | Install Mode | Required Python | Notes |
 |---|---|---|---|
-| **4.18** | C++ plugin + external sidecar | System Python 3.7+ (or 3.12 in CI) | No `PythonScriptPlugin`; Python tools run in external sidecar |
-| **4.27 – 5.0** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.7 / 3.9 | Enable the plugin in Editor |
-| **5.1 – 5.7** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.9 / 3.11 | Full DCC MCP skill catalog |
-| **5.8+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.11+ | DCC MCP tools + bridge to Epic's `ModelContextProtocol` plugin |
+| **4.18 – 4.26** | C++ plugin + standalone sidecar | No system Python required | Internal Python 3.9+ builds may select embedded mode |
+| **4.27** | C++ plugin + standalone sidecar | No system Python required | Stock Python 3.7 is unsupported; internal Python 3.9+ builds may select embedded mode |
+| **5.0 – 5.2** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.9 | Full DCC MCP skill catalog |
+| **5.3 – 5.6** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.11 | Full DCC MCP skill catalog |
+| **5.7+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.12 | DCC MCP tools + optional Epic MCP bridge where available |
 
 ### Per-Tier Detail
 
 **UE 4.18 (native baseline)**
 The C++ plugin builds with Visual Studio 2017 Build Tools and MSVC 14.16.
-Python skills need an external sidecar; install `dcc-mcp-unreal` into a
-system Python and run the server outside the editor. See the
+Python skills use the self-contained standalone sidecar outside the editor. See the
 [MSVC-Kit guide](msvc-kit-guide.md#unreal-engine-418) for the tested
 toolchain.
 
-**UE 4.27 – 5.7 (Python-enabled)**
+**UE 5.0+ (Python-enabled)**
 Full DCC MCP server inside the editor. Install `dcc-mcp-unreal` into the
 engine's bundled Python, enable `PythonScriptPlugin`, and the server runs
 in-process. The C++ plugin handles subprocess lifecycle and main-thread
@@ -69,29 +69,18 @@ first enable the **Python Editor Script Plugin** (Edit → Plugins → search
     "C:\Path\To\YourProject.uproject" -run=pythonscript -script="path\to\install.py" -stdout -unattended -nosplash
 ```
 
-### UE 5.2 / 5.1 (Python 3.9)
+### UE 5.2 / 5.1 / 5.0 (Python 3.9)
 
 ```bash
 "C:\Program Files\Epic Games\UE_5.2\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
 ```
 
-### UE 5.0 / 4.27 (Python 3.9 / 3.7)
+### UE 4.x
 
-```bash
-"C:\Program Files\Epic Games\UE_5.0\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install dcc-mcp-unreal
-```
-
-### UE 4.18 (External Sidecar)
-
-UE 4.18 has no embedded Python. Install into a system Python and connect
-the agent to the sidecar server:
-
-```bash
-pip install dcc-mcp-unreal
-```
-
-Then start the server from a Python script outside the editor, pointing at
-the UE 4.18 project. The native C++ plugin handles the automation bridge.
+Stock Python 2.7/3.7 builds use the standalone sidecar installer below.
+Internal engine builds with Python 3.9 or newer may install the Python package
+and set `DCC_MCP_UNREAL_RUNTIME=python` to use embedded mode. UE4 defaults to
+sidecar even when an older `PythonScriptPlugin` is loaded.
 
 ### Development Install
 
@@ -153,9 +142,9 @@ vx just package-zip         # builds + creates ZIP archive
 vx just deploy "C:\Path\To\MyProject"
 ```
 
-CI builds the uplugin for UE 5.7, UE 5.8, and UE 4.18 automatically on
-every release. The UE 4.18 artifact is Python-only (no native module
-compiled).
+CI builds native uplugin packages for UE 4.18, UE 4.26, UE 5.5, UE 5.7, and UE 5.8
+automatically on every release. The UE 4.x packages use the standalone
+sidecar and do not require an engine or system Python installation.
 
 ---
 
@@ -175,6 +164,30 @@ the Python plugin is absent.
 ---
 
 ## Verification
+
+### Standalone sidecar (no system Python)
+
+For Windows machines without Python, an agent should run the repository's
+PowerShell installer. It downloads only from the official GitHub repository,
+verifies every file listed in `SHA256SUMS`, smoke-tests the bundled interpreter,
+and persists `DCC_MCP_SERVER_EXECUTABLE` for the current user:
+
+```powershell
+irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 | iex
+```
+
+Install a specific release by downloading the script first:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 -OutFile install-standalone.ps1
+.\install-standalone.ps1 -Version v0.2.0
+```
+
+The default install directory is
+`%LOCALAPPDATA%\dcc-mcp-unreal\standalone`. Restart Unreal after installation
+so it inherits the persisted environment variable. The archive contains its
+own PyOxidizer interpreter and native `dcc-mcp-server`; neither `python` nor
+`pip` is required on the target machine.
 
 ### Smoke Test (Quick)
 
@@ -255,7 +268,7 @@ Expected output includes:
 ```
 Name: dcc-mcp-unreal
 Version: 0.2.0
-Requires: dcc-mcp-core>=0.19.45,<1.0.0
+Requires: dcc-mcp-core>=0.19.77,<1.0.0
 ```
 
 ### Required Environment Variables
@@ -266,9 +279,10 @@ Requires: dcc-mcp-core>=0.19.45,<1.0.0
 | `DCC_MCP_UNREAL_PORT` | OS-assigned (`0`) | Override the MCP instance port |
 | `DCC_MCP_UNREAL_SERVER_NAME` | `unreal-mcp` | Server display name |
 | `DCC_MCP_SERVER_EXECUTABLE` | auto-discovered | Override path to `dcc-mcp-server` binary |
+| `DCC_MCP_UNREAL_RUNTIME` | `auto` | Select `auto`, `python`, or `sidecar`; auto prefers an active `PythonScriptPlugin` |
 | `DCC_MCP_UNREAL_PYTHON_PLUGIN` | `PythonScriptPlugin` | Python plugin dependency name in `.uplugin` |
 | `UE_ROOT` | `C:\Program Files\Epic Games\UE_5.2` | Engine root (for `vx just package`) |
-| `DCC_MCP_CORE_SPEC` | `dcc-mcp-core>=0.18.7,<1.0.0` | Core version spec (for plugin builds) |
+| `DCC_MCP_CORE_SPEC` | `dcc-mcp-core>=0.19.77,<1.0.0` | Core version spec (for plugin builds) |
 
 Set environment variables before the editor starts. Example:
 
@@ -327,11 +341,11 @@ do not cross-deploy a UE 5.2 uplugin into UE 5.7.
 
 ### Python `dcc-mcp-core` version mismatch
 
-`dcc-mcp-unreal` pins `dcc-mcp-core>=0.19.45,<1.0.0`. If a newer core
+`dcc-mcp-unreal` pins `dcc-mcp-core>=0.19.77,<1.0.0`. If a newer core
 broke compatibility, pin the known-good version:
 
 ```bash
-"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install "dcc-mcp-core>=0.19.45,<0.20.0"
+"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -m pip install "dcc-mcp-core>=0.19.77,<0.20.0"
 ```
 
 ### Engine Python pip TLS / SSL errors

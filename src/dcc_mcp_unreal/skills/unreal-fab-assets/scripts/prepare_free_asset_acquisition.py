@@ -29,7 +29,7 @@ def prepare_free_asset_acquisition(
 
     return skill_success(
         "Prepared the official Fab acquisition and verification workflow.",
-        prompt="Open the scoped Unreal Fab window with app_ui__snapshot; stop at authentication or EULA boundaries.",
+        prompt="Open the scoped Unreal Fab window with ui_control__snapshot; stop at authentication or EULA boundaries.",
         query=query,
         engine_version=engine_version.strip() or "5.8",
         destination_path=destination_path,
@@ -41,7 +41,7 @@ def prepare_free_asset_acquisition(
             "license",
             "supported_engine_versions",
         ],
-        next_tool="app_ui__snapshot",
+        next_tool="ui_control__snapshot",
         verification_tools=[
             "unreal_assets__list_assets",
             "unreal_assets__get_asset_info",

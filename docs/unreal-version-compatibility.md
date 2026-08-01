@@ -8,7 +8,7 @@ that a current Unreal Python API exists on every version.
 | --- | --- | --- |
 | 4.18+ without `PythonScriptPlugin` | Native baseline | The C++ plugin and native automation bridge remain buildable with that engine's required toolchain; Python skills require an external sidecar. |
 | Engine with `PythonScriptPlugin` through 5.7 | DCC MCP Python | The DCC MCP server, skill discovery, asset, actor, level, automation, and app-ui integrations are available subject to per-API gates. |
-| 5.8+ | DCC MCP plus Epic | All normal DCC MCP capabilities remain available; `unreal-official-mcp` can optionally bridge Epic's installed Unreal MCP and Toolset Registry. |
+| 5.8+ | DCC MCP plus Epic | All normal DCC MCP capabilities remain available; typed Chaos Geometry Collection, material binding, and Simulation-in-Editor validation are available. `unreal-official-mcp` can optionally bridge Epic's installed Unreal MCP and Toolset Registry. |
 
 Epic's `ModelContextProtocol` plugin is experimental and marked `NoRedist`.
 The adapter detects and calls an installed loopback endpoint; it does not copy

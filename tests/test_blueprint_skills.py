@@ -73,9 +73,7 @@ def test_blueprint_layout_orders_connected_nodes_and_avoids_overlap():
 
 def test_blueprint_graph_lookup_uses_unreal_58_list_graphs():
     event_graph = SimpleNamespace(get_name=lambda: "EventGraph")
-    unreal = SimpleNamespace(
-        BlueprintEditorLibrary=SimpleNamespace(list_graphs=lambda _blueprint: [event_graph])
-    )
+    unreal = SimpleNamespace(BlueprintEditorLibrary=SimpleNamespace(list_graphs=lambda _blueprint: [event_graph]))
 
     with patch.dict(sys.modules, {"unreal": unreal}):
         module, spec = _load_module(

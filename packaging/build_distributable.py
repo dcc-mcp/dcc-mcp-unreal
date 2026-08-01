@@ -4,8 +4,10 @@
 This script creates a package suitable for users to drop into a project's
 ``Plugins/`` directory. It supports three modes:
 
-* ``native``: vendors Python, runs Unreal AutomationTool ``BuildPlugin``, and
-  writes ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``.
+* ``native``: vendors Python for UE5, runs Unreal AutomationTool
+  ``BuildPlugin``, and writes
+  ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``. UE4 native packages
+  use the standalone sidecar and omit the incompatible embedded dependencies.
 * ``source``: vendors Python and keeps the C++ source module for engines that
   should compile the plugin locally.
 * ``python-only``: vendors Python and strips the C++ module for legacy/internal
@@ -15,6 +17,7 @@ This script creates a package suitable for users to drop into a project's
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -29,7 +32,7 @@ PLUGIN_SOURCE = REPO_ROOT / "unreal" / "plugin" / "DccMcpUnreal.uplugin"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.7"))
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 DEFAULT_CORE_WHEEL_URL = os.environ.get("DCC_MCP_CORE_WHEEL_URL")
-DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.18.7,<1.0.0")
+DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.19.77,<1.0.0")
 
 
 def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:
@@ -85,6 +88,37 @@ def resolve_uat(ue_root: Path) -> Path:
     raise FileNotFoundError("RunUAT not found under {}".format(ue_root))
 
 
+@contextlib.contextmanager
+def temporarily_clear_legacy_ubt_user_config(work_dir: Path):
+    """Hide cross-version UBT settings while an old engine is running."""
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        yield
+        return
+
+    config_path = Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    if not config_path.is_file():
+        yield
+        return
+
+    backup_path = work_dir / "legacy-ubt-user-BuildConfiguration.xml.backup"
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(config_path), str(backup_path))
+    config_path.write_text(
+        '<?xml version="1.0" encoding="utf-8" ?>\n'
+        '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">\n'
+        "</Configuration>\n",
+        encoding="utf-8",
+    )
+    print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
+    try:
+        yield
+    finally:
+        shutil.copy2(str(backup_path), str(config_path))
+        backup_path.unlink()
+        print("[build-uplugin] Restored UBT config: {}".format(config_path))
+
+
 def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
     core_wheel = args.core_wheel
     if not core_wheel and args.core_wheel_url:
@@ -104,6 +138,8 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
     ]
     if args.mode == "python-only":
         cmd.append("--no-native")
+    if args.mode == "native" and read_engine_tag(args.ue_root).startswith("ue4."):
+        cmd.append("--skip-python-deps")
     if args.python:
         cmd += ["--python", str(args.python)]
     if core_wheel:
@@ -159,8 +195,22 @@ def _check_msvc_toolchain(version: str) -> None:
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
     uat = resolve_uat(args.ue_root)
-    cmd = [
-        str(uat),
+    cmd = [str(uat)]
+    engine_tag = read_engine_tag(args.ue_root)
+    is_ue4 = engine_tag.startswith("ue4.")
+    uses_legacy_ubt_config = is_ue4 or engine_tag in {"ue5.0", "ue5.1", "ue5.2", "ue5.3", "ue5.4", "ue5.5", "ue5.6"}
+    if is_ue4:
+        precompiled_uat = args.ue_root / "Engine" / "Binaries" / "DotNET" / "AutomationTool.exe"
+        if precompiled_uat.is_file():
+            cmd.append("-nocompile")
+        # Installed UE4 builds default to an AutomationTool log directory under
+        # the engine installation. A service account may not own stale logs
+        # created there by another user, so keep all UAT writes job-scoped.
+        uat_log_dir = uat_dir.parent / "uat-logs"
+        uat_log_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["uebp_LogFolder"] = str(uat_log_dir)
+        print("[build-uplugin] UE4 UAT log folder: {}".format(uat_log_dir))
+    cmd += [
         "BuildPlugin",
         "-Plugin={}".format(PLUGIN_SOURCE),
         "-Package={}".format(uat_dir),
@@ -206,7 +256,11 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
             os.environ["_CL_"] = "/wd4668"
     else:
         os.environ["_CL_"] = "/wd4668"
-    run(cmd)
+    if uses_legacy_ubt_config:
+        with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):
+            run(cmd)
+    else:
+        run(cmd)
 
 
 def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> None:
@@ -219,7 +273,9 @@ def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> N
         python_dst = final_plugin_dir / "python"
         if python_dst.exists():
             shutil.rmtree(str(python_dst))
-        shutil.copytree(str(python_src), str(python_dst), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        shutil.copytree(
+            str(python_src), str(python_dst), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        )
 
     build_info = payload_dir / "BUILD_INFO.txt"
     if build_info.exists():
@@ -230,7 +286,9 @@ def zip_final(final_plugin_dir: Path, ue_root: Path, mode: str) -> Path:
     version = read_plugin_version(final_plugin_dir)
     suffix = "win64" if mode == "native" else mode
     archive_base = REPO_ROOT / "dist" / "DccMcpUnreal-{}-{}-{}".format(version, read_engine_tag(ue_root), suffix)
-    archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=str(final_plugin_dir.parent), base_dir="DccMcpUnreal"))
+    archive_path = Path(
+        shutil.make_archive(str(archive_base), "zip", root_dir=str(final_plugin_dir.parent), base_dir="DccMcpUnreal")
+    )
     return archive_path
 
 
@@ -265,13 +323,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ue-root", default=str(DEFAULT_UE_ROOT), type=Path, help="Unreal Engine root")
     parser.add_argument("--python", default=None, type=Path, help="Python executable for vendoring dependencies")
-    parser.add_argument("--core-wheel", default=DEFAULT_CORE_WHEEL, type=Path, help="Local dcc-mcp-core wheel to vendor")
+    parser.add_argument(
+        "--core-wheel", default=DEFAULT_CORE_WHEEL, type=Path, help="Local dcc-mcp-core wheel to vendor"
+    )
     parser.add_argument("--core-wheel-url", default=DEFAULT_CORE_WHEEL_URL, help="URL to a dcc-mcp-core wheel artifact")
     parser.add_argument("--core-spec", default=DEFAULT_CORE_SPEC, help="dcc-mcp-core spec when no wheel is provided")
     parser.add_argument("--core-root", default=str(REPO_ROOT.parent / "dcc-mcp-core"), type=Path)
-    parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel")
+    parser.add_argument(
+        "--use-local-core", action="store_true", help="Install dcc-mcp-core from source instead of a wheel"
+    )
     parser.add_argument("--skip-core", action="store_true", help="Do not vendor dcc-mcp-core")
-    parser.add_argument("--vctoolchain-version", default=os.environ.get("VCTOOLCHAIN_VERSION", ""), help="MSVC toolchain version passed to UBT via -VCToolchainVersion=")
+    parser.add_argument(
+        "--vctoolchain-version",
+        default=os.environ.get("VCTOOLCHAIN_VERSION", ""),
+        help="MSVC toolchain version passed to UBT via -VCToolchainVersion=",
+    )
     parser.add_argument(
         "--patched-headers-dir",
         default=os.environ.get("PATCHED_HEADERS_DIR", ""),
@@ -322,7 +388,9 @@ def main() -> None:
     else:
         remove_tree(final_plugin_dir)
         final_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(str(payload_dir), str(final_plugin_dir), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        shutil.copytree(
+            str(payload_dir), str(final_plugin_dir), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        )
     rewrite_distribution_build_info(final_plugin_dir, args.mode)
     verify(final_plugin_dir)
     archive = zip_final(final_plugin_dir, args.ue_root, args.mode)

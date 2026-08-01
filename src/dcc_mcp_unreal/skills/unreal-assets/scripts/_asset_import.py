@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 
+def configure_alembic_geometry_cache_options(unreal_module):
+    """Create explicit Alembic Geometry Cache options."""
+    options = unreal_module.AbcImportSettings()
+    options.set_editor_property("import_type", unreal_module.AlembicImportType.GEOMETRY_CACHE)
+    return options
+
+
 def configure_fbx_options(
     unreal_module,
     *,

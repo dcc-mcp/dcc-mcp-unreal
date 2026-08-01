@@ -1,0 +1,215 @@
+tools:
+  - name: create_metasound_source
+    description: >-
+      Create and save a MetaSound Source with Unreal's official
+      MetaSoundBuilderSubsystem and MetaSoundEditorSubsystem. Returns the
+      graph's initial opaque Builder vertex handles for later connections.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: false
+    source_file: scripts/create_metasound_source.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+          description: "New package path, e.g. '/Game/Audio/MS_Tone'"
+        author:
+          type: string
+          default: dcc-mcp
+        output_format:
+          type: string
+          enum: [Mono, Stereo, Quad, "5.1", "7.1"]
+          default: Mono
+        is_one_shot:
+          type: boolean
+          default: true
+      required: [asset_path]
+    next-tools:
+      on-success: [unreal_metasound__add_metasound_input, unreal_metasound__add_metasound_node]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: add_metasound_input
+    description: >-
+      Add a Bool, Float, Int32, or String graph input with the official
+      Builder API. Returns its opaque output handle for safe connection.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: false
+    source_file: scripts/add_metasound_input.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+        input_name:
+          type: string
+        value_type:
+          type: string
+          enum: [Bool, Float, Int32, String]
+        default_value:
+          description: "Required typed default matching value_type"
+      required: [asset_path, input_name, value_type, default_value]
+    next-tools:
+      on-success: [unreal_metasound__connect_metasound_nodes, unreal_metasound__set_metasound_parameter_default]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: add_metasound_node
+    description: >-
+      Add an exact registered MetaSound node class by namespace, class name,
+      variant, and major version. Returns an opaque node handle and reflected
+      input/output pin handles. The tool does not guess broad DSP categories.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: false
+    source_file: scripts/add_metasound_node.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+        namespace:
+          type: string
+          description: "Exact registry namespace, e.g. 'UE'"
+        class_name:
+          type: string
+          description: "Exact registry class name, e.g. 'Sine'"
+        variant:
+          type: string
+          description: "Exact registry variant, e.g. 'Audio'; empty is valid for some classes"
+          default: ""
+        major_version:
+          type: integer
+          minimum: 1
+          default: 1
+        position_x:
+          type: number
+          default: 0.0
+        position_y:
+          type: number
+          default: 0.0
+      required: [asset_path, namespace, class_name]
+    next-tools:
+      on-success: [unreal_metasound__connect_metasound_nodes, unreal_metasound__inspect_metasound_node]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: connect_metasound_nodes
+    description: >-
+      Connect one opaque MetaSound Builder output handle to one input handle.
+      Both handles must come from this skill and belong to the same asset.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: true
+    source_file: scripts/connect_metasound_nodes.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+        output_handle:
+          type: string
+          description: "Opaque (NodeID=...,VertexID=...) output token"
+        input_handle:
+          type: string
+          description: "Opaque (NodeID=...,VertexID=...) input token"
+      required: [asset_path, output_handle, input_handle]
+    next-tools:
+      on-success: [unreal_metasound__build_metasound, unreal_metasound__validate_metasound_graph]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: set_metasound_parameter_default
+    description: >-
+      Set a graph-input default after deriving its declared type from the
+      Builder API. Supports Bool, Float, Int32, and String inputs.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: true
+    source_file: scripts/set_metasound_parameter_default.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+        input_name:
+          type: string
+        value:
+          description: "Typed value matching the graph input's declared type"
+      required: [asset_path, input_name, value]
+    next-tools:
+      on-success: [unreal_metasound__build_metasound]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: build_metasound
+    description: >-
+      Overwrite the MetaSound asset from its current official Builder, save it,
+      and run Unreal Data Validation. Returns success only after validation is
+      conclusive and valid.
+    execution: sync
+    affinity: main
+    read_only: false
+    destructive: false
+    idempotent: true
+    source_file: scripts/build_metasound.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+      required: [asset_path]
+    next-tools:
+      on-success: [unreal_metasound__validate_metasound_graph]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: inspect_metasound_node
+    description: >-
+      Inspect one opaque node handle with public Builder APIs. Returns its
+      registered class version and exact input/output pin handles. Read-only.
+    execution: sync
+    affinity: main
+    read_only: true
+    destructive: false
+    idempotent: true
+    source_file: scripts/inspect_metasound_node.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+        node_handle:
+          type: string
+          description: "Opaque (NodeID=...) token returned by add_metasound_node"
+      required: [asset_path, node_handle]
+    next-tools:
+      on-success: [unreal_metasound__connect_metasound_nodes]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: validate_metasound_graph
+    description: >-
+      Run Unreal's registered Data Validation rules on a MetaSound Source and
+      report graph interface names. Fails closed when no validator runs;
+      read-only and does not claim unsupported cycle or connectivity analysis.
+    execution: sync
+    affinity: main
+    read_only: true
+    destructive: false
+    idempotent: true
+    source_file: scripts/validate_metasound_graph.py
+    input_schema:
+      type: object
+      properties:
+        asset_path:
+          type: string
+      required: [asset_path]
+    next-tools:
+      on-success: []
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

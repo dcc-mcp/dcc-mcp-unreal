@@ -71,3 +71,12 @@ def test_fab_skill_contract_validates():
     skill_dir = SCRIPTS.parent
     report = validate_skill(str(skill_dir))
     assert not report.has_errors, report
+    skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    tools_text = (skill_dir / "tools.yaml").read_text(encoding="utf-8")
+    depends_text = (skill_dir / "metadata" / "depends.md").read_text(encoding="utf-8")
+    assert 'depends: ["ui-control", "unreal-assets"]' in skill_text
+    assert "ui-control" in depends_text
+    assert "ui_control__snapshot" in tools_text
+    assert "app-ui" not in skill_text
+    assert "app-ui" not in depends_text
+    assert "app_ui__" not in tools_text

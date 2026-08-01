@@ -65,9 +65,7 @@ def layout_graph(graph, horizontal_spacing: int = 400, vertical_spacing: int = 2
     edges = {node_id: set() for node_id in node_by_id}
     indegree = {node_id: 0 for node_id in node_by_id}
 
-    if hasattr(unreal, "BlueprintGraphPinLibrary") and hasattr(
-        unreal.BlueprintEditorLibrary, "list_output_pins"
-    ):
+    if hasattr(unreal, "BlueprintGraphPinLibrary") and hasattr(unreal.BlueprintEditorLibrary, "list_output_pins"):
         for source_id, node in node_by_id.items():
             for pin in unreal.BlueprintEditorLibrary.list_output_pins(node):
                 for linked_pin in unreal.BlueprintGraphPinLibrary.list_connected_pins(pin):
