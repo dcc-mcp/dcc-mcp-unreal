@@ -36,23 +36,22 @@ def find_nodes(
             prompt="Create the Blueprint first with create_blueprint_class.",
         )
 
-    # Get the event graph
-    event_graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
-    if not event_graphs:
+    from _blueprint_graph_api import get_graph, get_node_id, get_node_position, get_nodes  # noqa: PLC0415
+
+    event_graph = get_graph(blueprint)
+    if event_graph is None:
         return skill_error(
             f"No event graph found in '{blueprint_name}'",
-            "No event graphs returned",
+            "No Blueprint graphs returned",
             prompt="Ensure the Blueprint has a valid event graph.",
         )
 
-    event_graph = event_graphs[0]
-
     # Collect all nodes
     nodes = []
-    for node in event_graph.get_all_nodes():
+    for node in get_nodes(event_graph):
         node_class_name = node.get_class().get_name()
-        node_guid = str(node.get_node_guid())
-        node_title = node.get_node_title()
+        node_guid = get_node_id(node)
+        node_title = unreal.BlueprintEditorLibrary.get_node_title(node)
 
         # Apply type filter
         if node_type and node_type.lower() not in node_class_name.lower():
@@ -64,14 +63,17 @@ def find_nodes(
 
         # Get pin info
         pins = []
-        for pin in node.get_all_pins():
-            pin_direction = "output" if pin.get_direction() == unreal.EdGraphPinDirection.EGPD_Output else "input"
-            pins.append(
+        for direction, node_pins in (
+            ("input", unreal.BlueprintEditorLibrary.list_input_pins(node)),
+            ("output", unreal.BlueprintEditorLibrary.list_output_pins(node)),
+        ):
+            pins.extend(
                 {
-                    "name": pin.get_name(),
-                    "direction": pin_direction,
-                    "type": str(pin.get_pin_type()),
+                    "name": str(pin.get_pin_name()),
+                    "direction": direction,
+                    "type": str(pin.get_pin_type_display_string()),
                 }
+                for pin in node_pins
             )
 
         nodes.append(
@@ -79,7 +81,7 @@ def find_nodes(
                 "node_id": node_guid,
                 "title": node_title,
                 "type": node_class_name,
-                "position": [node.get_editor_property("node_pos_x"), node.get_editor_property("node_pos_y")],
+                "position": list(get_node_position(node)),
                 "pins": pins,
             }
         )

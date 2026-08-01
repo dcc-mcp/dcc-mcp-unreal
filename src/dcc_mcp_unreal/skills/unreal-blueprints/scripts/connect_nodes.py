@@ -38,16 +38,15 @@ def connect_nodes(
             prompt="Create the Blueprint first with create_blueprint_class.",
         )
 
-    # Get the event graph
-    event_graphs = unreal.BlueprintEditorLibrary.get_blueprint_event_graphs(blueprint)
-    if not event_graphs:
+    from _blueprint_graph_api import get_graph  # noqa: PLC0415
+
+    event_graph = get_graph(blueprint)
+    if event_graph is None:
         return skill_error(
             f"No event graph found in '{blueprint_name}'",
-            "No event graphs returned",
+            "No Blueprint graphs returned",
             prompt="Ensure the Blueprint has a valid event graph.",
         )
-
-    event_graph = event_graphs[0]
 
     # Find source and target nodes by GUID
     source_node = _find_node_by_id(event_graph, source_node_id)
@@ -71,11 +70,7 @@ def connect_nodes(
     target_pin_obj = _find_pin_by_name(target_node, target_pin, is_output=False)
 
     if source_pin_obj is None:
-        available = [
-            p.get_name()
-            for p in source_node.get_all_pins()
-            if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Output
-        ]
+        available = [str(p.get_pin_name()) for p in unreal.BlueprintEditorLibrary.list_output_pins(source_node)]
         return skill_error(
             f"Source pin '{source_pin}' not found on node {source_node_id}",
             f"Available output pins: {', '.join(available) if available else 'none'}",
@@ -83,11 +78,7 @@ def connect_nodes(
         )
 
     if target_pin_obj is None:
-        available = [
-            p.get_name()
-            for p in target_node.get_all_pins()
-            if p.get_direction() == unreal.EdGraphPinDirection.EGPD_Input
-        ]
+        available = [str(p.get_pin_name()) for p in unreal.BlueprintEditorLibrary.list_input_pins(target_node)]
         return skill_error(
             f"Target pin '{target_pin}' not found on node {target_node_id}",
             f"Available input pins: {', '.join(available) if available else 'none'}",
@@ -96,13 +87,18 @@ def connect_nodes(
 
     # Make the connection
     try:
-        source_pin_obj.make_link_to(target_pin_obj)
+        if not source_pin_obj.try_create_connection(target_pin_obj):
+            raise ValueError("Unreal rejected the pin connection")
     except Exception as e:
         return skill_error(
             f"Failed to connect nodes: {e}",
             f"make_link_to failed: {e}",
             prompt="Check pin type compatibility.",
         )
+
+    from _blueprint_graph_api import layout_graph  # noqa: PLC0415
+
+    layout = layout_graph(event_graph)
 
     return skill_success(
         f"Connected '{source_node_id}.{source_pin}' -> '{target_node_id}.{target_pin}' in '{blueprint_name}'",
@@ -112,14 +108,18 @@ def connect_nodes(
         source_pin=source_pin,
         target_node_id=target_node_id,
         target_pin=target_pin,
+        layout_applied=True,
+        layout_node_count=layout["node_count"],
     )
 
 
 def _find_node_by_id(graph: "unreal.EdGraph", node_id: str) -> "unreal.EdGraphNode":  # noqa: F821
     """Find a node in the graph by its GUID string."""
 
-    for node in graph.get_all_nodes():
-        if str(node.get_node_guid()) == node_id:
+    from _blueprint_graph_api import get_node_id, get_nodes  # noqa: PLC0415
+
+    for node in get_nodes(graph):
+        if get_node_id(node) == node_id:
             return node
     return None
 
@@ -132,9 +132,12 @@ def _find_pin_by_name(
     """Find a pin on a node by name and direction."""
     import unreal  # noqa: PLC0415
 
-    direction = unreal.EdGraphPinDirection.EGPD_Output if is_output else unreal.EdGraphPinDirection.EGPD_Input
-
-    for pin in node.get_all_pins():
-        if pin.get_direction() == direction and pin.get_name().lower() == pin_name.lower():
+    pins = (
+        unreal.BlueprintEditorLibrary.list_output_pins(node)
+        if is_output
+        else unreal.BlueprintEditorLibrary.list_input_pins(node)
+    )
+    for pin in pins:
+        if str(pin.get_pin_name()).lower() == pin_name.lower():
             return pin
     return None

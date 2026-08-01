@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from time import monotonic
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -51,8 +52,15 @@ class OfficialMcpClient:
     def __init__(self, endpoint: str = DEFAULT_OFFICIAL_MCP_URL, timeout: float = 15.0) -> None:
         self.endpoint = _validate_endpoint(endpoint)
         self.timeout = timeout
+        self._deadline = monotonic() + timeout
         self.session_id = ""
         self._request_id = 0
+
+    def _remaining_timeout(self) -> float:
+        remaining = self._deadline - monotonic()
+        if remaining <= 0:
+            raise OfficialMcpError("Epic MCP operation timed out after {:g}s".format(self.timeout))
+        return remaining
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -80,7 +88,7 @@ class OfficialMcpClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(request, timeout=self._remaining_timeout()) as response:
                 if not self.session_id:
                     self.session_id = response.headers.get("Mcp-Session-Id", "")
                 result = _decode_response(response.read())
@@ -124,9 +132,9 @@ class OfficialMcpClient:
             method="DELETE",
         )
         try:
-            with urlopen(request, timeout=self.timeout):
+            with urlopen(request, timeout=self._remaining_timeout()):
                 pass
-        except (HTTPError, URLError, OSError):
+        except (HTTPError, URLError, OSError, OfficialMcpError):
             pass
         finally:
             self.session_id = ""
