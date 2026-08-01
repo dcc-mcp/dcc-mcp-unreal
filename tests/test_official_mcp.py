@@ -115,12 +115,16 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         ]
     )
     requests = []
+    timeouts = []
+    now = [100.0]
 
     def fake_urlopen(request, timeout):
         requests.append(request)
-        assert timeout == 15.0
+        timeouts.append(timeout)
+        now[0] += 1.0
         return next(responses)
 
+    monkeypatch.setattr(official_mcp, "monotonic", lambda: now[0])
     monkeypatch.setattr(official_mcp, "urlopen", fake_urlopen)
 
     result = official_mcp.bridge_official_mcp(
@@ -141,6 +145,7 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         },
     }
     assert requests[-1].method == "DELETE"
+    assert timeouts == [15.0, 14.0, 13.0, 12.0, 11.0]
 
 
 def test_client_propagates_inner_tool_error(monkeypatch):
