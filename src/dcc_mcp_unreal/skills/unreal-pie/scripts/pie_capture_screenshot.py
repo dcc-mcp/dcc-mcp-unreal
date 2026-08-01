@@ -80,8 +80,11 @@ def pie_capture_screenshot(
                 filepath,
             )
             return unreal_success(
-                "Screenshot captured via AutomationLibrary",
+                "Screenshot capture requested via AutomationLibrary",
+                prompt="Wait for the screenshot file to exist at: {}".format(filepath),
                 filepath=filepath,
+                method="automation_library",
+                capture_pending=True,
                 resolution_x=resolution_x,
                 resolution_y=resolution_y,
             )
@@ -96,10 +99,11 @@ def pie_capture_screenshot(
         unreal.SystemLibrary.execute_console_command(world, cmd)
 
         return unreal_success(
-            "Screenshot captured via console command",
-            prompt="Screenshot saved. Verify the file at: {}".format(filepath),
+            "Screenshot capture requested via console command",
+            prompt="Wait for the screenshot file to exist at: {}".format(filepath),
             filepath=filepath,
             method="console_command",
+            capture_pending=True,
         )
     except Exception as exc:
         return unreal_from_exception(exc, "Failed to capture screenshot to {}".format(filepath))

@@ -80,9 +80,9 @@ tools:
 
   - name: pie_capture_screenshot
     description: >-
-      Capture the active Unreal viewport as a PNG screenshot. Saves to the
-      specified file path. Falls back to HighResShot console command when
-      AutomationLibrary is unavailable.
+      Request an asynchronous PNG screenshot of the active Unreal viewport.
+      The result reports capture_pending until the specified file appears.
+      Falls back to HighResShot when AutomationLibrary is unavailable.
     source_file: scripts/pie_capture_screenshot.py
     execution: sync
     affinity: main
