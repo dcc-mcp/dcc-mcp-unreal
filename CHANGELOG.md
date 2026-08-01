@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.12](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.11...v0.2.12) (2026-08-01)
+
+
+### Features
+
+* add geospatial PCG table importer ([#123](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/123)) ([70415c0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/70415c0b1394bb88fcedc415783b11fa84616e93))
+
+
+### Bug Fixes
+
+* propagate official MCP tool errors ([#126](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/126)) ([453202c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/453202c5765e42cf3a2969b2830ba357c1c1e7b9))
+* report pending screenshot captures ([#124](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/124)) ([a100c4c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a100c4c2071ef26beaef5d61352a7d67f1cfcd30))
+
 ## [0.2.11](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.10...v0.2.11) (2026-08-01)
 
 
