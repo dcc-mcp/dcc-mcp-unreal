@@ -113,7 +113,19 @@ class OfficialMcpClient:
         return self._send("tools/list", {}).get("result", {})
 
     def call_tool(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-        return self._send("tools/call", {"name": name, "arguments": dict(arguments or {})}).get("result", {})
+        result = self._send("tools/call", {"name": name, "arguments": dict(arguments or {})}).get("result", {})
+        if result.get("isError"):
+            content = result.get("content", ())
+            detail = next(
+                (
+                    item.get("text", "")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+                ),
+                "unknown tool error",
+            )
+            raise OfficialMcpError("Epic MCP tool error: {}".format(detail[:1000]))
+        return result
 
     def close(self) -> None:
         if not self.session_id:

@@ -141,3 +141,16 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         },
     }
     assert requests[-1].method == "DELETE"
+
+
+def test_client_propagates_inner_tool_error(monkeypatch):
+    client = official_mcp.OfficialMcpClient()
+    monkeypatch.setattr(
+        client,
+        "_send",
+        lambda *args, **kwargs: {
+            "result": {"content": [{"type": "text", "text": "CaptureViewport failed"}], "isError": True}
+        },
+    )
+    with pytest.raises(official_mcp.OfficialMcpError, match="CaptureViewport failed"):
+        client.call_tool("CaptureViewport")
