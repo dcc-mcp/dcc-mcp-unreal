@@ -9,6 +9,7 @@ from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 from dcc_mcp_unreal.project_config import (
     project_config_path,
     read_console_variables,
+    requested_keys,
     runtime_console_values,
     validate_settings,
 )
@@ -19,7 +20,7 @@ def verify_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
     try:
         path = project_config_path()
         disk = read_console_variables(path)
-        requested = list(keys or disk.keys())
+        requested = requested_keys(disk, keys)
         validate_settings({key: disk.get(key, 0) for key in requested})
         runtime = runtime_console_values(requested)
     except (ValueError, OSError) as exc:

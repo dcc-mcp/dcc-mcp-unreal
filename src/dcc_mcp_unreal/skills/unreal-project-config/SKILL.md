@@ -30,4 +30,6 @@ editor when required -> verify disk and runtime values with this skill plus the
 official Unreal MCP CVar/log tools.
 
 The first version intentionally scopes writes to renderer ConsoleVariables used
-by the Manhattan showcase. Unsupported keys return an actionable error.
+by the Manhattan showcase. Inspect/verify without `keys` show only configured
+allowlisted variables, while explicit unsupported keys return an actionable
+error.

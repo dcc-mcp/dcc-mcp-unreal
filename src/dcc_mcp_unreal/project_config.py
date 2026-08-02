@@ -114,6 +114,13 @@ def read_console_variables(path: Path) -> Dict[str, str]:
     return values
 
 
+def requested_keys(values: Mapping[str, str], keys: Optional[Iterable[str]]) -> list[str]:
+    """Select explicit keys or only configured allowlisted keys by default."""
+    if keys is not None:
+        return list(keys)
+    return [key for key in values if key in ALLOWED_CONSOLE_VARIABLES]
+
+
 def _serialize(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
