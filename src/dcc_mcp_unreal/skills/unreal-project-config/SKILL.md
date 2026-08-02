@@ -30,6 +30,6 @@ editor when required -> verify disk and runtime values with this skill plus the
 official Unreal MCP CVar/log tools.
 
 The public skill intentionally scopes writes to a small renderer allowlist.
-Inspect/verify without `keys` show only configured allowlisted variables, while
-explicit unsupported keys return an actionable error. Project-specific presets
+Inspect and verify calls take explicit allowlisted keys; unsupported keys return
+an actionable error. Project-specific presets and default-selection policies
 belong in the consuming project's private skill layer.

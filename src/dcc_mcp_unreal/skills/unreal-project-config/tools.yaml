@@ -15,7 +15,8 @@ tools:
         keys:
           type: array
           items: {type: string}
-          description: Optional allowlisted renderer keys; omit to inspect all keys present.
+          description: Explicit allowlisted renderer keys to inspect.
+      required: [keys]
     call_examples:
       - arguments: {keys: ["r.LumenScene.SurfaceCache.AtlasSize"]}
         note: Inspect the Lumen surface-cache atlas setting.
@@ -60,6 +61,7 @@ tools:
         keys:
           type: array
           items: {type: string}
-          description: Optional allowlisted renderer keys; omit to verify all configured keys.
+          description: Explicit allowlisted renderer keys to verify.
+      required: [keys]
     next-tools: [unreal_official_mcp__official_mcp_bridge]
     on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]

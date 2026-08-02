@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 from dcc_mcp_unreal.project_config import (
     project_config_path,
     read_console_variables,
-    requested_keys,
     runtime_console_values,
     validate_settings,
 )
 
 
 @skill_entry
-def verify_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
+def verify_project_config(keys: List[str], **kwargs) -> dict:
     try:
+        if not keys:
+            raise ValueError("Pass one or more allowlisted renderer keys in 'keys'")
         path = project_config_path()
         disk = read_console_variables(path)
-        requested = requested_keys(disk, keys)
+        requested = list(keys)
         validate_settings({key: disk.get(key, 0) for key in requested})
         runtime = runtime_console_values(requested)
     except (ValueError, OSError) as exc:

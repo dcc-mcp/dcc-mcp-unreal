@@ -6,7 +6,6 @@ import pytest
 from dcc_mcp_unreal.project_config import (
     patch_console_variables,
     read_console_variables,
-    requested_keys,
     validate_settings,
 )
 
@@ -51,13 +50,6 @@ def test_patch_is_idempotent(tmp_path: Path):
 
     assert first["changed"] == {"r.Nanite": 1}
     assert second["changed"] == {}
-
-
-def test_default_selection_ignores_unallowlisted_console_variables():
-    values = {"r.Nanite": "1", "r.UnrelatedProjectSetting": "1"}
-
-    assert requested_keys(values, None) == ["r.Nanite"]
-    assert requested_keys(values, ["r.UnrelatedProjectSetting"]) == ["r.UnrelatedProjectSetting"]
 
 
 def test_skill_handlers_publish_explicit_mcp_parameters():
