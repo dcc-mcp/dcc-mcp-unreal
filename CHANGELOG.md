@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.14](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.13...v0.2.14) (2026-08-02)
+
+
+### Features
+
+* add safe Unreal project config skill ([#134](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/134)) ([fb3386d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/fb3386d7fe54d41d9e3c0b7246c1a302238968e1))
+* harden Unreal MCP skills and blueprint layout ([534b387](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/534b387898c168432a2cdcd47c401af9672d0940))
+
+
+### Bug Fixes
+
+* avoid Unreal API for config path discovery ([#137](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/137)) ([d880a4d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d880a4d5ec90435a9d35ff94aa3f31a5e7dfcaef))
+* ignore unrelated Unreal console variables ([#135](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/135)) ([c73f608](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/c73f608caf629645d89bb8ab8b60d88f0712126a))
+* keep private config selection out of public skill ([5f75226](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5f75226fc69bd4bceeb3ec72ae6850b9bc666c35))
+* keep showcase details out of public skills ([#136](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/136)) ([2f1dd3a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2f1dd3a3b6f767992b3bfe568622160ceda4cecd))
+
 ## [0.2.13](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.12...v0.2.13) (2026-08-01)
 
 
