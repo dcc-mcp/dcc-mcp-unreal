@@ -35,6 +35,11 @@ def _configure_ui_control_for_process() -> None:
     """Bind Windows UI Control to this Unreal Editor process."""
     if not _IS_WINDOWS:
         return
+    # dcc-mcp-core's isolated host reads the APP_UI contract. Keep the
+    # legacy UI_CONTROL names while downstream adapters migrate.
+    os.environ["DCC_MCP_APP_UI_BACKEND"] = "windows-uia"
+    os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] = str(os.getpid())
+    os.environ.pop("DCC_MCP_APP_UI_UIA_WINDOW_HANDLE", None)
     os.environ["DCC_MCP_UI_CONTROL_BACKEND"] = "windows-uia"
     os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] = str(os.getpid())
     os.environ.pop("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", None)

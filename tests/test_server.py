@@ -471,6 +471,9 @@ def test_server_forces_current_windows_ui_control_scope(monkeypatch):
     assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
     assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
     assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in os.environ
+    assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
+    assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_APP_UI_UIA_WINDOW_HANDLE" not in os.environ
 
 
 def test_server_start_repairs_ui_control_scope_drift(monkeypatch):
@@ -493,6 +496,9 @@ def test_server_start_repairs_ui_control_scope_drift(monkeypatch):
     assert captured["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
     assert captured["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
     assert "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE" not in captured
+    assert captured["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
+    assert captured["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
+    assert "DCC_MCP_APP_UI_UIA_WINDOW_HANDLE" not in captured
 
 
 def test_server_custom_name():
@@ -716,6 +722,8 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
     monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
     monkeypatch.delenv("DCC_MCP_UI_CONTROL_BACKEND", raising=False)
     monkeypatch.delenv("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", raising=False)
+    monkeypatch.delenv("DCC_MCP_APP_UI_BACKEND", raising=False)
+    monkeypatch.delenv("DCC_MCP_APP_UI_UIA_PROCESS_ID", raising=False)
 
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
@@ -723,9 +731,13 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
     if sys.platform == "win32":
         assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
         assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
+        assert os.environ["DCC_MCP_APP_UI_BACKEND"] == "windows-uia"
+        assert os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] == str(os.getpid())
     else:
         assert "DCC_MCP_UI_CONTROL_BACKEND" not in os.environ
         assert "DCC_MCP_UI_CONTROL_UIA_PROCESS_ID" not in os.environ
+        assert "DCC_MCP_APP_UI_BACKEND" not in os.environ
+        assert "DCC_MCP_APP_UI_UIA_PROCESS_ID" not in os.environ
 
     callbacks[0](0.0)
 
