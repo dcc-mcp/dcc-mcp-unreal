@@ -232,13 +232,13 @@ def test_data_table_creation_uses_native_pcg_point_schema() -> None:
         PCGPoint=PCGPoint,
     )
 
-    asset, created = entry._load_or_create_table(unreal, "/Game/PCG/Manhattan/DT_OSM_Manhattan_Roads", False)
+    asset, created = entry._load_or_create_table(unreal, "/Game/PCG/City/DT_OSM_City_Roads", False)
 
     assert asset is created_asset
     assert created is True
     assert calls[0][:3] == (
-        "DT_OSM_Manhattan_Roads",
-        "/Game/PCG/Manhattan",
+        "DT_OSM_City_Roads",
+        "/Game/PCG/City",
         DataTable,
     )
     assert calls[0][3].struct == "PCGPointStruct"

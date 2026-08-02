@@ -25,11 +25,11 @@ Settings or writing arbitrary files. The skill only touches the active
 project's `Config/DefaultEngine.ini`, backs up the file before a change, and
 reports when an editor restart is required.
 
-Workflow: inspect -> apply an allowlisted setting or preset -> save/restart the
+Workflow: inspect -> apply allowlisted settings -> save/restart the
 editor when required -> verify disk and runtime values with this skill plus the
 official Unreal MCP CVar/log tools.
 
-The first version intentionally scopes writes to renderer ConsoleVariables used
-by the Manhattan showcase. Inspect/verify without `keys` show only configured
-allowlisted variables, while explicit unsupported keys return an actionable
-error.
+The public skill intentionally scopes writes to a small renderer allowlist.
+Inspect/verify without `keys` show only configured allowlisted variables, while
+explicit unsupported keys return an actionable error. Project-specific presets
+belong in the consuming project's private skill layer.
