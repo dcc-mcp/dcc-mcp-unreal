@@ -13,7 +13,9 @@ from dcc_mcp_unreal.project_config import (
 def test_patch_console_variables_preserves_other_sections_and_creates_backup(tmp_path: Path):
     path = tmp_path / "Config" / "DefaultEngine.ini"
     path.parent.mkdir()
-    path.write_text("[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=4096\n\n[Other]\nKeep=1\n", encoding="utf-8")
+    path.write_text(
+        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=4096\n\n[Other]\nKeep=1\n", encoding="utf-8"
+    )
 
     result = patch_console_variables(path, {"r.LumenScene.SurfaceCache.AtlasSize": 8192})
 
@@ -42,7 +44,9 @@ def test_patch_is_idempotent(tmp_path: Path):
 def test_skill_handlers_publish_explicit_mcp_parameters():
     from dcc_mcp_core.schema import tool_spec_from_callable
 
-    script = Path(__file__).parents[1] / "src/dcc_mcp_unreal/skills/unreal-project-config/scripts/apply_project_config.py"
+    script = (
+        Path(__file__).parents[1] / "src/dcc_mcp_unreal/skills/unreal-project-config/scripts/apply_project_config.py"
+    )
     spec = importlib.util.spec_from_file_location("unreal_project_config_apply", script)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

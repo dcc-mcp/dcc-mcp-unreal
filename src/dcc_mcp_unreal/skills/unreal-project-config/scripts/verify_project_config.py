@@ -32,7 +32,9 @@ def verify_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
         if key in runtime and str(selected_disk[key]) != str(runtime[key])
     }
     return skill_success(
-        "Project renderer config verified" if not mismatches else "Project renderer config differs from the running editor",
+        "Project renderer config verified"
+        if not mismatches
+        else "Project renderer config differs from the running editor",
         prompt="Use the official Unreal MCP SearchCVars tool when runtime_values is unavailable or a restart is pending.",
         config_path=str(path),
         disk_values=selected_disk,
