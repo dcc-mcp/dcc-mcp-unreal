@@ -60,6 +60,8 @@ def _resolve_bootstrap_runtime() -> str:
 def _configure_app_ui() -> None:
     """Make the bundled app-ui skill target this Unreal Editor process."""
     if sys.platform == "win32":
+        os.environ.setdefault("DCC_MCP_APP_UI_BACKEND", "windows-uia")
+        os.environ.setdefault("DCC_MCP_APP_UI_UIA_PROCESS_ID", str(os.getpid()))
         os.environ.setdefault("DCC_MCP_UI_CONTROL_BACKEND", "windows-uia")
         os.environ.setdefault("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", str(os.getpid()))
 
