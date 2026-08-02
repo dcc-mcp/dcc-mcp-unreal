@@ -10,6 +10,7 @@ from dcc_mcp_unreal.project_config import (
     ALLOWED_CONSOLE_VARIABLES,
     project_config_path,
     read_console_variables,
+    requested_keys,
     validate_settings,
 )
 
@@ -19,7 +20,7 @@ def inspect_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
     try:
         path = project_config_path()
         values = read_console_variables(path)
-        requested = list(keys or values.keys())
+        requested = requested_keys(values, keys)
         validate_settings({key: values.get(key, 0) for key in requested})
     except (ValueError, OSError) as exc:
         return skill_error("Unable to inspect project config", str(exc))
