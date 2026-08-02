@@ -11,6 +11,17 @@ from dcc_mcp_unreal.project_config import (
 )
 
 
+def test_project_config_path_discovers_embedded_plugin_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import dcc_mcp_unreal.project_config as project_config
+
+    module_file = tmp_path / "Plugins" / "DccMcpUnreal" / "python" / "dcc_mcp_unreal" / "project_config.py"
+    (tmp_path / "Config").mkdir()
+    (tmp_path / "Config" / "DefaultEngine.ini").write_text("", encoding="utf-8")
+    monkeypatch.setattr(project_config, "__file__", str(module_file))
+
+    assert project_config.project_config_path() == tmp_path / "Config" / "DefaultEngine.ini"
+
+
 def test_patch_console_variables_preserves_other_sections_and_creates_backup(tmp_path: Path):
     path = tmp_path / "Config" / "DefaultEngine.ini"
     path.parent.mkdir()

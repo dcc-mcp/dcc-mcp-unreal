@@ -24,14 +24,29 @@ ALLOWED_CONSOLE_VARIABLES = {
 }
 
 
+def _bundled_project_dir() -> Optional[Path]:
+    """Find the Unreal project root when running from an embedded plugin.
+
+    ``unreal.Paths`` is main-thread-only in the editor.  The project plugin
+    already sits below the project root, so config reads can stay thread-safe
+    without depending on the Unreal Python API.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "Config" / "DefaultEngine.ini").is_file():
+            return parent
+    return None
+
+
 def project_config_path(project_dir: Optional[str] = None) -> Path:
     """Return the active project's DefaultEngine.ini path."""
     if project_dir:
         root = Path(project_dir).expanduser().resolve()
     else:
-        import unreal  # noqa: PLC0415
+        root = _bundled_project_dir()
+        if root is None:
+            import unreal  # noqa: PLC0415
 
-        root = Path(unreal.Paths.project_dir()).resolve()
+            root = Path(unreal.Paths.project_dir()).resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError("The Unreal project directory does not exist")
     return root / "Config" / "DefaultEngine.ini"
