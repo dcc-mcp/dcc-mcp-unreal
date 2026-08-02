@@ -1,0 +1,71 @@
+tools:
+  - name: inspect_project_config
+    description: Inspect allowlisted renderer ConsoleVariables in the active project's DefaultEngine.ini.
+    source_file: scripts/inspect_project_config.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        keys:
+          type: array
+          items: {type: string}
+          description: Optional allowlisted renderer keys; omit to inspect all keys present.
+    call_examples:
+      - arguments: {keys: ["r.LumenScene.SurfaceCache.AtlasSize"]}
+        note: Inspect the Lumen surface-cache atlas setting.
+    next-tools: [unreal_project_config__apply_project_config]
+
+  - name: apply_project_config
+    description: Apply an allowlisted renderer configuration or preset to the active project and create a .bak first.
+    source_file: scripts/apply_project_config.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: true
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        settings:
+          type: object
+          additionalProperties: {type: number}
+          description: Allowlisted renderer ConsoleVariables and their values.
+        preset:
+          type: string
+          enum: [lumen_cinematic]
+          description: Optional preset for the Manhattan cinematic renderer.
+    call_examples:
+      - arguments: {preset: lumen_cinematic}
+        note: Enable the validated Lumen/Nanite cinematic baseline.
+      - arguments: {settings: {"r.LumenScene.SurfaceCache.AtlasSize": 8192}}
+        note: Increase the Lumen surface-cache atlas and mark restart required.
+    next-tools: [unreal_project_config__inspect_project_config, unreal_project_config__verify_project_config]
+    on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: verify_project_config
+    description: Compare allowlisted renderer values on disk with values exposed by the running Unreal editor.
+    source_file: scripts/verify_project_config.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        keys:
+          type: array
+          items: {type: string}
+          description: Optional allowlisted renderer keys; omit to verify all configured keys.
+    next-tools: [unreal_official_mcp__official_mcp_bridge]
+    on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
