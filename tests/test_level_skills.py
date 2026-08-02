@@ -16,7 +16,7 @@ def test_save_level_uses_ue58_save_packages_signature():
     )
     unreal = SimpleNamespace(
         EditorLevelLibrary=SimpleNamespace(
-            get_editor_world=lambda: SimpleNamespace(get_name=lambda: "PCG_Fab_Manhattan_Showcase"),
+            get_editor_world=lambda: SimpleNamespace(get_name=lambda: "PCG_City_Showcase"),
             save_current_level=lambda: True,
         ),
         EditorLoadingAndSavingUtils=loading_and_saving,

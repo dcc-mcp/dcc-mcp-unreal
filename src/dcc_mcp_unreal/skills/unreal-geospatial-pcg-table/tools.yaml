@@ -21,7 +21,7 @@ tools:
         asset_path:
           type: string
           pattern: ^/Game/.+
-          description: Destination DataTable path, such as /Game/PCG/Manhattan/DT_OSM_Manhattan_Roads.
+          description: Destination DataTable path, such as /Game/PCG/City/DT_OSM_City_Roads.
         layer:
           type: string
           enum: [roads, pedestrian, buildings, railways, water, landuse]
@@ -64,16 +64,16 @@ tools:
       additionalProperties: true
     call_examples:
       - arguments:
-          geojson_path: C:/Project/Content/PCG/Manhattan/SourceData/openstreetmap-city.geojson
-          asset_path: /Game/PCG/Manhattan/DT_OSM_Manhattan_Roads
+          geojson_path: C:/Project/Content/PCG/City/SourceData/openstreetmap-city.geojson
+          asset_path: /Game/PCG/City/DT_OSM_City_Roads
           layer: roads
           road_spacing_m: 25
           max_points: 50000
           attribution: OpenStreetMap contributors, ODbL 1.0
-        note: Import Manhattan roads aligned to the active CesiumGeoreference.
+        note: Import city roads aligned to the active CesiumGeoreference.
       - arguments:
-          geojson_path: C:/Project/Content/PCG/Manhattan/SourceData/openstreetmap-pedestrian.geojson
-          asset_path: /Game/PCG/Manhattan/DT_OSM_Manhattan_Pedestrian
+          geojson_path: C:/Project/Content/PCG/City/SourceData/openstreetmap-pedestrian.geojson
+          asset_path: /Game/PCG/City/DT_OSM_City_Pedestrian
           layer: pedestrian
           road_spacing_m: 3
           attribution: OpenStreetMap contributors, ODbL 1.0

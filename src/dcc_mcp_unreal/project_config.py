@@ -10,9 +10,9 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 
 PROJECT_CONFIG_SECTION = "[ConsoleVariables]"
 
-# Keep the first version intentionally narrow: these are the renderer controls
-# used by the Manhattan showcase. New keys should be added with a test and a
-# documented reason, rather than opening arbitrary INI writes to the agent.
+# Keep the public surface intentionally narrow. New keys should be added with
+# a test and a documented reason, rather than opening arbitrary INI writes to
+# the agent.
 ALLOWED_CONSOLE_VARIABLES = {
     "r.EyeAdaptation.CachedLightingPreExposure": "number",
     "r.Lumen.GlobalIllumination": "integer",
@@ -21,18 +21,6 @@ ALLOWED_CONSOLE_VARIABLES = {
     "r.Nanite": "integer",
     "r.Shadow.Virtual.Enable": "integer",
     "r.TemporalAA.Upsampling": "integer",
-}
-
-PRESETS: Dict[str, Dict[str, Any]] = {
-    "lumen_cinematic": {
-        "r.EyeAdaptation.CachedLightingPreExposure": 8,
-        "r.Lumen.GlobalIllumination": 1,
-        "r.Lumen.Reflections.Allow": 1,
-        "r.LumenScene.SurfaceCache.AtlasSize": 8192,
-        "r.Nanite": 1,
-        "r.Shadow.Virtual.Enable": 1,
-        "r.TemporalAA.Upsampling": 1,
-    }
 }
 
 

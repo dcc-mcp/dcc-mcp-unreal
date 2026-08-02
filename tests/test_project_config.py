@@ -62,5 +62,5 @@ def test_skill_handlers_publish_explicit_mcp_parameters():
 
     schema = tool_spec_from_callable(module.apply_project_config).input_schema
 
-    assert set(schema["properties"]) == {"settings", "preset"}
+    assert set(schema["properties"]) == {"settings"}
     assert schema["properties"]["settings"]["anyOf"][0]["additionalProperties"] == {"type": "number"}

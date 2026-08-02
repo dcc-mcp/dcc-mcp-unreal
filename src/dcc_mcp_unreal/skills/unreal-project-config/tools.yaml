@@ -22,7 +22,7 @@ tools:
     next-tools: [unreal_project_config__apply_project_config]
 
   - name: apply_project_config
-    description: Apply an allowlisted renderer configuration or preset to the active project and create a .bak first.
+    description: Apply allowlisted renderer settings to the active project and create a .bak first.
     source_file: scripts/apply_project_config.py
     execution: sync
     affinity: main
@@ -38,13 +38,7 @@ tools:
           type: object
           additionalProperties: {type: number}
           description: Allowlisted renderer ConsoleVariables and their values.
-        preset:
-          type: string
-          enum: [lumen_cinematic]
-          description: Optional preset for the Manhattan cinematic renderer.
     call_examples:
-      - arguments: {preset: lumen_cinematic}
-        note: Enable the validated Lumen/Nanite cinematic baseline.
       - arguments: {settings: {"r.LumenScene.SurfaceCache.AtlasSize": 8192}}
         note: Increase the Lumen surface-cache atlas and mark restart required.
     next-tools: [unreal_project_config__inspect_project_config, unreal_project_config__verify_project_config]
