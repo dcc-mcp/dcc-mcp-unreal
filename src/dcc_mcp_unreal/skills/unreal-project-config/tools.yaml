@@ -40,7 +40,7 @@ tools:
           additionalProperties: {type: number}
           description: Allowlisted renderer ConsoleVariables and their values.
     call_examples:
-      - arguments: {settings: {"r.LumenScene.SurfaceCache.AtlasSize": 4096}}
+      - arguments: {settings: {"r.LumenScene.SurfaceCache.AtlasSize": 8192}}
         note: Increase the Lumen surface-cache atlas and mark restart required.
     next-tools: [unreal_project_config__inspect_project_config, unreal_project_config__verify_project_config]
     on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
