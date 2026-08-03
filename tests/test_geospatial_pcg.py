@@ -60,6 +60,31 @@ def test_classifies_osm_semantic_layers() -> None:
     assert geo.classify_feature({"amenity": "bench"}) is None
 
 
+def test_routes_overture_features_to_the_requested_single_layer() -> None:
+    geo = _module()
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": "building/1186021638",
+                "properties": {
+                    "subtype": "commercial",
+                    "sources": [{"dataset": "OpenStreetMap", "record_id": "w1186021638@1"}],
+                    "version": 1,
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
+                },
+            }
+        ],
+    }
+    result = geo.build_point_specs(payload, lambda x, y, z: (x, y, z), ["buildings"], 25.0, 10)
+    assert result["feature_counts"] == {"buildings": 1}
+    assert result["point_counts"] == {"buildings": 1}
+
+
 def test_projects_to_unreal_east_south_up_centimeters() -> None:
     geo = _module()
     origin = (-73.9855, 40.7580)

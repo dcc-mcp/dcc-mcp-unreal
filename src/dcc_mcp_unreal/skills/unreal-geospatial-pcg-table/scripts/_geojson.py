@@ -39,6 +39,15 @@ def classify_feature(properties: Mapping[str, object]) -> str | None:
     return None
 
 
+def _is_overture_feature(properties: Mapping[str, object]) -> bool:
+    """Recognize Overture's common provenance envelope without guessing its theme."""
+    return (
+        isinstance(properties.get("sources"), list)
+        and properties.get("version") is not None
+        and properties.get("subtype") is not None
+    )
+
+
 def project_east_south_up(
     longitude: float,
     latitude: float,
@@ -223,6 +232,16 @@ def build_point_specs(
             continue
         properties = feature.get("properties")
         layer = classify_feature(properties) if isinstance(properties, Mapping) else None
+        # Overture exports one theme per file but uses ``subtype`` instead of
+        # OSM's semantic keys.  A single requested layer is an explicit,
+        # lossless hint from the caller; keep the fallback bounded to that case.
+        if (
+            layer is None
+            and len(selected) == 1
+            and isinstance(properties, Mapping)
+            and _is_overture_feature(properties)
+        ):
+            layer = selected[0]
         if layer in grouped:
             grouped[layer].append(feature)
 
