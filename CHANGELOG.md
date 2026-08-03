@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.15](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.14...v0.2.15) (2026-08-03)
+
+
+### Features
+
+* add Unreal PCG refresh skill ([#141](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/141)) ([d1f32b3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d1f32b3911bd8d874aaff6740eebdaa5ff5e4a81))
+
+
+### Bug Fixes
+
+* accept Unreal material asset classes ([93a0607](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/93a060789234166e7933d6b6a97f38fb8a1fe2b2))
+* bind Unreal UI control to core contract ([5761a66](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5761a66b1186cb7a10a0e33d4d25e6c69da602b4))
+* bind Unreal UI Control to core contract ([f9dbe58](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f9dbe58a63bf147fb6284dbf3d5ec88c053d0aaf))
+* defer Unreal MCP startup until editor tick ([0f9df22](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0f9df22cf06aedd94764caf947ab4c303499b484))
+* preserve PCG refresh execution ([5fb1724](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5fb1724fe0e8d7ee97afef11b15a986904f6b32a))
+
 ## [0.2.14](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.13...v0.2.14) (2026-08-02)
 
 
