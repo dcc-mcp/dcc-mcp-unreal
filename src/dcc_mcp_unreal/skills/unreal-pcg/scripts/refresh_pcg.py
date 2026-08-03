@@ -34,18 +34,22 @@ def refresh_pcg(actor_name: str = "", **kwargs) -> dict:
     for actor in actors:
         components = actor.get_components_by_class(component_class)
         for component in components:
-            method = next(
-                (
-                    getattr(component, name, None)
-                    for name in ("rebuild_generated", "generate")
-                    if callable(getattr(component, name, None))
-                ),
-                None,
-            )
+            method_name = ""
+            method = None
+            for candidate in ("rebuild_generated", "generate"):
+                candidate_method = getattr(component, candidate, None)
+                if callable(candidate_method):
+                    method_name, method = candidate, candidate_method
+                    break
             if method is None:
                 continue
-            method()
-            refreshed.append({"actor_name": actor.get_name(), "method": method.__name__})
+            try:
+                method()
+            except TypeError as exc:
+                if method_name != "generate" or "force" not in str(exc).lower():
+                    raise
+                method(True)
+            refreshed.append({"actor_name": actor.get_name(), "method": method_name})
 
     if not refreshed:
         return skill_error(
