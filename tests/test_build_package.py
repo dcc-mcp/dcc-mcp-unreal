@@ -33,6 +33,15 @@ def _load_build_distributable_module():
     return module
 
 
+def _load_build_plugin_module():
+    script = Path(__file__).parents[1] / "packaging" / "build_plugin.py"
+    spec = importlib.util.spec_from_file_location("_test_build_plugin", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _make_engine(tmp_path: Path) -> Path:
     engine = tmp_path / "UE_5.8"
     (engine / "Engine" / "Build" / "BatchFiles").mkdir(parents=True)
@@ -44,6 +53,20 @@ def _make_engine(tmp_path: Path) -> Path:
     prerequisites.mkdir(parents=True)
     (prerequisites / "vc_redist.x64.exe").write_bytes(b"redist")
     return engine
+
+
+def test_local_core_version_must_meet_plugin_minimum(tmp_path):
+    module = _load_build_plugin_module()
+    core = tmp_path / "dcc-mcp-core"
+    core.mkdir()
+    (core / "pyproject.toml").write_text('[project]\nversion = "0.19.60"\n', encoding="utf-8")
+
+    try:
+        module.validate_local_core(core)
+    except ValueError as exc:
+        assert "0.19.77" in str(exc)
+    else:
+        raise AssertionError("stale local core must be rejected")
 
 
 def test_build_plugin_package_reuses_repository_build_script(tmp_path, monkeypatch):
