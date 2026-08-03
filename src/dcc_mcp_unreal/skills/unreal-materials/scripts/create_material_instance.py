@@ -5,6 +5,20 @@ from __future__ import annotations
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
+def _is_material_interface(asset, unreal) -> bool:
+    if isinstance(asset, unreal.MaterialInterface):
+        return True
+    get_class = getattr(asset, "get_class", None)
+    asset_class = get_class() if callable(get_class) else None
+    get_name = getattr(asset_class, "get_name", None)
+    return callable(get_name) and get_name() in {
+        "Material",
+        "MaterialInstance",
+        "MaterialInstanceConstant",
+        "MaterialInstanceDynamic",
+    }
+
+
 @skill_entry
 def create_material_instance(
     parent_material_path: str = "",
@@ -22,7 +36,7 @@ def create_material_instance(
             "parent_material_path and instance_name are required; destination_path must be under /Game",
         )
     parent = unreal.EditorAssetLibrary.load_asset(parent_material_path)
-    if parent is None or not isinstance(parent, unreal.MaterialInterface):
+    if parent is None or not _is_material_interface(parent, unreal):
         return skill_error("Material parent not found", f"'{parent_material_path}' is not a Material Interface")
 
     destination_path = destination_path.rstrip("/")
