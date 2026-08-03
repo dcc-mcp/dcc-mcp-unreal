@@ -4,7 +4,6 @@ tools:
     source_file: scripts/refresh_pcg.py
     execution: sync
     affinity: main
-    thread_affinity: main
     enforce_thread_affinity: true
     timeout_hint_secs: 120
     read_only: false
