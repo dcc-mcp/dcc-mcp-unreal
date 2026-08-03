@@ -1,0 +1,21 @@
+tools:
+  - name: refresh_pcg
+    description: Rebuild generated output for PCG components in the current Unreal level.
+    source_file: scripts/refresh_pcg.py
+    execution: sync
+    affinity: main
+    thread_affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      properties:
+        actor_name:
+          type: string
+          description: Optional exact actor name; when omitted, refresh every PCG component in the level.
+    next-tools:
+      on-success: [unreal_level__save_level]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
