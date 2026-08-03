@@ -82,6 +82,18 @@ def test_prepare_official_mcp_resolves_project_and_engine(tmp_path):
     assert plugin_dir == engine.resolve() / "Plugins"
 
 
+def test_prepare_official_mcp_resolves_equals_project_argument(tmp_path):
+    prepare = _load_prepare_module()
+    engine = tmp_path / "UE_5.8" / "Engine"
+    executable = engine / "Binaries" / "Win64" / "UnrealEditor.exe"
+    project = tmp_path / "Rain Car" / "RainCar.uproject"
+
+    project_file, plugin_dir = prepare._resolve_project_context([str(executable), f"-project={project}", "-log"])
+
+    assert project_file == project.resolve()
+    assert plugin_dir == engine.resolve() / "Plugins"
+
+
 def test_prepare_official_mcp_writes_autostart_idempotently(tmp_path):
     prepare = _load_prepare_module()
     config_path = tmp_path / "DefaultEditorPerProjectUserSettings.ini"
