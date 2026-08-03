@@ -210,6 +210,43 @@ def test_geometry_cache_material_assignment_updates_and_saves_asset() -> None:
     editor_assets.save_loaded_asset.assert_called_once_with(cache, only_if_is_dirty=False)
 
 
+def test_material_assignment_accepts_ue_material_class_not_python_interface_subclass() -> None:
+    class Material:
+        def get_class(self):
+            return type("Class", (), {"get_name": lambda _self: "Material"})()
+
+    class StaticMesh:
+        def set_material(self, slot, value) -> None:
+            self.material = (slot, value)
+
+    material = Material()
+    mesh = StaticMesh()
+    editor_assets = MagicMock()
+    editor_assets.load_asset.side_effect = lambda path: mesh if path.endswith("SM_Road_Straight") else material
+    editor_assets.save_loaded_asset.return_value = True
+
+    unreal = types.ModuleType("unreal")
+    unreal.MaterialInterface = type("MaterialInterface", (), {})
+    unreal.StaticMesh = StaticMesh
+    unreal.GeometryCache = type("GeometryCache", (), {})
+    unreal.EditorAssetLibrary = editor_assets
+
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module = _load_script(
+            "assign_native_material",
+            MATERIAL_SKILL / "scripts" / "assign_material.py",
+        )
+        result = module.assign_material(
+            target_kind="static_mesh",
+            target_path="/Game/City/Roads/SM_Road_Straight",
+            material_path="/Game/City/Materials/M_Road012A_PBR",
+            slot_index=1,
+        )
+
+    assert result["success"] is True
+    assert mesh.material == (1, material)
+
+
 def test_geometry_cache_parameters_are_declared_in_tool_schemas() -> None:
     asset_tools = yaml.safe_load((ASSET_SCRIPTS.parent / "tools.yaml").read_text(encoding="utf-8"))["tools"]
     import_schema = next(tool for tool in asset_tools if tool["name"] == "import_asset")["input_schema"]

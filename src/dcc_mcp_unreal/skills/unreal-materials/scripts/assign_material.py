@@ -5,6 +5,20 @@ from __future__ import annotations
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
+def _is_material_interface(asset, unreal) -> bool:
+    if isinstance(asset, unreal.MaterialInterface):
+        return True
+    get_class = getattr(asset, "get_class", None)
+    asset_class = get_class() if callable(get_class) else None
+    get_name = getattr(asset_class, "get_name", None)
+    return callable(get_name) and get_name() in {
+        "Material",
+        "MaterialInstance",
+        "MaterialInstanceConstant",
+        "MaterialInstanceDynamic",
+    }
+
+
 @skill_entry
 def assign_material(
     target_kind: str = "",
@@ -22,7 +36,7 @@ def assign_material(
             "target_kind must be static_mesh, geometry_cache, or actor and slot_index must be non-negative",
         )
     material = unreal.EditorAssetLibrary.load_asset(material_path)
-    if material is None or not isinstance(material, unreal.MaterialInterface):
+    if material is None or not _is_material_interface(material, unreal):
         return skill_error("Material not found", f"'{material_path}' is not a Material Interface")
 
     if target_kind == "static_mesh":
