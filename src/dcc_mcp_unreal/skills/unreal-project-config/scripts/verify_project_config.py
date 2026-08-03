@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 from dcc_mcp_unreal.project_config import (
+    ALLOWED_CONSOLE_VARIABLES,
     project_config_path,
     read_console_variables,
     runtime_console_values,
@@ -15,14 +16,15 @@ from dcc_mcp_unreal.project_config import (
 
 
 @skill_entry
-def verify_project_config(keys: List[str], **kwargs) -> dict:
+def verify_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
     try:
-        if not keys:
-            raise ValueError("Pass one or more allowlisted renderer keys in 'keys'")
         path = project_config_path()
         disk = read_console_variables(path)
-        requested = list(keys)
-        validate_settings({key: disk.get(key, 0) for key in requested})
+        requested = list(keys) if keys is not None else [key for key in disk if key in ALLOWED_CONSOLE_VARIABLES]
+        if keys is not None and not requested:
+            raise ValueError("Pass one or more allowlisted renderer keys in 'keys'")
+        if requested:
+            validate_settings({key: disk.get(key, 0) for key in requested})
         runtime = runtime_console_values(requested)
     except (ValueError, OSError) as exc:
         return skill_error("Unable to verify project config", str(exc))

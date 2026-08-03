@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
@@ -15,14 +15,15 @@ from dcc_mcp_unreal.project_config import (
 
 
 @skill_entry
-def inspect_project_config(keys: List[str], **kwargs) -> dict:
+def inspect_project_config(keys: Optional[List[str]] = None, **kwargs) -> dict:
     try:
-        if not keys:
-            raise ValueError("Pass one or more allowlisted renderer keys in 'keys'")
         path = project_config_path()
         values = read_console_variables(path)
-        requested = list(keys)
-        validate_settings({key: values.get(key, 0) for key in requested})
+        requested = list(keys) if keys is not None else [key for key in ALLOWED_CONSOLE_VARIABLES if key in values]
+        if keys is not None and not requested:
+            raise ValueError("Pass one or more allowlisted renderer keys in 'keys'")
+        if requested:
+            validate_settings({key: values.get(key, 0) for key in requested})
     except (ValueError, OSError) as exc:
         return skill_error("Unable to inspect project config", str(exc))
 

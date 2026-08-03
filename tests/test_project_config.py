@@ -69,3 +69,32 @@ def test_skill_handlers_publish_explicit_mcp_parameters():
 
     assert set(schema["properties"]) == {"settings"}
     assert schema["properties"]["settings"]["anyOf"][0]["additionalProperties"] == {"type": "number"}
+
+
+def test_project_config_handlers_default_to_configured_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = Path(__file__).parents[1]
+    path = tmp_path / "Config" / "DefaultEngine.ini"
+    path.parent.mkdir()
+    path.write_text("[ConsoleVariables]\nr.Nanite=1\nr.Private=2\n", encoding="utf-8")
+
+    for name, filename in (
+        ("inspect_project_config", "inspect_project_config.py"),
+        ("verify_project_config", "verify_project_config.py"),
+    ):
+        script = root / "src/dcc_mcp_unreal/skills/unreal-project-config/scripts" / filename
+        spec = importlib.util.spec_from_file_location(f"unreal_project_config_{name}", script)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        monkeypatch.setattr(module, "project_config_path", lambda: path)
+        if name == "verify_project_config":
+            monkeypatch.setattr(module, "runtime_console_values", lambda keys: {})
+
+        result = getattr(module, name)()
+
+        assert result["success"] is True
+        assert result["context"]["values" if name == "inspect_project_config" else "disk_values"] == {"r.Nanite": "1"}
+
+        unsupported = getattr(module, name)(keys=["r.Private"])
+        assert unsupported["success"] is False
+        assert "Unsupported renderer setting" in unsupported["error"]
