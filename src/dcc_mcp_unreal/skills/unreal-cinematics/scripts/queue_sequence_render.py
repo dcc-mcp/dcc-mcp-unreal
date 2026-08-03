@@ -29,7 +29,7 @@ def _validate_lumen_render_config() -> dict | None:
     try:
         path = project_config_path()
         values = read_console_variables(path)
-    except (ImportError, OSError, ValueError):
+    except (AttributeError, ImportError, OSError, ValueError):
         return None
 
     key = "r.LumenScene.SurfaceCache.AtlasSize"
