@@ -64,19 +64,21 @@ def test_routes_overture_features_to_the_requested_single_layer() -> None:
     geo = _module()
     payload = {
         "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "id": "building/1186021638",
-            "properties": {
-                "subtype": "commercial",
-                "sources": [{"dataset": "OpenStreetMap", "record_id": "w1186021638@1"}],
-                "version": 1,
-            },
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
-            },
-        }],
+        "features": [
+            {
+                "type": "Feature",
+                "id": "building/1186021638",
+                "properties": {
+                    "subtype": "commercial",
+                    "sources": [{"dataset": "OpenStreetMap", "record_id": "w1186021638@1"}],
+                    "version": 1,
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
+                },
+            }
+        ],
     }
     result = geo.build_point_specs(payload, lambda x, y, z: (x, y, z), ["buildings"], 25.0, 10)
     assert result["feature_counts"] == {"buildings": 1}
