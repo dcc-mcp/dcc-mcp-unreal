@@ -253,7 +253,7 @@ def test_queue_rejects_unsafe_lumen_atlas_before_allocating_job(tmp_path):
     unreal, _subsystem, queue, _output_setting = _render_unreal()
     config_path = tmp_path / "DefaultEngine.ini"
     config_path.write_text(
-        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=8192\n",
+        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=16384\n",
         encoding="utf-8",
     )
     with patch.dict(sys.modules, {"unreal": unreal}):

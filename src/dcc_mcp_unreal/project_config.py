@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 PROJECT_CONFIG_SECTION = "[ConsoleVariables]"
-MAX_LUMEN_ATLAS_SIZE = 4096
+# High-density city scenes can exceed the default atlas without making the
+# setting unbounded. 8192 remains an explicit, power-of-two opt-in.
+MAX_LUMEN_ATLAS_SIZE = 8192
 
 # Keep the public surface intentionally narrow. New keys should be added with
 # a test and a documented reason, rather than opening arbitrary INI writes to
