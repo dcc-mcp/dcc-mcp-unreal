@@ -649,6 +649,7 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
     unregistered = []
     entries = []
     submenus = []
+    starts = []
 
     class FakeHandle:
         @staticmethod
@@ -657,7 +658,7 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
 
     fake_package = types.ModuleType("dcc_mcp_unreal")
     fake_package.__path__ = []
-    fake_package.start_server = lambda **_kwargs: FakeHandle()
+    fake_package.start_server = lambda **_kwargs: starts.append(True) or FakeHandle()
     fake_package.stop_server = lambda: None
     fake_version = types.ModuleType("dcc_mcp_unreal.__version__")
     fake_version.__version__ = "0.2.0"
@@ -728,6 +729,7 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
     script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
     runpy.run_path(str(script), run_name="dcc_mcp_unreal_test_init")
     assert len(callbacks) == 1
+    assert starts == []
     if sys.platform == "win32":
         assert os.environ["DCC_MCP_UI_CONTROL_BACKEND"] == "windows-uia"
         assert os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] == str(os.getpid())
@@ -740,6 +742,7 @@ def test_init_unreal_registers_submenu_entries_and_releases_one_shot_tick(monkey
         assert "DCC_MCP_APP_UI_UIA_PROCESS_ID" not in os.environ
 
     callbacks[0](0.0)
+    assert starts == [True]
 
     assert submenus == [
         {
