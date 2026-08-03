@@ -249,6 +249,29 @@ def test_queue_rejects_unsaved_editor_level_before_allocating_job():
     queue.allocate_new_job.assert_not_called()
 
 
+def test_queue_rejects_unsafe_lumen_atlas_before_allocating_job(tmp_path):
+    unreal, _subsystem, queue, _output_setting = _render_unreal()
+    config_path = tmp_path / "DefaultEngine.ini"
+    config_path.write_text(
+        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=8192\n",
+        encoding="utf-8",
+    )
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        module = _load_script(
+            "queue_sequence_render_unsafe_lumen",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/queue_sequence_render.py",
+        )
+        module.project_config_path = lambda: config_path
+        result = module.queue_sequence_render(
+            sequence_path="/Game/Sequences/Test",
+            output_path="C:/renders",
+        )
+
+    assert result["success"] is False
+    assert result["message"] == "Unsafe Lumen renderer config"
+    queue.allocate_new_job.assert_not_called()
+
+
 def test_queue_fails_cleanly_when_movie_render_queue_plugin_is_disabled():
     unreal, _subsystem, queue, _output_setting = _render_unreal()
     del unreal.MoviePipelineQueueSubsystem
