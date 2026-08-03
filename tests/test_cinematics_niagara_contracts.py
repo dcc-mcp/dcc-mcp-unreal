@@ -441,6 +441,57 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
     section.set_range.assert_called_once_with(24, 48)
 
 
+def test_camera_cut_reuses_existing_named_binding():
+    import dcc_mcp_unreal.api as api_module
+
+    unreal = types.ModuleType("unreal")
+    unreal.log = MagicMock()
+
+    class CameraCutTrack:
+        pass
+
+    class ObjectBindingId:
+        def set_editor_property(self, name, value):
+            setattr(self, name, value)
+
+    unreal.MovieSceneCameraCutTrack = CameraCutTrack
+    unreal.MovieSceneObjectBindingID = ObjectBindingId
+    section = MagicMock()
+    track = CameraCutTrack()
+    track.add_section = MagicMock(return_value=section)
+    binding = MagicMock()
+    binding.get_display_name.return_value = "HeroCamera"
+    binding.get_id.return_value = object()
+    sequence = MagicMock()
+    sequence.get_tracks.return_value = [track]
+    sequence.get_bindings.return_value = [binding]
+    sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=30, denominator=1)
+    unreal.load_asset = MagicMock(return_value=sequence)
+    unreal.EditorAssetLibrary = MagicMock()
+    unreal.EditorAssetLibrary.save_loaded_asset.return_value = True
+
+    with (
+        patch.dict(sys.modules, {"unreal": unreal}),
+        patch.object(api_module, "find_level_actor", return_value=object(), create=True),
+    ):
+        module = _load_script(
+            "add_camera_cut_reuse_contract",
+            "src/dcc_mcp_unreal/skills/unreal-cinematics/scripts/add_camera_cut_track.py",
+        )
+        result = module.add_camera_cut_track(
+            sequence_path="/Game/Cinematics/LS_Test",
+            camera_name="CameraActor",
+            binding_name="HeroCamera",
+            start_time=0.0,
+            end_time=1.0,
+        )
+
+    assert result["success"] is True
+    sequence.add_possessable.assert_not_called()
+    binding_id = section.set_camera_binding_id.call_args.args[0]
+    assert binding_id.guid is binding.get_id.return_value
+
+
 def test_sequence_info_normalizes_unreal_text_and_detects_camera_track_by_type():
     unreal = types.ModuleType("unreal")
     unreal.log = MagicMock()
