@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
+from dcc_mcp_unreal.project_config import project_config_path, read_console_variables, validate_settings
 
 _OUTPUT_CLASSES = {
     "png": "MoviePipelineImageSequenceOutput_PNG",
@@ -21,6 +22,29 @@ _OUTPUT_CLASSES = {
 def _is_absolute_output_path(value: str) -> bool:
     """Accept explicit Windows or POSIX absolute paths on every agent platform."""
     return PureWindowsPath(value).is_absolute() or PurePosixPath(value).is_absolute()
+
+
+def _validate_lumen_render_config() -> dict | None:
+    """Reject known-unsafe project Lumen settings before MRQ touches the renderer."""
+    try:
+        path = project_config_path()
+        values = read_console_variables(path)
+    except (AttributeError, ImportError, OSError, ValueError):
+        return None
+
+    key = "r.LumenScene.SurfaceCache.AtlasSize"
+    if key not in values:
+        return None
+    try:
+        validate_settings({key: values[key]})
+    except ValueError as exc:
+        return unreal_error(
+            "Unsafe Lumen renderer config",
+            str(exc),
+            config_path=str(path),
+            setting=key,
+        )
+    return None
 
 
 @skill_entry
@@ -87,6 +111,10 @@ def queue_sequence_render(
         import unreal  # noqa: PLC0415
     except ImportError:
         return unreal_error("Unreal Engine not available", "ImportError: unreal module not found")
+
+    config_error = _validate_lumen_render_config()
+    if config_error is not None:
+        return config_error
 
     render_queue = None
     job = None
