@@ -25,13 +25,13 @@ def test_patch_console_variables_preserves_other_sections_and_creates_backup(tmp
     path = tmp_path / "Config" / "DefaultEngine.ini"
     path.parent.mkdir()
     path.write_text(
-        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=4096\n\n[Other]\nKeep=1\n", encoding="utf-8"
+        "[ConsoleVariables]\nr.LumenScene.SurfaceCache.AtlasSize=2048\n\n[Other]\nKeep=1\n", encoding="utf-8"
     )
 
-    result = patch_console_variables(path, {"r.LumenScene.SurfaceCache.AtlasSize": 8192})
+    result = patch_console_variables(path, {"r.LumenScene.SurfaceCache.AtlasSize": 4096})
 
-    assert result["changed"] == {"r.LumenScene.SurfaceCache.AtlasSize": 8192}
-    assert read_console_variables(path)["r.LumenScene.SurfaceCache.AtlasSize"] == "8192"
+    assert result["changed"] == {"r.LumenScene.SurfaceCache.AtlasSize": 4096}
+    assert read_console_variables(path)["r.LumenScene.SurfaceCache.AtlasSize"] == "4096"
     assert "Keep=1" in path.read_text(encoding="utf-8")
     assert path.with_suffix(".ini.bak").exists()
 
@@ -41,6 +41,8 @@ def test_validate_settings_rejects_unknown_keys_and_invalid_atlas():
         validate_settings({"r.Unknown": 1})
     with pytest.raises(ValueError, match="power of two"):
         validate_settings({"r.LumenScene.SurfaceCache.AtlasSize": 5000})
+    with pytest.raises(ValueError, match="between 1024 and 4096"):
+        validate_settings({"r.LumenScene.SurfaceCache.AtlasSize": 8192})
 
 
 def test_patch_is_idempotent(tmp_path: Path):

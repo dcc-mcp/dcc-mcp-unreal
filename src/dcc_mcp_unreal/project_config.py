@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 PROJECT_CONFIG_SECTION = "[ConsoleVariables]"
+MAX_LUMEN_ATLAS_SIZE = 4096
 
 # Keep the public surface intentionally narrow. New keys should be added with
 # a test and a documented reason, rather than opening arbitrary INI writes to
@@ -74,8 +75,8 @@ def validate_settings(settings: Mapping[str, Any]) -> Dict[str, Any]:
                 parsed = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key} must be a positive power of two") from exc
-            if parsed < 1024 or parsed > 32768 or parsed & (parsed - 1):
-                raise ValueError(f"{key} must be a power of two between 1024 and 32768")
+            if parsed < 1024 or parsed > MAX_LUMEN_ATLAS_SIZE or parsed & (parsed - 1):
+                raise ValueError(f"{key} must be a power of two between 1024 and {MAX_LUMEN_ATLAS_SIZE}")
             normalized[key] = parsed
         elif kind == "integer":
             if isinstance(value, bool):
