@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,7 @@ DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "DccMcpUnreal"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.2"))
 DEFAULT_CORE_ROOT = Path(os.environ.get("DCC_MCP_CORE_ROOT", str(REPO_ROOT.parent / "dcc-mcp-core")))
 DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.19.77,<1.0.0")
+MIN_CORE_VERSION = (0, 19, 77)
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 
 
@@ -28,6 +30,20 @@ def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:
 
 def _quote(value: str) -> str:
     return '"{}"'.format(value) if " " in value else value
+
+
+def validate_local_core(core_root: Path) -> None:
+    """Reject a local core checkout older than the plugin's runtime contract."""
+    metadata = core_root / "pyproject.toml"
+    if not metadata.is_file():
+        raise FileNotFoundError("Local dcc-mcp-core checkout has no pyproject.toml: {}".format(core_root))
+    match = re.search(r'^version\s*=\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', metadata.read_text(encoding="utf-8"), re.MULTILINE)
+    if not match:
+        raise ValueError("Cannot determine dcc-mcp-core version from {}".format(metadata))
+    version = tuple(int(part) for part in match.group(1).split("."))
+    if version < MIN_CORE_VERSION:
+        required = ".".join(str(part) for part in MIN_CORE_VERSION)
+        raise ValueError("Local dcc-mcp-core {} is too old; dcc-mcp-unreal requires >= {}".format(match.group(1), required))
 
 
 def copytree_clean(src: Path, dst: Path) -> None:
@@ -115,6 +131,7 @@ def install_python_payload(
         elif use_local_core:
             if not core_root.exists():
                 raise FileNotFoundError("Local dcc-mcp-core checkout not found: {}".format(core_root))
+            validate_local_core(core_root)
             run(pip_base + ["--no-deps", str(core_root)])
         else:
             run(
