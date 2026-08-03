@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.16](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.15...v0.2.16) (2026-08-03)
+
+
+### Bug Fixes
+
+* cap unsafe Lumen atlas settings ([453a45a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/453a45a74d9b879cb1d3523db3875d4cb49b697d))
+* preflight unsafe Lumen config before MRQ ([7ae80ff](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7ae80ffdc938162878ee2ca4a9213f2c913fa5cf))
+* reject stale local core when packaging plugin ([1fee083](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1fee083da781969b1a1d78f95060b09d41b4d8ab))
+* tolerate non-editor config preflight ([32af88b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/32af88ba73a84a9fa3ca425a1fe593421553271d))
+
 ## [0.2.15](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.14...v0.2.15) (2026-08-03)
 
 
