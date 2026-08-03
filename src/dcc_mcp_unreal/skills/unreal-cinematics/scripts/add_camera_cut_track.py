@@ -9,6 +9,17 @@ from dcc_mcp_core.skill import skill_entry
 from dcc_mcp_unreal.api import find_level_actor, unreal_error, unreal_from_exception, unreal_success
 
 
+def _find_named_binding(sequence, binding_name: str):
+    get_bindings = getattr(sequence, "get_bindings", None)
+    if not callable(get_bindings):
+        return None
+    for binding in get_bindings() or []:
+        get_display_name = getattr(binding, "get_display_name", None)
+        if callable(get_display_name) and str(get_display_name()) == binding_name:
+            return binding
+    return None
+
+
 @skill_entry
 def add_camera_cut_track(
     sequence_path: str,
@@ -83,11 +94,13 @@ def add_camera_cut_track(
         if camera_cut_track is None:
             return unreal_error("Failed to add camera cut track", "The sequence rejected the camera cut track.")
 
-        # Bind the camera
-        camera_binding = sequence.add_possessable(camera_actor)
+        # Reuse an existing possessable so camera cuts evaluate its transform track.
+        camera_binding = _find_named_binding(sequence, resolved_binding)
+        if camera_binding is None:
+            camera_binding = sequence.add_possessable(camera_actor)
         if camera_binding is None:
             return unreal_error("Failed to add camera binding", f"Could not bind camera '{camera_name}'.")
-        if binding_name:
+        if binding_name and str(camera_binding.get_display_name()) != binding_name:
             camera_binding.set_display_name(binding_name)
 
         # Add camera cut section
