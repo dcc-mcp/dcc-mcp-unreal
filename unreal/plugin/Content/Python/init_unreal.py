@@ -537,26 +537,18 @@ def _show_url_dialog() -> None:
 
 
 def _initialize() -> None:
-    """Plugin initialisation: start server and register menus."""
+    """Defer embedded startup until Unreal has entered its editor tick."""
     global _tick_handle
     if _runtime_mode == "sidecar":
         logger.info("[dcc-mcp-unreal] Standalone sidecar selected; skipping the embedded server")
         return
     try:
-        _start()
-    except Exception as exc:
-        logger.error("[dcc-mcp-unreal] Initialisation failed: %s", exc)
-        return
-
-    # Register menus only when running in editor (not commandlet / game)
-    if os.environ.get("DCC_MCP_UNREAL_DISABLE_MENUS", "").lower() in ("1", "true", "yes"):
-        return
-
-    try:
         import unreal  # noqa: PLC0415
 
+        # init_unreal.py is also evaluated by commandlets and MRQ. Starting the
+        # embedded HTTP server there can block engine startup; only the editor
+        # needs the interactive MCP lifecycle.
         if unreal.is_editor():
-            # Defer menu registration until after the main menu bar is ready
             _tick_handle = unreal.register_slate_post_tick_callback(_on_first_tick)
     except Exception as exc:
         logger.debug("[dcc-mcp-unreal] Menu registration deferred: %s", exc)
@@ -568,6 +560,11 @@ _tick_handle = None
 
 def _on_first_tick(delta: float) -> None:
     global _tick_handle
+    if _handle is None:
+        try:
+            _start()
+        except Exception as exc:
+            logger.error("[dcc-mcp-unreal] Initialisation failed: %s", exc)
     _register_menus()
     # Unregister this callback after first run
     try:
