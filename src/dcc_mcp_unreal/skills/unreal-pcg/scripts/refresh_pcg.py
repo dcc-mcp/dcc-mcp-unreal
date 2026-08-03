@@ -44,7 +44,12 @@ def refresh_pcg(actor_name: str = "", **kwargs) -> dict:
             )
             if method is None:
                 continue
-            method()
+            try:
+                method()
+            except TypeError as exc:
+                if method_name != "generate" or "force" not in str(exc).lower():
+                    raise
+                method(True)
             refreshed.append({"actor_name": actor.get_name(), "method": method.__name__})
 
     if not refreshed:
