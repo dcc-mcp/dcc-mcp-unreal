@@ -114,9 +114,21 @@ def add_camera_cut_track(
         if camera_cut_section is None:
             return unreal_error("Failed to add camera cut section", "The camera cut track rejected a new section.")
         camera_cut_section.set_range(start_frame, end_frame)
-        camera_binding_id = unreal.MovieSceneObjectBindingID()
-        camera_binding_id.set_editor_property("guid", camera_binding.get_id())
-        camera_cut_section.set_camera_binding_id(camera_binding_id)
+        # Ask the sequence for the binding ID so it carries the correct local
+        # binding space. A GUID-only struct can silently fall back to the
+        # actor's level transform during MRQ renders.
+        get_binding_id = getattr(sequence, "get_binding_id", None)
+        if callable(get_binding_id):
+            camera_cut_section.set_camera_binding_id(get_binding_id(camera_binding))
+        else:
+            set_camera_guid = getattr(camera_cut_section, "set_camera_guid", None)
+            if callable(set_camera_guid):
+                set_camera_guid(camera_binding.get_id())
+                camera_binding_id = None
+            else:
+                camera_binding_id = unreal.MovieSceneObjectBindingID()
+                camera_binding_id.set_editor_property("guid", camera_binding.get_id())
+                camera_cut_section.set_camera_binding_id(camera_binding_id)
 
         if not unreal.EditorAssetLibrary.save_loaded_asset(sequence):
             return unreal_error("Failed to save Level Sequence", f"Unreal could not save '{sequence_path}'.")

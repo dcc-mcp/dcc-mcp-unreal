@@ -388,7 +388,7 @@ def test_playback_range_uses_frame_rate_denominator_and_fails_closed():
     assert result["success"] is False
 
 
-def test_camera_cut_wraps_guid_in_object_binding_id():
+def test_camera_cut_uses_sequence_binding_id():
     import dcc_mcp_unreal.api as api_module
 
     unreal = types.ModuleType("unreal")
@@ -414,6 +414,7 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
     sequence.get_tracks.return_value = []
     sequence.add_track.return_value = track
     sequence.add_possessable.return_value = binding
+    sequence.get_binding_id.return_value = binding_guid
     sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=24000, denominator=1001)
     unreal.load_asset = MagicMock(return_value=sequence)
     unreal.EditorAssetLibrary = MagicMock()
@@ -435,9 +436,7 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
         )
 
     assert result["success"] is True
-    binding_id = section.set_camera_binding_id.call_args.args[0]
-    assert isinstance(binding_id, ObjectBindingId)
-    assert binding_id.guid is binding_guid
+    section.set_camera_binding_id.assert_called_once_with(binding_guid)
     section.set_range.assert_called_once_with(24, 48)
 
 
