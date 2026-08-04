@@ -327,3 +327,4 @@ def test_transform_keyframes_support_linear_interpolation():
     assert "enum: [default, linear, constant]" in tools
     assert 'get_editor_property("channel_name")' in script
     assert "channel.add_key(key_time, value, 0.0)" in script
+    assert "get_tick_resolution" in script

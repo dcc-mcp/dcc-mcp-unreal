@@ -410,6 +410,7 @@ def test_camera_cut_uses_sequence_binding_id():
     sequence.add_track.return_value = track
     sequence.add_possessable.return_value = binding
     sequence.get_binding_id.return_value = binding_guid
+    sequence.get_tick_resolution.return_value = types.SimpleNamespace(numerator=24000, denominator=1)
     sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=24000, denominator=1001)
     unreal.load_asset = MagicMock(return_value=sequence)
     unreal.EditorAssetLibrary = MagicMock()
@@ -432,7 +433,7 @@ def test_camera_cut_uses_sequence_binding_id():
 
     assert result["success"] is True
     section.set_camera_binding_id.assert_called_once_with(binding_guid)
-    section.set_range.assert_called_once_with(24, 48)
+    section.set_range.assert_called_once_with(24024, 48048)
 
 
 def test_camera_cut_reuses_existing_named_binding():
@@ -455,6 +456,7 @@ def test_camera_cut_reuses_existing_named_binding():
     sequence.get_tracks.return_value = [track]
     sequence.get_bindings.return_value = [binding]
     sequence.get_binding_id.return_value = binding.get_id.return_value
+    sequence.get_tick_resolution.return_value = types.SimpleNamespace(numerator=30, denominator=1)
     sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=30, denominator=1)
     unreal.load_asset = MagicMock(return_value=sequence)
     unreal.EditorAssetLibrary = MagicMock()

@@ -104,11 +104,19 @@ def add_camera_cut_track(
             camera_binding.set_display_name(binding_name)
 
         # Add camera cut section
-        display_rate = sequence.get_display_rate()
-        if display_rate.numerator <= 0 or display_rate.denominator <= 0:
+        get_tick_resolution = getattr(sequence, "get_tick_resolution", None)
+        tick_resolution = get_tick_resolution() if callable(get_tick_resolution) else None
+        if tick_resolution is None:
+            tick_resolution = sequence.get_display_rate()
+        try:
+            tick_numerator = float(tick_resolution.numerator)
+            tick_denominator = float(tick_resolution.denominator)
+        except (AttributeError, TypeError, ValueError):
+            tick_numerator = tick_denominator = 0.0
+        if tick_numerator <= 0 or tick_denominator <= 0:
             return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
-        start_frame = round(start_time * display_rate.numerator / display_rate.denominator)
-        end_frame = round(end_time * display_rate.numerator / display_rate.denominator)
+        start_frame = round(start_time * tick_numerator / tick_denominator)
+        end_frame = round(end_time * tick_numerator / tick_denominator)
 
         camera_cut_section = camera_cut_track.add_section()
         if camera_cut_section is None:
