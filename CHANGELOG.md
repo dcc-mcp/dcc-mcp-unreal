@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.17](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.16...v0.2.17) (2026-08-04)
+
+
+### Bug Fixes
+
+* allow explicit 8192 Lumen atlas ([#151](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/151)) ([2e87893](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2e87893caf5eabc5c8f131d24522e1b93e99c339))
+* default project config inspection keys ([4eb9589](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4eb9589f112da20ff450b5038d0e910fb8a26597))
+* default project config inspection keys ([#152](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/152)) ([d565fa2](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d565fa227eb365b41f9227e7aff1708e3562a7d9))
+* parse Unreal project argument ([1fd0d96](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1fd0d96f6329cafdde892fd79cdee2109394d602))
+* parse Unreal project argument ([bf7e602](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/bf7e602e37ac7e541fa1199ec92bbaf9288f739b))
+* reuse cinematic camera bindings ([67cc872](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/67cc8720d566bf249e27c677a68f5a4de482e2ce))
+* reuse cinematic camera bindings ([10d2551](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/10d255168950f40061e93b2927fd681643d4426a))
+* support Overture GeoJSON theme hints ([9ccfe77](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/9ccfe779d414b0b396a6ccb62ba6d42f06c98558))
+
 ## [0.2.16](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.15...v0.2.16) (2026-08-03)
 
 
