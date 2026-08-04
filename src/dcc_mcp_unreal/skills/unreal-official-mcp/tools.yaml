@@ -53,6 +53,11 @@ tools:
           type: string
         arguments:
           type: object
+        timeout:
+          type: number
+          minimum: 1
+          default: 15
+          description: Overall HTTP operation timeout in seconds; raise for large PCG graphs or Data View calls.
     output_schema:
       type: object
       additionalProperties: true

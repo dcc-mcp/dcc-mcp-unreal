@@ -171,10 +171,11 @@ def bridge_official_mcp(
     toolset_name: str = "",
     tool_name: str = "",
     arguments: Optional[Mapping[str, Any]] = None,
+    timeout: float = 15.0,
 ) -> Dict[str, Any]:
     """Execute one bounded operation against Epic's optional UE 5.8 MCP server."""
     operation = operation.strip().lower()
-    client = OfficialMcpClient(endpoint)
+    client = OfficialMcpClient(endpoint, timeout=timeout)
     with client.connected():
         tool_list = client.list_tools()
         names = _tool_names(tool_list)
