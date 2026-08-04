@@ -17,6 +17,7 @@ def official_mcp_bridge(
     toolset_name: str = "",
     tool_name: str = "",
     arguments: Optional[Dict[str, Any]] = None,
+    timeout: float = 15.0,
     **kwargs,
 ) -> dict:
     try:
@@ -37,6 +38,7 @@ def official_mcp_bridge(
             toolset_name=toolset_name,
             tool_name=tool_name,
             arguments=arguments,
+            timeout=timeout,
         )
     except OfficialMcpError as exc:
         return skill_error(

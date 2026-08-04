@@ -132,6 +132,7 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         toolset_name="ActorTools",
         tool_name="get_selected_actors",
         arguments={"include_components": False},
+        timeout=42.0,
     )
 
     assert result == {"structuredContent": {"ok": True}}
@@ -145,7 +146,7 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         },
     }
     assert requests[-1].method == "DELETE"
-    assert timeouts == [15.0, 14.0, 13.0, 12.0, 11.0]
+    assert timeouts == [42.0, 41.0, 40.0, 39.0, 38.0]
 
 
 def test_client_propagates_inner_tool_error(monkeypatch):
