@@ -106,17 +106,37 @@ def add_transform_keyframe(
         channels = transform_section.get_all_channels()
 
         # Set keyframes
-        display_rate = sequence.get_display_rate()
-        if display_rate.numerator <= 0 or display_rate.denominator <= 0:
+        get_tick_resolution = getattr(sequence, "get_tick_resolution", None)
+        tick_resolution = get_tick_resolution() if callable(get_tick_resolution) else None
+        if tick_resolution is None:
+            tick_resolution = sequence.get_display_rate()
+        try:
+            tick_numerator = float(tick_resolution.numerator)
+            tick_denominator = float(tick_resolution.denominator)
+        except (AttributeError, TypeError, ValueError):
+            tick_numerator = tick_denominator = 0.0
+        if tick_numerator <= 0 or tick_denominator <= 0:
             return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
-        key_time = unreal.FrameNumber(round(time * display_rate.numerator / display_rate.denominator))
+        key_time = unreal.FrameNumber(round(time * tick_numerator / tick_denominator))
         interpolation_mode = {
             "linear": unreal.RichCurveInterpMode.RCIM_LINEAR,
             "constant": unreal.RichCurveInterpMode.RCIM_CONSTANT,
         }.get(interpolation)
 
+        def get_channel_name(channel) -> str:
+            get_editor_property = getattr(channel, "get_editor_property", None)
+            if callable(get_editor_property):
+                try:
+                    return str(get_editor_property("channel_name"))
+                except Exception:
+                    pass
+            return str(channel.get_name())
+
         def add_key(channel, value: float) -> None:
-            key = channel.add_key(key_time, value)
+            try:
+                key = channel.add_key(key_time, value, 0.0)
+            except TypeError:
+                key = channel.add_key(key_time, value)
             if interpolation_mode is not None:
                 key.set_interpolation_mode(interpolation_mode)
 
@@ -124,7 +144,7 @@ def add_transform_keyframe(
 
         if location is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Location.X" in channel_name:
                     add_key(channel, float(location[0]))
                     keys_added += 1
@@ -137,7 +157,7 @@ def add_transform_keyframe(
 
         if rotation is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Rotation.X" in channel_name:
                     add_key(channel, float(rotation[2]))
                     keys_added += 1
@@ -150,7 +170,7 @@ def add_transform_keyframe(
 
         if scale is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Scale.X" in channel_name:
                     add_key(channel, float(scale[0]))
                     keys_added += 1

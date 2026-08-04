@@ -104,19 +104,39 @@ def add_camera_cut_track(
             camera_binding.set_display_name(binding_name)
 
         # Add camera cut section
-        display_rate = sequence.get_display_rate()
-        if display_rate.numerator <= 0 or display_rate.denominator <= 0:
+        get_tick_resolution = getattr(sequence, "get_tick_resolution", None)
+        tick_resolution = get_tick_resolution() if callable(get_tick_resolution) else None
+        if tick_resolution is None:
+            tick_resolution = sequence.get_display_rate()
+        try:
+            tick_numerator = float(tick_resolution.numerator)
+            tick_denominator = float(tick_resolution.denominator)
+        except (AttributeError, TypeError, ValueError):
+            tick_numerator = tick_denominator = 0.0
+        if tick_numerator <= 0 or tick_denominator <= 0:
             return unreal_error("Invalid sequence frame rate", "The Level Sequence has a non-positive display rate.")
-        start_frame = round(start_time * display_rate.numerator / display_rate.denominator)
-        end_frame = round(end_time * display_rate.numerator / display_rate.denominator)
+        start_frame = round(start_time * tick_numerator / tick_denominator)
+        end_frame = round(end_time * tick_numerator / tick_denominator)
 
         camera_cut_section = camera_cut_track.add_section()
         if camera_cut_section is None:
             return unreal_error("Failed to add camera cut section", "The camera cut track rejected a new section.")
         camera_cut_section.set_range(start_frame, end_frame)
-        camera_binding_id = unreal.MovieSceneObjectBindingID()
-        camera_binding_id.set_editor_property("guid", camera_binding.get_id())
-        camera_cut_section.set_camera_binding_id(camera_binding_id)
+        # Ask the sequence for the binding ID so it carries the correct local
+        # binding space. A GUID-only struct can silently fall back to the
+        # actor's level transform during MRQ renders.
+        get_binding_id = getattr(sequence, "get_binding_id", None)
+        if callable(get_binding_id):
+            camera_cut_section.set_camera_binding_id(get_binding_id(camera_binding))
+        else:
+            set_camera_guid = getattr(camera_cut_section, "set_camera_guid", None)
+            if callable(set_camera_guid):
+                set_camera_guid(camera_binding.get_id())
+                camera_binding_id = None
+            else:
+                camera_binding_id = unreal.MovieSceneObjectBindingID()
+                camera_binding_id.set_editor_property("guid", camera_binding.get_id())
+                camera_cut_section.set_camera_binding_id(camera_binding_id)
 
         if not unreal.EditorAssetLibrary.save_loaded_asset(sequence):
             return unreal_error("Failed to save Level Sequence", f"Unreal could not save '{sequence_path}'.")

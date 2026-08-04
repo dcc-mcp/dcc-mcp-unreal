@@ -388,7 +388,7 @@ def test_playback_range_uses_frame_rate_denominator_and_fails_closed():
     assert result["success"] is False
 
 
-def test_camera_cut_wraps_guid_in_object_binding_id():
+def test_camera_cut_uses_sequence_binding_id():
     import dcc_mcp_unreal.api as api_module
 
     unreal = types.ModuleType("unreal")
@@ -397,12 +397,7 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
     class CameraCutTrack:
         pass
 
-    class ObjectBindingId:
-        def set_editor_property(self, name, value):
-            setattr(self, name, value)
-
     unreal.MovieSceneCameraCutTrack = CameraCutTrack
-    unreal.MovieSceneObjectBindingID = ObjectBindingId
 
     section = MagicMock()
     track = CameraCutTrack()
@@ -414,6 +409,8 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
     sequence.get_tracks.return_value = []
     sequence.add_track.return_value = track
     sequence.add_possessable.return_value = binding
+    sequence.get_binding_id.return_value = binding_guid
+    sequence.get_tick_resolution.return_value = types.SimpleNamespace(numerator=24000, denominator=1)
     sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=24000, denominator=1001)
     unreal.load_asset = MagicMock(return_value=sequence)
     unreal.EditorAssetLibrary = MagicMock()
@@ -435,10 +432,8 @@ def test_camera_cut_wraps_guid_in_object_binding_id():
         )
 
     assert result["success"] is True
-    binding_id = section.set_camera_binding_id.call_args.args[0]
-    assert isinstance(binding_id, ObjectBindingId)
-    assert binding_id.guid is binding_guid
-    section.set_range.assert_called_once_with(24, 48)
+    section.set_camera_binding_id.assert_called_once_with(binding_guid)
+    section.set_range.assert_called_once_with(24024, 48048)
 
 
 def test_camera_cut_reuses_existing_named_binding():
@@ -450,12 +445,7 @@ def test_camera_cut_reuses_existing_named_binding():
     class CameraCutTrack:
         pass
 
-    class ObjectBindingId:
-        def set_editor_property(self, name, value):
-            setattr(self, name, value)
-
     unreal.MovieSceneCameraCutTrack = CameraCutTrack
-    unreal.MovieSceneObjectBindingID = ObjectBindingId
     section = MagicMock()
     track = CameraCutTrack()
     track.add_section = MagicMock(return_value=section)
@@ -465,6 +455,8 @@ def test_camera_cut_reuses_existing_named_binding():
     sequence = MagicMock()
     sequence.get_tracks.return_value = [track]
     sequence.get_bindings.return_value = [binding]
+    sequence.get_binding_id.return_value = binding.get_id.return_value
+    sequence.get_tick_resolution.return_value = types.SimpleNamespace(numerator=30, denominator=1)
     sequence.get_display_rate.return_value = types.SimpleNamespace(numerator=30, denominator=1)
     unreal.load_asset = MagicMock(return_value=sequence)
     unreal.EditorAssetLibrary = MagicMock()
@@ -488,8 +480,7 @@ def test_camera_cut_reuses_existing_named_binding():
 
     assert result["success"] is True
     sequence.add_possessable.assert_not_called()
-    binding_id = section.set_camera_binding_id.call_args.args[0]
-    assert binding_id.guid is binding.get_id.return_value
+    section.set_camera_binding_id.assert_called_once_with(binding.get_id.return_value)
 
 
 def test_sequence_info_normalizes_unreal_text_and_detects_camera_track_by_type():
