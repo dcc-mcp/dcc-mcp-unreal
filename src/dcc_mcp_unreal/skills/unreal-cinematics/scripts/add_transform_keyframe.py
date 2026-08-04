@@ -115,8 +115,20 @@ def add_transform_keyframe(
             "constant": unreal.RichCurveInterpMode.RCIM_CONSTANT,
         }.get(interpolation)
 
+        def get_channel_name(channel) -> str:
+            get_editor_property = getattr(channel, "get_editor_property", None)
+            if callable(get_editor_property):
+                try:
+                    return str(get_editor_property("channel_name"))
+                except Exception:
+                    pass
+            return str(channel.get_name())
+
         def add_key(channel, value: float) -> None:
-            key = channel.add_key(key_time, value)
+            try:
+                key = channel.add_key(key_time, value, 0.0)
+            except TypeError:
+                key = channel.add_key(key_time, value)
             if interpolation_mode is not None:
                 key.set_interpolation_mode(interpolation_mode)
 
@@ -124,7 +136,7 @@ def add_transform_keyframe(
 
         if location is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Location.X" in channel_name:
                     add_key(channel, float(location[0]))
                     keys_added += 1
@@ -137,7 +149,7 @@ def add_transform_keyframe(
 
         if rotation is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Rotation.X" in channel_name:
                     add_key(channel, float(rotation[2]))
                     keys_added += 1
@@ -150,7 +162,7 @@ def add_transform_keyframe(
 
         if scale is not None:
             for channel in channels:
-                channel_name = str(channel.get_name())
+                channel_name = get_channel_name(channel)
                 if "Scale.X" in channel_name:
                     add_key(channel, float(scale[0]))
                     keys_added += 1
