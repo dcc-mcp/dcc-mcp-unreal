@@ -45,8 +45,17 @@ def _process_arguments() -> list[str]:
 
 
 def _resolve_project_context(arguments: Iterable[str]) -> tuple[Path, Path]:
-    paths = [Path(argument) for argument in arguments]
+    raw_arguments = list(arguments)
+    project_arguments = [
+        argument.split("=", 1)[1] for argument in raw_arguments[1:] if argument.lower().startswith("-project=")
+    ]
+    paths = [Path(argument) for argument in raw_arguments if not argument.lower().startswith("-project=")]
     project_file = next((path for path in paths[1:] if path.suffix.lower() == ".uproject"), None)
+    if project_file is None:
+        project_file = next(
+            (Path(argument) for argument in project_arguments if Path(argument).suffix.lower() == ".uproject"),
+            None,
+        )
     if project_file is None:
         raise ValueError("The Unreal Editor process command line does not contain a .uproject path")
     project_file = project_file.resolve()
