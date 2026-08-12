@@ -176,6 +176,52 @@ tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
+  - name: import_groom_cache
+    description: Import an Alembic Groom Cache against an existing GroomAsset using an append-only versioned destination.
+    source_file: scripts/import_groom_cache.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 300
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [source_path, groom_asset_path]
+      properties:
+        source_path:
+          type: string
+          minLength: 1
+          description: Absolute path to a topology-compatible Alembic Groom Cache.
+        groom_asset_path:
+          type: string
+          minLength: 1
+          description: Existing GroomAsset package or object path used as the topology reference.
+        destination_path:
+          type: string
+          description: Content Browser destination folder for the versioned cache.
+          default: /Game/GroomCaches
+        asset_name:
+          type: string
+          description: Requested base name; an available _vNNN suffix is selected automatically.
+          default: ""
+        frame_start:
+          type: integer
+          minimum: 0
+          default: 0
+        frame_end:
+          type: integer
+          minimum: 0
+          default: 0
+        import_type:
+          type: string
+          enum: [strands, guides]
+          default: strands
+    next-tools:
+      on-success: [unreal_assets__get_asset_info]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
   - name: create_blueprint
     description: Create a Blueprint asset derived from an Unreal class.
     source_file: scripts/create_blueprint.py
