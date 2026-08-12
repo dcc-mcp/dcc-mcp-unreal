@@ -28,7 +28,7 @@ Configuration (environment variables)
     Runtime selection: ``auto`` (default), ``python``, or ``sidecar``.
 
 ``DCC_MCP_UI_CONTROL_BACKEND``
-    UI automation backend.  Defaults to ``"windows-uia"`` on Windows while
+    UI automation backend.  Defaults to ``"cua"`` on Windows while
     preserving an explicit user override.
 """
 
@@ -58,12 +58,19 @@ def _resolve_bootstrap_runtime() -> str:
 
 
 def _configure_app_ui() -> None:
-    """Make the bundled app-ui skill target this Unreal Editor process."""
+    """Make the bundled UI Control skill target this Unreal Editor process."""
     if sys.platform == "win32":
-        os.environ.setdefault("DCC_MCP_APP_UI_BACKEND", "windows-uia")
-        os.environ.setdefault("DCC_MCP_APP_UI_UIA_PROCESS_ID", str(os.getpid()))
-        os.environ.setdefault("DCC_MCP_UI_CONTROL_BACKEND", "windows-uia")
-        os.environ.setdefault("DCC_MCP_UI_CONTROL_UIA_PROCESS_ID", str(os.getpid()))
+        os.environ.setdefault("DCC_MCP_UI_CONTROL_BACKEND", "cua")
+        os.environ.setdefault("DCC_MCP_UI_CONTROL_PROCESS_ID", str(os.getpid()))
+        os.environ.pop("DCC_MCP_UI_CONTROL_WINDOW_HANDLE", None)
+        for legacy_name in (
+            "DCC_MCP_UI_CONTROL_UIA_PROCESS_ID",
+            "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE",
+            "DCC_MCP_APP_UI_BACKEND",
+            "DCC_MCP_APP_UI_UIA_PROCESS_ID",
+            "DCC_MCP_APP_UI_UIA_WINDOW_HANDLE",
+        ):
+            os.environ.pop(legacy_name, None)
 
 
 _configure_app_ui()

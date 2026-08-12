@@ -35,14 +35,19 @@ def _configure_ui_control_for_process() -> None:
     """Bind Windows UI Control to this Unreal Editor process."""
     if not _IS_WINDOWS:
         return
-    # dcc-mcp-core's isolated host reads the APP_UI contract. Keep the
-    # legacy UI_CONTROL names while downstream adapters migrate.
-    os.environ["DCC_MCP_APP_UI_BACKEND"] = "windows-uia"
-    os.environ["DCC_MCP_APP_UI_UIA_PROCESS_ID"] = str(os.getpid())
-    os.environ.pop("DCC_MCP_APP_UI_UIA_WINDOW_HANDLE", None)
-    os.environ["DCC_MCP_UI_CONTROL_BACKEND"] = "windows-uia"
-    os.environ["DCC_MCP_UI_CONTROL_UIA_PROCESS_ID"] = str(os.getpid())
-    os.environ.pop("DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE", None)
+    # Core 0.20 delegates native UI Control to standalone dcc-cua. The
+    # adapter grants only its own process; requests may narrow but not widen it.
+    os.environ["DCC_MCP_UI_CONTROL_BACKEND"] = "cua"
+    os.environ["DCC_MCP_UI_CONTROL_PROCESS_ID"] = str(os.getpid())
+    os.environ.pop("DCC_MCP_UI_CONTROL_WINDOW_HANDLE", None)
+    for legacy_name in (
+        "DCC_MCP_UI_CONTROL_UIA_PROCESS_ID",
+        "DCC_MCP_UI_CONTROL_UIA_WINDOW_HANDLE",
+        "DCC_MCP_APP_UI_BACKEND",
+        "DCC_MCP_APP_UI_UIA_PROCESS_ID",
+        "DCC_MCP_APP_UI_UIA_WINDOW_HANDLE",
+    ):
+        os.environ.pop(legacy_name, None)
 
 
 class UnrealMainThreadDispatcher:

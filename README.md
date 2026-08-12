@@ -152,7 +152,7 @@ them.
 | Unreal Engine | 4.18+ (capability-gated) |
 | Unreal Python Editor Script Plugin | optional; required for in-editor Python skills |
 | Python | 3.9+ for Python skills; optional for the native sidecar path |
-| dcc-mcp-core | >= 0.19.77, < 1.0.0 |
+| dcc-mcp-core | >= 0.20.0, < 1.0.0 |
 
 See the [Unreal version compatibility contract](docs/unreal-version-compatibility.md)
 for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
