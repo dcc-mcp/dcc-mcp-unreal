@@ -27,6 +27,7 @@ Tools for Content Browser asset discovery, import, export, inspection, and delet
 
 - `list_assets`
 - `import_asset`
+- `import_groom_cache`
 - `export_asset`
 - `get_asset_info`
 - `delete_asset`
