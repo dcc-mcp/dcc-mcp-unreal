@@ -16,7 +16,7 @@ from typing import List, Sequence
 
 from dcc_mcp_core.skills_helper import CancelledError, check_dcc_cancelled, skill_error, skill_success
 
-_CORE_SPEC = "dcc-mcp-core>=0.19.77,<1.0.0"
+_CORE_SPEC = "dcc-mcp-core>=0.20.0,<1.0.0"
 _PLUGIN_MODES = {"native", "source", "python-only"}
 _CONFIGURATIONS = {"Development", "Shipping"}
 _RELEASE_PROFILES = {"archive", "installer", "steam", "wegame"}

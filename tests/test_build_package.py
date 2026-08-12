@@ -64,7 +64,7 @@ def test_local_core_version_must_meet_plugin_minimum(tmp_path):
     try:
         module.validate_local_core(core)
     except ValueError as exc:
-        assert "0.19.77" in str(exc)
+        assert "0.20.0" in str(exc)
     else:
         raise AssertionError("stale local core must be rejected")
 
@@ -151,7 +151,7 @@ def test_ue4_native_payload_skips_incompatible_embedded_python_dependencies(tmp_
             skip_core=False,
             use_local_core=False,
             core_root=tmp_path / "core",
-            core_spec="dcc-mcp-core>=0.19.77,<1.0.0",
+            core_spec="dcc-mcp-core>=0.20.0,<1.0.0",
         ),
         tmp_path / "payload",
     )
