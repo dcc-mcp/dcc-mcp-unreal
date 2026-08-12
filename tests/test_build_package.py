@@ -127,6 +127,97 @@ def test_legacy_ubt_config_guard_wraps_only_the_uat_subprocess():
     assert "temporarily_clear_legacy_ubt_user_config" not in inspect.getsource(module.build_python_payload)
 
 
+def test_ue58_in_place_update_uses_job_scoped_generated_header_aliases(tmp_path):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_5.8"
+    build_dir = engine / "Engine" / "Build"
+    build_dir.mkdir(parents=True)
+    (build_dir / "Build.version").write_text(
+        json.dumps({"MajorVersion": 5, "MinorVersion": 8, "PatchVersion": 1}),
+        encoding="utf-8",
+    )
+    source = engine / "Engine" / "Source" / "Runtime" / "CoreUObject" / "Public" / "UObject" / "Package.h"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join(
+            ["// filler"] * 214
+            + [
+                "UCLASS(MinimalAPI, Config=Engine)",
+                "class UPackage : public UObject",
+                "{",
+                "    GENERATED_BODY()",
+                "};",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    generated = (
+        engine
+        / "Engine"
+        / "Intermediate"
+        / "Build"
+        / "Win64"
+        / "UnrealEditor"
+        / "Inc"
+        / "CoreUObject"
+        / "UHT"
+        / "Package.generated.h"
+    )
+    generated.parent.mkdir(parents=True)
+    generated.write_text(
+        "#define FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_214_PROLOG\n"
+        "#define FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_217_GENERATED_BODY\n",
+        encoding="utf-8",
+    )
+
+    compat = module.create_generated_header_compat(engine, tmp_path / "work")
+
+    assert compat is not None
+    text = compat.read_text(encoding="utf-8")
+    assert "Package_h_215_PROLOG FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_214_PROLOG" in text
+    assert (
+        "Package_h_218_GENERATED_BODY "
+        "FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_217_GENERATED_BODY" in text
+    )
+
+
+def test_matching_ue58_generated_headers_need_no_compatibility_file(tmp_path):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_5.8"
+    build_dir = engine / "Engine" / "Build"
+    build_dir.mkdir(parents=True)
+    (build_dir / "Build.version").write_text(
+        json.dumps({"MajorVersion": 5, "MinorVersion": 8, "PatchVersion": 1}),
+        encoding="utf-8",
+    )
+    source = engine / "Engine" / "Source" / "Runtime" / "CoreUObject" / "Public" / "UObject" / "Package.h"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "UCLASS(MinimalAPI, Config=Engine)\nclass UPackage\n{\n    GENERATED_BODY()\n};\n",
+        encoding="utf-8",
+    )
+    generated = (
+        engine
+        / "Engine"
+        / "Intermediate"
+        / "Build"
+        / "Win64"
+        / "UnrealEditor"
+        / "Inc"
+        / "CoreUObject"
+        / "UHT"
+        / "Package.generated.h"
+    )
+    generated.parent.mkdir(parents=True)
+    generated.write_text(
+        "#define FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_1_PROLOG\n"
+        "#define FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h_4_GENERATED_BODY\n",
+        encoding="utf-8",
+    )
+
+    assert module.create_generated_header_compat(engine, tmp_path / "work") is None
+
+
 def test_ue4_native_payload_skips_incompatible_embedded_python_dependencies(tmp_path, monkeypatch):
     module = _load_build_distributable_module()
     engine = tmp_path / "UE_4.26"

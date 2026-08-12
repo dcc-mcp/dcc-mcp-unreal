@@ -126,6 +126,16 @@ def test_ue418_native_bridge_uses_the_core_sidecar_wire_contract() -> None:
     )
 
 
+def test_native_module_applies_generated_header_compat_without_mutating_engine() -> None:
+    rules = PLUGIN_RULES.read_text(encoding="utf-8")
+
+    assert "DCC_MCP_UNREAL_GENERATED_HEADER_COMPAT" in rules
+    assert 'Enum.Parse(typeof(PCHUsageMode), "NoPCHs")' in rules
+    assert "PCHUsageMode.NoPCHs" not in rules
+    assert 'GetProperty("ForceIncludeFiles")' in rules
+    assert "WriteAllText" not in rules
+
+
 def test_smoke_script_supports_ue4_and_ue5_editor_commandlets() -> None:
     script = SMOKE_SCRIPT.read_text(encoding="utf-8")
 
