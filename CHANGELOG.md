@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.17...v0.3.0) (2026-08-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* migrate UI Control to dcc-cua 0.4.0 ([#157](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/157))
+
+### Features
+
+* migrate UI Control to dcc-cua 0.4.0 ([#157](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/157)) ([2f8701b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/2f8701bbabe538475c54e6289b1ef8fd70027757))
+
+
+### Bug Fixes
+
+* tolerate stale UE 5.8 generated headers ([4acc002](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4acc002fb475230c02a20a8688971f29561c8ef5))
+
 ## [0.2.17](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.16...v0.2.17) (2026-08-04)
 
 
