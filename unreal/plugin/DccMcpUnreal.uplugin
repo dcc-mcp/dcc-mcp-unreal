@@ -1,7 +1,7 @@
 {
     "FileVersion": 3,
     "Version": 1,
-    "VersionName": "0.2.17",
+    "VersionName": "0.3.0",
     "FriendlyName": "DCC MCP Unreal",
     "Description": "Embeds a standards-compliant MCP Streamable HTTP server inside Unreal Engine. Allows MCP-compatible AI agents (Claude, Cursor, …) to control Unreal Editor via tools.",
     "Category": "Scripting",
