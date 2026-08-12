@@ -222,6 +222,50 @@ tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
+  - name: import_static_groom
+    description: Import an Alembic GroomAsset using explicit HairStrands options and an append-only versioned destination.
+    source_file: scripts/import_static_groom.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 300
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [source_path]
+      properties:
+        source_path:
+          type: string
+          minLength: 1
+          description: Absolute path to a static Alembic Groom source.
+        destination_path:
+          type: string
+          description: Content Browser destination for the versioned GroomAsset.
+          default: /Game/Grooms
+        asset_name:
+          type: string
+          description: Requested base name; an available _vNNN suffix is selected automatically.
+          default: ""
+        rotation:
+          type: array
+          description: Import rotation in degrees as [X, Y, Z].
+          minItems: 3
+          maxItems: 3
+          items: {type: number}
+          default: [0.0, 0.0, 0.0]
+        scale:
+          type: array
+          description: Non-zero import scale as [X, Y, Z].
+          minItems: 3
+          maxItems: 3
+          items: {type: number}
+          default: [1.0, 1.0, 1.0]
+    next-tools:
+      on-success: [unreal_assets__get_asset_info, unreal_assets__import_groom_cache]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
   - name: create_blueprint
     description: Create a Blueprint asset derived from an Unreal class.
     source_file: scripts/create_blueprint.py
