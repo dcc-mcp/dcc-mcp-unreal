@@ -6,13 +6,7 @@ import types
 from pathlib import Path
 
 SCRIPT = (
-    Path(__file__).parents[1]
-    / "src"
-    / "dcc_mcp_unreal"
-    / "skills"
-    / "unreal-assets"
-    / "scripts"
-    / "get_asset_info.py"
+    Path(__file__).parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-assets" / "scripts" / "get_asset_info.py"
 )
 
 
