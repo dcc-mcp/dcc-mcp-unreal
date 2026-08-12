@@ -6,6 +6,64 @@ from _asset_data import configure_dependency_options
 from _asset_data import object_path as asset_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+_GROOM_GROUP_FIELDS = (
+    "group_index",
+    "group_id",
+    "group_name",
+    "num_curves",
+    "num_guides",
+    "num_curve_vertices",
+    "num_guide_vertices",
+    "max_curve_length",
+)
+
+
+def _editor_property(value, name: str):
+    """Read an Unreal reflected property without assuming attribute exposure."""
+    try:
+        return value.get_editor_property(name)
+    except Exception:
+        return getattr(value, name, None)
+
+
+def _extract_groom_asset_info(asset_obj) -> dict:
+    """Return stable, JSON-friendly Groom counts across Unreal versions."""
+    groups = _editor_property(asset_obj, "hair_groups_info")
+    if groups is None:
+        return {
+            "groom_metadata_available": False,
+            "groom_metadata_error": "hair_groups_info is unavailable",
+        }
+
+    group_rows = []
+    for position, group in enumerate(groups):
+        row = {}
+        for field in _GROOM_GROUP_FIELDS:
+            value = _editor_property(group, field)
+            if value is None:
+                continue
+            if field == "group_name":
+                row[field] = str(value)
+            elif field == "max_curve_length":
+                row[field] = float(value)
+            else:
+                row[field] = int(value)
+        row.setdefault("group_index", position)
+        group_rows.append(row)
+
+    def total(field: str) -> int:
+        return sum(int(row.get(field, 0)) for row in group_rows)
+
+    return {
+        "groom_metadata_available": True,
+        "groom_group_count": len(group_rows),
+        "groom_total_curves": total("num_curves"),
+        "groom_total_guides": total("num_guides"),
+        "groom_total_curve_vertices": total("num_curve_vertices"),
+        "groom_total_guide_vertices": total("num_guide_vertices"),
+        "groom_groups": group_rows,
+    }
+
 
 @skill_entry
 def get_asset_info(
@@ -102,6 +160,8 @@ def get_asset_info(
             .rsplit(".", 1)[-1]
             .split(":", 1)[0],
         )
+    if asset_obj is not None and asset_class == "GroomAsset":
+        info.update(_extract_groom_asset_info(asset_obj))
     if include_dependencies:
         info["dependencies"] = dependencies
         info["dependency_count"] = len(dependencies)

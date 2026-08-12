@@ -275,7 +275,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: get_asset_info
-    description: Get registry metadata and optional dependencies for one asset.
+    description: Get registry metadata, optional dependencies, and Groom curve/guide counts for one asset.
     source_file: scripts/get_asset_info.py
     execution: sync
     affinity: main
