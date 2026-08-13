@@ -47,7 +47,9 @@ def _ensure_fresh_helpers():
     for mod_name in list(sys.modules.keys()):
         if mod_name.startswith("pie_") or mod_name == "_pie_helpers":
             del sys.modules[mod_name]
-    return importlib.import_module("_pie_helpers")
+    helpers = importlib.import_module("_pie_helpers")
+    helpers._job_registry.clear()
+    return helpers
 
 
 def _fake_unreal_module():
@@ -665,6 +667,22 @@ class TestPieCaptureScreenshot:
             completed = status_mod.pie_get_screenshot_job(job_id=capture["context"]["job_id"])
 
         assert stale["context"]["status"] == "pending"
+        assert completed["context"]["status"] == "completed"
+
+    def test_screenshot_job_survives_isolated_helper_reload(self, tmp_path):
+        """Core may rematerialize sibling helper modules between typed calls."""
+        _ensure_fresh_helpers()
+        filepath = tmp_path / "isolated.png"
+        with _patch_unreal():
+            capture = _import_script("pie_capture_screenshot").pie_capture_screenshot(filepath=str(filepath))
+            sys.modules.pop("_pie_helpers", None)
+            sys.modules.pop("pie_capture_screenshot", None)
+            filepath.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            completed = _import_script("pie_get_screenshot_job").pie_get_screenshot_job(
+                job_id=capture["context"]["job_id"]
+            )
+
+        assert completed["success"] is True
         assert completed["context"]["status"] == "completed"
 
     def test_console_capture_reports_pending(self, tmp_path):
