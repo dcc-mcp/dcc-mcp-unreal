@@ -11,11 +11,19 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+import dcc_mcp_unreal as _adapter_package
+
 # ---------------------------------------------------------------------------
-# In-memory job registry
+# Process-scoped job registry
 # ---------------------------------------------------------------------------
 
-_job_registry: Dict[str, Dict[str, Any]] = {}
+# Core materializes skill scripts as isolated modules and may recreate this
+# sibling helper between typed calls.  The adapter package has a stable import
+# identity for the lifetime of Unreal's Python interpreter, so it owns the
+# shared process-scoped registry.
+if not hasattr(_adapter_package, "_pie_job_registry"):
+    _adapter_package._pie_job_registry = {}  # type: ignore[attr-defined]
+_job_registry: Dict[str, Dict[str, Any]] = _adapter_package._pie_job_registry  # type: ignore[attr-defined]
 
 
 def create_job(job_type: str, filter_str: str = "", **extra: Any) -> str:
