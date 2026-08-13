@@ -76,6 +76,16 @@ def test_toolchain_script_selects_latest_valid_compiler_for_modern_ue(
     )
 
 
+@pytest.mark.parametrize("ue_version", ["5.5", "5.6"])
+def test_toolchain_script_bounds_legacy_ue5_build_memory_without_compiler_override(
+    tmp_path: Path,
+    ue_version: str,
+) -> None:
+    environment = _configure_toolchain(ue_version, tmp_path)
+
+    assert environment == "UBT_EXTRA_ARGS=-NoUBA -NoUBALocal -MaxParallelActions=1\n"
+
+
 def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 

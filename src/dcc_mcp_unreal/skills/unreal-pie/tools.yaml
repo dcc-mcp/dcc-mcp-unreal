@@ -108,7 +108,32 @@ tools:
           description: Viewport height override (0 = current viewport size).
           default: 0
     next-tools:
-      on-success: [unreal_pie__get_status]
+      on-success: [unreal_pie__get_screenshot_job]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: pie_get_screenshot_job
+    description: >-
+      Poll an adapter-owned screenshot job and report completed only after the
+      requested PNG exists on disk with a non-zero size.
+    source_file: scripts/pie_get_screenshot_job.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 10
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [job_id]
+      additionalProperties: false
+      properties:
+        job_id:
+          type: string
+          minLength: 1
+          description: The job_id returned by pie_capture_screenshot.
+    next-tools:
+      on-success: [unreal_pie__get_screenshot_job]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_snapshot_log

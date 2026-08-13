@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
+from _pie_helpers import create_job
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
@@ -20,6 +22,20 @@ def _ensure_dir(filepath: str) -> str:
     directory = os.path.dirname(os.path.abspath(filepath))
     os.makedirs(directory, exist_ok=True)
     return os.path.abspath(filepath)
+
+
+def _create_screenshot_job(filepath: str, method: str) -> str:
+    """Record the pre-request artifact signature so stale files cannot complete a new job."""
+    path = Path(filepath)
+    stat = path.stat() if path.is_file() else None
+    return create_job(
+        "screenshot",
+        filepath,
+        filepath=filepath,
+        method=method,
+        baseline_mtime_ns=stat.st_mtime_ns if stat else None,
+        baseline_size=stat.st_size if stat else None,
+    )
 
 
 def _default_screenshot_path() -> str:
@@ -74,6 +90,7 @@ def pie_capture_screenshot(
 
         # Preferred path: AutomationLibrary high-res screenshot
         if hasattr(unreal, "AutomationLibrary") and hasattr(unreal.AutomationLibrary, "take_high_res_screenshot"):
+            job_id = _create_screenshot_job(filepath, "automation_library")
             unreal.AutomationLibrary.take_high_res_screenshot(
                 resolution_x if resolution_x > 0 else 0,
                 resolution_y if resolution_y > 0 else 0,
@@ -83,6 +100,7 @@ def pie_capture_screenshot(
                 "Screenshot capture requested via AutomationLibrary",
                 prompt="Wait for the screenshot file to exist at: {}".format(filepath),
                 filepath=filepath,
+                job_id=job_id,
                 method="automation_library",
                 capture_pending=True,
                 resolution_x=resolution_x,
@@ -96,12 +114,14 @@ def pie_capture_screenshot(
         else:
             cmd = "HighResShot filename={}".format(filepath)
 
+        job_id = _create_screenshot_job(filepath, "console_command")
         unreal.SystemLibrary.execute_console_command(world, cmd)
 
         return unreal_success(
             "Screenshot capture requested via console command",
             prompt="Wait for the screenshot file to exist at: {}".format(filepath),
             filepath=filepath,
+            job_id=job_id,
             method="console_command",
             capture_pending=True,
         )
