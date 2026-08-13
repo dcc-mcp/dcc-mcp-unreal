@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,6 +35,10 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
         pytest.skip("PowerShell 7 is required to exercise the workflow helper")
 
     environment_file = tmp_path / "github-env.txt"
+    environment = os.environ.copy()
+    environment["RUNNER_TEMP"] = str(tmp_path)
+    environment["GITHUB_RUN_ID"] = "test-run"
+    environment["GITHUB_RUN_ATTEMPT"] = "1"
     subprocess.run(
         [
             pwsh,
@@ -48,6 +53,7 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
         check=True,
         text=True,
         capture_output=True,
+        env=environment,
     )
     return environment_file.read_text(encoding="utf-8-sig")
 
@@ -55,8 +61,7 @@ def _configure_toolchain(ue_version: str, tmp_path: Path) -> str:
 def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
     assert ".github/scripts/configure-ubt-toolchain.ps1" in text
-    assert "$env:APPDATA" not in text
-    assert "DCC_MCP_UNREAL_UBT_APPDATA" not in text
+    assert "$env:APPDATA = $env:DCC_MCP_UNREAL_UBT_APPDATA" in text
 
     release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     assert release["jobs"]["build-unreal-plugin"]["uses"] == ("./.github/workflows/build-uplugin.yml")
@@ -83,10 +88,16 @@ def test_toolchain_script_bounds_legacy_ue5_build_memory_without_compiler_overri
 ) -> None:
     environment = _configure_toolchain(ue_version, tmp_path)
 
-    assert environment == (
-        "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false\n"
-        "UnrealBuildTool_BuildConfiguration__MaxParallelActions=1\n"
-    )
+    prefix = "DCC_MCP_UNREAL_UBT_APPDATA="
+    assert environment.startswith(prefix)
+    appdata = Path(environment[len(prefix) :].strip())
+    assert appdata.is_relative_to(tmp_path)
+    config = appdata / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    assert config.is_file()
+    text = config.read_text(encoding="utf-8-sig")
+    assert "<bAllowUBAExecutor>false</bAllowUBAExecutor>" in text
+    assert "<MaxParallelActions>1</MaxParallelActions>" in text
+    assert "CompilerVersion" not in text
 
 
 def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
