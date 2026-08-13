@@ -1,0 +1,68 @@
+tools:
+  - name: bind_groom_cache
+    description: Bind an explicit GroomAsset and optional GroomCache to one exact GroomComponent object path.
+    source_file: scripts/bind_groom_cache.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [component_path, groom_asset_path]
+      properties:
+        component_path: {type: string, minLength: 1}
+        groom_asset_path: {type: string, minLength: 1}
+        groom_cache_path: {type: string, default: ""}
+        running: {type: boolean, default: true}
+        looping: {type: boolean, default: true}
+        manual_tick: {type: boolean, default: false}
+    next-tools:
+      on-success: [unreal_hair__get_groom_component_info, unreal_hair__add_groom_cache_track]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: get_groom_component_info
+    description: Read the exact Groom/Cache binding and playback state of one GroomComponent object path.
+    source_file: scripts/get_groom_component_info.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [component_path]
+      properties:
+        component_path: {type: string, minLength: 1}
+    next-tools:
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: add_groom_cache_track
+    description: Add a versioned Groom Cache possessable binding and section to an existing Level Sequence.
+    source_file: scripts/add_groom_cache_track.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [sequence_path, component_path, groom_cache_path]
+      properties:
+        sequence_path: {type: string, minLength: 1}
+        component_path: {type: string, minLength: 1}
+        groom_cache_path: {type: string, minLength: 1}
+        start_frame: {type: integer, minimum: 0, default: 0}
+        end_frame: {type: integer, minimum: 1, default: 150}
+        play_rate: {type: number, exclusiveMinimum: 0, default: 1.0}
+        reverse: {type: boolean, default: false}
+        binding_name: {type: string, default: VellumGroomCache}
+    next-tools:
+      on-success: [unreal_cinematics__get_sequence_info, unreal_hair__get_groom_component_info]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
