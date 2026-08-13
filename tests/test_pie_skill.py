@@ -625,7 +625,8 @@ class TestPieCaptureScreenshot:
         assert "success" in result
 
     def test_automation_capture_reports_pending(self, tmp_path):
-        """AutomationLibrary queues capture instead of completing it inline."""
+        """AutomationLibrary returns an adapter-owned job that can verify artifact readiness."""
+        _ensure_fresh_helpers()
         with _patch_unreal():
             mod = _import_script("pie_capture_screenshot")
             result = mod.pie_capture_screenshot(filepath=str(tmp_path / "automation.png"))
@@ -633,7 +634,38 @@ class TestPieCaptureScreenshot:
         assert result["success"] is True
         assert result["context"]["method"] == "automation_library"
         assert result["context"]["capture_pending"] is True
+        assert result["context"]["job_id"].startswith("pie_screenshot_")
         assert "requested" in result["message"].lower()
+
+    def test_screenshot_job_completes_only_after_png_exists(self, tmp_path):
+        _ensure_fresh_helpers()
+        filepath = tmp_path / "automation.png"
+        with _patch_unreal():
+            capture = _import_script("pie_capture_screenshot").pie_capture_screenshot(filepath=str(filepath))
+            status_mod = _import_script("pie_get_screenshot_job")
+            pending = status_mod.pie_get_screenshot_job(job_id=capture["context"]["job_id"])
+            filepath.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            completed = status_mod.pie_get_screenshot_job(job_id=capture["context"]["job_id"])
+
+        assert pending["context"]["status"] == "pending"
+        assert pending["context"]["artifact_ready"] is False
+        assert completed["context"]["status"] == "completed"
+        assert completed["context"]["artifact_ready"] is True
+        assert completed["context"]["size_bytes"] > 8
+
+    def test_screenshot_job_does_not_accept_a_stale_existing_png(self, tmp_path):
+        _ensure_fresh_helpers()
+        filepath = tmp_path / "existing.png"
+        filepath.write_bytes(b"old screenshot")
+        with _patch_unreal():
+            capture = _import_script("pie_capture_screenshot").pie_capture_screenshot(filepath=str(filepath))
+            status_mod = _import_script("pie_get_screenshot_job")
+            stale = status_mod.pie_get_screenshot_job(job_id=capture["context"]["job_id"])
+            filepath.write_bytes(b"new screenshot with different size")
+            completed = status_mod.pie_get_screenshot_job(job_id=capture["context"]["job_id"])
+
+        assert stale["context"]["status"] == "pending"
+        assert completed["context"]["status"] == "completed"
 
     def test_console_capture_reports_pending(self, tmp_path):
         """HighResShot fallback queues capture instead of completing it inline."""
@@ -672,13 +704,14 @@ class TestSkillMetadata:
         with open(tools_path, "r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         assert "tools" in data
-        assert len(data["tools"]) == 8
+        assert len(data["tools"]) == 9
 
         tool_names = [t["name"] for t in data["tools"]]
         expected = [
             "pie_control",
             "pie_inject_input",
             "pie_capture_screenshot",
+            "pie_get_screenshot_job",
             "pie_snapshot_log",
             "pie_get_status",
             "pie_run_test",
