@@ -29,6 +29,6 @@ if ($UEVersion -in @("5.7", "5.8")) {
 }
 
 # UE 5.5/5.6 read this native, process-scoped contract at the UBT entrypoint.
-"UBT_EXTRA_ARGS=-NoUBA -MaxParallelActions=1" |
+"UBT_EXTRA_ARGS=-NoUBA -NoUBALocal -MaxParallelActions=1" |
     Out-File -FilePath $EnvironmentFile -Encoding utf8 -Append
 Write-Host "Configured UE $UEVersion with bounded UBT command-line arguments"

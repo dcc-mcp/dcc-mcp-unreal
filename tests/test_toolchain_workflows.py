@@ -83,7 +83,7 @@ def test_toolchain_script_bounds_legacy_ue5_build_memory_without_compiler_overri
 ) -> None:
     environment = _configure_toolchain(ue_version, tmp_path)
 
-    assert environment == "UBT_EXTRA_ARGS=-NoUBA -MaxParallelActions=1\n"
+    assert environment == "UBT_EXTRA_ARGS=-NoUBA -NoUBALocal -MaxParallelActions=1\n"
 
 
 def test_build_workflow_no_longer_writes_global_ubt_config() -> None:
