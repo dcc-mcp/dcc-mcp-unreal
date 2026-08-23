@@ -75,6 +75,45 @@ jobs:
       - name: Lint SKILL.md files
         run: python tools/lint_skills.py --error-only
 
+  install-sop-smoke:
+    name: Install SOP lifecycle smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run lifecycle and bootstrap contract tests
+        run: python -m pytest tests/test_install_cli.py tests/test_bootstrap_diagnostics.py -q
+
+      - name: Build and inspect wheel lifecycle payload
+        run: |
+          python -m build --wheel
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel = next(Path("dist").glob("dcc_mcp_unreal-*.whl"))
+          with ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          required = {
+              "dcc_mcp_unreal/install_cli.py",
+              "dcc_mcp_unreal/_plugin/DccMcpUnreal.uplugin",
+              "dcc_mcp_unreal/_plugin/Content/Python/init_unreal.py",
+          }
+          missing = required - names
+          if missing:
+              raise SystemExit(f"wheel is missing lifecycle payload: {sorted(missing)}")
+          PY
+
   package-unreal-plugin:
     name: Package Unreal Plugin
     runs-on: windows-latest

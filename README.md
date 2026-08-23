@@ -168,16 +168,19 @@ for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
 
 ## Installation
 
-📖 **[Full installation guide](docs/installation.md)** — covers pip install,
-uplugin deployment, GitHub Releases, UE 4.18–5.8+ matrix, agent-oriented
-paths, environment variables, and troubleshooting.
+📖 **[Agent-first install, verify, upgrade, and uninstall](install.md)** — the
+standard lifecycle contract. The
+**[extended installation guide](docs/installation.md)** covers pip install,
+uplugin deployment, GitHub Releases, UE 4.18–5.8+ matrix, agent-oriented paths,
+environment variables, and troubleshooting.
 
 ### Quick Install
 
 No system Python (Windows native sidecar):
 
 ```powershell
-irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 | iex
+Invoke-WebRequest https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/v0.3.0/scripts/install-standalone.ps1 -OutFile install-standalone.ps1
+.\install-standalone.ps1 -Version v0.3.0
 ```
 
 For Python-enabled engines, pick the one-liner for your engine version:
