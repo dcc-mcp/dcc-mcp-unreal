@@ -20,6 +20,7 @@ def _load_script(name: str, relative_path: str):
 def _render_unreal():
     unreal = types.ModuleType("unreal")
     unreal.log = MagicMock()
+    unreal.DccMcpAutomationLibrary = types.SimpleNamespace(get_enabled_plugin_names=lambda: ["MovieRenderPipeline"])
     unreal.LevelSequence = type("LevelSequence", (), {})
     unreal.MoviePipelineQueueSubsystem = type("MoviePipelineQueueSubsystem", (), {})
     unreal.MoviePipelineExecutorJob = type("MoviePipelineExecutorJob", (), {})
@@ -274,6 +275,7 @@ def test_queue_rejects_unsafe_lumen_atlas_before_allocating_job(tmp_path):
 
 def test_queue_fails_cleanly_when_movie_render_queue_plugin_is_disabled():
     unreal, _subsystem, queue, _output_setting = _render_unreal()
+    unreal.DccMcpAutomationLibrary.get_enabled_plugin_names = lambda: []
     del unreal.MoviePipelineQueueSubsystem
     with patch.dict(sys.modules, {"unreal": unreal}):
         module = _load_script(
@@ -286,13 +288,14 @@ def test_queue_fails_cleanly_when_movie_render_queue_plugin_is_disabled():
         )
 
     assert result["success"] is False
-    assert result["message"] == "Movie Render Queue unavailable"
+    assert result["context"]["missing_plugins"] == ["MovieRenderPipeline"]
     queue.allocate_new_job.assert_not_called()
 
 
 def test_cancel_render_uses_active_executor():
     unreal = types.ModuleType("unreal")
     unreal.log = MagicMock()
+    unreal.DccMcpAutomationLibrary = types.SimpleNamespace(get_enabled_plugin_names=lambda: ["MovieRenderPipeline"])
     unreal.MoviePipelineQueueSubsystem = type("MoviePipelineQueueSubsystem", (), {})
     executor = MagicMock()
     subsystem = MagicMock()

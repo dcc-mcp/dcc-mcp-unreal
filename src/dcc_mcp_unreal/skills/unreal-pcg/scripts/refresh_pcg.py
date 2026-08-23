@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.world_preflight import editor_world_error
+
 
 @skill_entry
 def refresh_pcg(actor_name: str = "", **kwargs) -> dict:
     """Rebuild PCG components in the current editor level."""
     import unreal  # noqa: PLC0415
 
-    world = unreal.EditorLevelLibrary.get_editor_world()
-    if world is None:
-        return skill_error(
-            "No editor world available",
-            "EditorLevelLibrary.get_editor_world() returned None",
-            prompt="Open the target level before refreshing PCG.",
-        )
+    world, world_error = editor_world_error(
+        unreal,
+        retry_tool="unreal_pcg__refresh_pcg",
+        retry_arguments={"actor_name": actor_name},
+    )
+    if world_error is not None:
+        return world_error
 
     component_class = getattr(unreal, "PCGComponent", None)
     if component_class is None:

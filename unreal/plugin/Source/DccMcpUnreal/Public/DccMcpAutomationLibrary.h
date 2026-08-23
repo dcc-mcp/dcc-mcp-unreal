@@ -10,6 +10,9 @@ class DCCMCPUNREAL_API UDccMcpAutomationLibrary : public UBlueprintFunctionLibra
     GENERATED_BODY()
 
 public:
+    UFUNCTION(BlueprintPure, Category = "DCC MCP|Capabilities")
+    static TArray<FString> GetEnabledPluginNames();
+
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Automation")
     static FString ListAutomationTestsJson(const FString& Filter);
 

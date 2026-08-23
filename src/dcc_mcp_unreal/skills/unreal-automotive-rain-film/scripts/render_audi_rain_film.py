@@ -100,6 +100,7 @@ def render_audi_rain_film(
         height,
         temporal_samples,
         timeout_hint_secs=30,
+        required_capability="movie_render_queue",
     )
 
 

@@ -23,6 +23,11 @@ metadata:
 
 Tools for active level inspection, map loading/saving, and world settings.
 
+When an editor world is unavailable, tools report either
+`reason=editor_not_loaded` or `reason=pie_or_mrq_active`. Active PIE/MRQ
+responses include a typed status-poll action and the exact level-tool retry;
+they do not create another poller or background job.
+
 ## Scripts
 
 - `create_level`

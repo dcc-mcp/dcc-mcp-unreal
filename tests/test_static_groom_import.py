@@ -78,6 +78,9 @@ def test_import_static_groom_uses_explicit_factory_options_and_safe_version(tmp_
         does_asset_exist=lambda path: path == "/Game/Grooms/G_Hair",
     )
     unreal = types.ModuleType("unreal")
+    unreal.DccMcpAutomationLibrary = types.SimpleNamespace(
+        get_enabled_plugin_names=lambda: ["HairStrands", "AlembicHairImporter"]
+    )
     unreal.AssetImportTask = AssetImportTask
     unreal.GroomAsset = GroomAsset
     unreal.HairStrandsFactory = type("HairStrandsFactory", (), {})

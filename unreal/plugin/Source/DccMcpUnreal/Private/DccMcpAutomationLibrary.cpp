@@ -121,6 +121,17 @@ FString SerializeJson(const TSharedRef<FJsonObject>& Root)
 }
 } // namespace
 
+TArray<FString> UDccMcpAutomationLibrary::GetEnabledPluginNames()
+{
+    TArray<FString> Names;
+    for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetEnabledPlugins())
+    {
+        Names.Add(Plugin->GetName());
+    }
+    Names.Sort();
+    return Names;
+}
+
 FString UDccMcpAutomationLibrary::ListAutomationTestsJson(const FString& Filter)
 {
     FAutomationTestFramework& Framework = FAutomationTestFramework::Get();

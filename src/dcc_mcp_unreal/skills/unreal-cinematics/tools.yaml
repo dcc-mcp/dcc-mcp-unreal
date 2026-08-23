@@ -234,7 +234,8 @@ tools:
 
   - name: queue_sequence_render
     description: >-
-      Add a configured Level Sequence job to the active Movie Render Queue.
+      Add a configured Level Sequence job to the active Movie Render Queue
+      after checking the MovieRenderPipeline plugin.
       The job remains in the current editor session; this tool does not start
       rendering, save a queue preset, or verify output files.
     source_file: scripts/queue_sequence_render.py
@@ -308,7 +309,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: start_queued_render
-    description: Start every configured job in the active Movie Render Queue with a PIE executor.
+    description: Start every configured job in the active Movie Render Queue with a PIE executor after checking MovieRenderPipeline.
     source_file: scripts/start_queued_render.py
     execution: sync
     affinity: main
@@ -325,7 +326,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: get_render_status
-    description: Report whether Movie Render Queue is active and how many jobs remain configured.
+    description: Report whether Movie Render Queue is active and how many jobs remain configured after checking MovieRenderPipeline.
     source_file: scripts/get_render_status.py
     execution: sync
     affinity: main
@@ -339,7 +340,7 @@ tools:
       properties: {}
 
   - name: cancel_queued_render
-    description: Request cancellation of the active Movie Render Queue executor and skip remaining jobs.
+    description: Request cancellation of the active Movie Render Queue executor and skip remaining jobs after checking MovieRenderPipeline.
     source_file: scripts/cancel_queued_render.py
     execution: sync
     affinity: main

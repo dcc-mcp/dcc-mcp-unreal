@@ -299,6 +299,7 @@ def test_create_ocio_configuration_persists_valid_display_transform(monkeypatch)
 def test_start_render_requires_a_queued_job(monkeypatch):
     unreal = ModuleType("unreal")
     unreal.log = MagicMock()
+    unreal.DccMcpAutomationLibrary = SimpleNamespace(get_enabled_plugin_names=lambda: ["MovieRenderPipeline"])
     unreal.MoviePipelineQueueSubsystem = type("MoviePipelineQueueSubsystem", (), {})
     subsystem = MagicMock()
     subsystem.is_rendering.return_value = False
