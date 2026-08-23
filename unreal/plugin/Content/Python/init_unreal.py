@@ -160,6 +160,24 @@ def _get_version() -> str:
 
 VERSION = _get_version()
 
+
+def _bootstrap_log_dir() -> Path:
+    plugin_root = Path(__file__).resolve().parent.parent.parent
+    project_root = plugin_root.parent.parent if plugin_root.parent.name == "Plugins" else plugin_root.parent
+    return project_root / ".dcc-mcp" / "bootstrap-errors"
+
+
+def _clear_bootstrap_errors(log_dir: Path) -> None:
+    """A successful startup supersedes stale failures for this adapter."""
+    if not log_dir.is_dir():
+        return
+    for error_log in log_dir.glob("dcc-mcp-unreal.*.host-errors.log"):
+        try:
+            error_log.unlink()
+        except OSError as exc:
+            logger.warning("[dcc-mcp-unreal] Could not clear stale bootstrap error %s: %s", error_log, exc)
+
+
 # ---------------------------------------------------------------------------
 # Server helpers
 # ---------------------------------------------------------------------------
@@ -569,7 +587,19 @@ def _on_first_tick(delta: float) -> None:
     global _tick_handle
     if _handle is None:
         try:
-            _start()
+            from dcc_mcp_core import capture_bootstrap_errors  # noqa: PLC0415
+
+            log_dir = _bootstrap_log_dir()
+            with capture_bootstrap_errors(
+                "unreal",
+                adapter_version=VERSION,
+                min_core_version="0.20.0",
+                phase="bootstrap",
+                log_dir=str(log_dir),
+                metadata={"runtime_mode": _runtime_mode},
+            ):
+                _start()
+            _clear_bootstrap_errors(log_dir)
         except Exception as exc:
             logger.error("[dcc-mcp-unreal] Initialisation failed: %s", exc)
     _register_menus()

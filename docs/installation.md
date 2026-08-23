@@ -100,8 +100,8 @@ project or engine installation.
 ### From GitHub Releases
 
 1. Go to the [Releases page](https://github.com/dcc-mcp/dcc-mcp-unreal/releases)
-2. Download the ZIP matching your engine: `DccMcpUnreal-0.2.0-ue5.7.zip`,
-   `DccMcpUnreal-0.2.0-ue5.8.zip`, or `DccMcpUnreal-0.2.0-ue4.18.zip`
+2. Download the ZIP matching your engine: `DccMcpUnreal-0.3.0-ue5.7-win64.zip`,
+   `DccMcpUnreal-0.3.0-ue5.8-win64.zip`, or `DccMcpUnreal-0.3.0-ue4.18-win64.zip`
 3. Extract into your project or engine:
 
 **Project plugin** (recommended — keeps the engine clean):
@@ -173,14 +173,17 @@ verifies every file listed in `SHA256SUMS`, smoke-tests the bundled interpreter,
 and persists `DCC_MCP_SERVER_EXECUTABLE` for the current user:
 
 ```powershell
-irm https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 | iex
+Invoke-WebRequest https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/v0.3.0/scripts/install-standalone.ps1 -OutFile install-standalone.ps1
+.\install-standalone.ps1 -Version v0.3.0
 ```
 
-Install a specific release by downloading the script first:
+Always pin the script and release asset to the same version. For another
+release, replace both `v0.3.0` values together:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/main/scripts/install-standalone.ps1 -OutFile install-standalone.ps1
-.\install-standalone.ps1 -Version v0.2.0
+$Version = "v0.2.17"
+Invoke-WebRequest "https://raw.githubusercontent.com/dcc-mcp/dcc-mcp-unreal/$Version/scripts/install-standalone.ps1" -OutFile install-standalone.ps1
+.\install-standalone.ps1 -Version $Version
 ```
 
 The default install directory is
@@ -233,7 +236,7 @@ gateway.
 "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" -c "import dcc_mcp_unreal; print(dcc_mcp_unreal.__version__)"
 ```
 
-Expected output: `0.2.0` (or the installed version).
+Expected output: `0.3.0` (or the installed version).
 
 ---
 
@@ -267,7 +270,7 @@ Get-ChildItem "C:\Program Files\Epic Games\UE_*" -Directory |
 Expected output includes:
 ```
 Name: dcc-mcp-unreal
-Version: 0.2.0
+Version: 0.3.0
 Requires: dcc-mcp-core>=0.20.0,<1.0.0
 ```
 
@@ -361,9 +364,9 @@ certifi before the main install:
 
 - Read the [Unreal version compatibility contract](unreal-version-compatibility.md)
   for capability gating details
-- Follow the [README Quick Start](../README.md#quick-start) to start the
+- Follow the [README Quick Start](https://github.com/dcc-mcp/dcc-mcp-unreal#quick-start) to start the
   server and connect an agent
-- Browse [built-in skills](../src/dcc_mcp_unreal/skills/) to see available
+- Browse [built-in skills](https://github.com/dcc-mcp/dcc-mcp-unreal/tree/main/src/dcc_mcp_unreal/skills) to see available
   MCP tools
 - Read the [MSVC-Kit guide](msvc-kit-guide.md) if you need to build the
   C++ plugin from source for UE 4.18
