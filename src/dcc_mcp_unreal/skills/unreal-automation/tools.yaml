@@ -1,4 +1,25 @@
 tools:
+  - name: preflight_plugins
+    description: Inspect the enabled Unreal plugins required for a typed adapter capability without changing the project.
+    source_file: scripts/preflight_plugins.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [capability]
+      properties:
+        capability:
+          type: string
+          enum: [static_groom_import, usd_import, movie_render_queue]
+          description: Adapter capability whose required plugins should be inspected.
+    next-tools:
+      on-failure: [dcc_diagnostics__audit_log]
+
   - name: mcp_self_check
     description: Validate the active MCP server, bundled skills, registered tools, and HTTP readiness without restarting the server.
     source_file: scripts/mcp_self_check.py

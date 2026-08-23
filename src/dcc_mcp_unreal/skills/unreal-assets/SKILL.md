@@ -23,6 +23,11 @@ metadata:
 
 Tools for Content Browser asset discovery, import, export, inspection, and deletion.
 
+Static Groom imports require `HairStrands` and `AlembicHairImporter`. Generic
+imports of `.usd`, `.usda`, `.usdc`, or `.usdz` require `USDImporter`. These
+dependencies are checked before an import task or Content Browser mutation is
+created, and failures include the exact missing plugin names.
+
 ## Scripts
 
 - `list_assets`

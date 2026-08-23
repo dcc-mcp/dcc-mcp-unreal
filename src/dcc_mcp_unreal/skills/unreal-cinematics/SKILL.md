@@ -27,6 +27,11 @@ author transform keyframes, control playback range, and prepare cinematic jobs
 for the Movie Render Queue. Starting a render and verifying output are outside
 this skill's current contract.
 
+Movie Render Queue tools require the `MovieRenderPipeline` plugin and fail
+closed before queue, asset, console-command, or executor mutation when it is
+not enabled. Use `unreal_automation__preflight_plugins` with
+`capability=movie_render_queue` for a read-only readiness check.
+
 ## Workflow
 
 1. Call `create_level_sequence` to create a new sequence asset.

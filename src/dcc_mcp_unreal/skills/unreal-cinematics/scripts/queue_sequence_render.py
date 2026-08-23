@@ -9,7 +9,9 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
+from dcc_mcp_unreal.plugin_preflight import require_plugins
 from dcc_mcp_unreal.project_config import project_config_path, read_console_variables, validate_settings
+from dcc_mcp_unreal.world_preflight import editor_world_error
 
 _OUTPUT_CLASSES = {
     "png": "MoviePipelineImageSequenceOutput_PNG",
@@ -112,6 +114,32 @@ def queue_sequence_render(
     except ImportError:
         return unreal_error("Unreal Engine not available", "ImportError: unreal module not found")
 
+    preflight_error = require_plugins(unreal, "movie_render_queue")
+    if preflight_error is not None:
+        return preflight_error
+
+    world, world_error = editor_world_error(
+        unreal,
+        retry_tool="unreal_cinematics__queue_sequence_render",
+        retry_arguments={
+            "sequence_path": sequence_path,
+            "output_path": output_path,
+            "resolution_x": resolution_x,
+            "resolution_y": resolution_y,
+            "output_format": output_format,
+            "frame_rate_override": frame_rate_override,
+            "spatial_samples": spatial_samples,
+            "temporal_samples": temporal_samples,
+            "clear_existing_jobs": clear_existing_jobs,
+            "ocio_config_path": ocio_config_path,
+            "ocio_source_color_space": ocio_source_color_space,
+            "ocio_display": ocio_display,
+            "ocio_view": ocio_view,
+        },
+    )
+    if world_error is not None:
+        return world_error
+
     config_error = _validate_lumen_render_config()
     if config_error is not None:
         return config_error
@@ -158,9 +186,6 @@ def queue_sequence_render(
                 f"{_OUTPUT_CLASSES[normalized_format]} is unavailable. Enable the required Movie Render Queue plugin.",
             )
 
-        world = unreal.EditorLevelLibrary.get_editor_world()
-        if world is None:
-            return unreal_error("Editor world unavailable", "No editor world is open for the render job map.")
         map_path = str(world.get_path_name())
         map_package_path = map_path.split(".", 1)[0]
         if map_package_path.startswith(("/Temp/", "/Transient")) or not unreal.EditorAssetLibrary.does_asset_exist(

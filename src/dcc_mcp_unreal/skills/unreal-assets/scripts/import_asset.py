@@ -7,6 +7,8 @@ import os
 from _asset_import import configure_alembic_geometry_cache_options, configure_fbx_options, primary_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.plugin_preflight import require_plugins
+
 
 @skill_entry
 def import_asset(
@@ -92,6 +94,17 @@ def import_asset(
     if not asset_name:
         asset_name = os.path.splitext(os.path.basename(source_path))[0]
 
+    extension = os.path.splitext(source_path)[1].lower()
+    if import_as_geometry_cache and extension != ".abc":
+        return skill_error(
+            "Invalid Geometry Cache source",
+            "import_as_geometry_cache requires an Alembic (.abc) source file",
+        )
+    if extension in {".usd", ".usda", ".usdc", ".usdz"}:
+        preflight_error = require_plugins(unreal, "usd_import")
+        if preflight_error is not None:
+            return preflight_error
+
     # --- build import task ---
     task = unreal.AssetImportTask()
     task.set_editor_property("filename", source_path)
@@ -100,12 +113,6 @@ def import_asset(
     task.set_editor_property("replace_existing", replace_existing)
     task.set_editor_property("automated", True)
     task.set_editor_property("save", True)
-    extension = os.path.splitext(source_path)[1].lower()
-    if import_as_geometry_cache and extension != ".abc":
-        return skill_error(
-            "Invalid Geometry Cache source",
-            "import_as_geometry_cache requires an Alembic (.abc) source file",
-        )
     if extension == ".fbx":
         task.set_editor_property(
             "options",

@@ -7,6 +7,8 @@ import os
 from _groom_import import groom_topology, vector3, versioned_groom_name
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_exception, skill_success
 
+from dcc_mcp_unreal.plugin_preflight import require_plugins
+
 
 @skill_entry
 def import_static_groom(
@@ -34,6 +36,10 @@ def import_static_groom(
         return skill_error("Invalid static Groom conversion", str(exc))
     if any(component == 0.0 for component in scale_xyz):
         return skill_error("Invalid static Groom conversion", "scale components must be non-zero")
+
+    preflight_error = require_plugins(unreal, "static_groom_import")
+    if preflight_error is not None:
+        return preflight_error
 
     destination_path = destination_path.rstrip("/") or "/Game/Grooms"
     requested_name = asset_name or os.path.splitext(os.path.basename(source_path))[0]

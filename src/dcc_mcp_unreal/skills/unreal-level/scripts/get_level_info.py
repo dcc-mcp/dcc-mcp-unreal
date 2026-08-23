@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_success
 
+from dcc_mcp_unreal.world_preflight import editor_world_error
+
 
 @skill_entry
 def get_level_info(**kwargs) -> dict:
@@ -18,15 +20,9 @@ def get_level_info(**kwargs) -> dict:
     """
     import unreal  # noqa: PLC0415
 
-    world = unreal.EditorLevelLibrary.get_editor_world()
-    if world is None:
-        from dcc_mcp_core.skill import skill_error
-
-        return skill_error(
-            "No editor world available",
-            "EditorLevelLibrary.get_editor_world() returned None",
-            prompt="Ensure Unreal Editor is fully loaded with an open level.",
-        )
+    world, world_error = editor_world_error(unreal, retry_tool="unreal_level__get_level_info")
+    if world_error is not None:
+        return world_error
 
     level_name = world.get_name()
     package_name = world.get_outer().get_name() if world.get_outer() else level_name

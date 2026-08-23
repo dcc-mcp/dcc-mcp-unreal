@@ -29,7 +29,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: import_asset
-    description: Import a source file into a Content Browser destination folder.
+    description: Import a source file into a Content Browser destination folder; USD sources require the USDImporter plugin.
     source_file: scripts/import_asset.py
     execution: sync
     affinity: main
@@ -223,7 +223,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: import_static_groom
-    description: Import an Alembic GroomAsset using explicit HairStrands options and an append-only versioned destination.
+    description: Import an Alembic GroomAsset after checking HairStrands and AlembicHairImporter, using explicit options and an append-only versioned destination.
     source_file: scripts/import_static_groom.py
     execution: sync
     affinity: main

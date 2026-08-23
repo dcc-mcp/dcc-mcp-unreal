@@ -5,12 +5,17 @@ from __future__ import annotations
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import unreal_error, unreal_from_exception, unreal_success
+from dcc_mcp_unreal.plugin_preflight import require_plugins
 
 
 @skill_entry
 def get_render_status(**_kwargs) -> dict:
     try:
         import unreal  # noqa: PLC0415
+
+        preflight_error = require_plugins(unreal, "movie_render_queue")
+        if preflight_error is not None:
+            return preflight_error
 
         subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
         if subsystem is None:

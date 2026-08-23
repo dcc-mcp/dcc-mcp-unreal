@@ -159,7 +159,15 @@ def audit_actor(unreal, actor) -> dict:
     }
 
 
-def dispatch_or_error(function, *args, timeout_hint_secs: int = 120):
+def dispatch_or_error(function, *args, timeout_hint_secs: int = 120, required_capability: str | None = None):
+    if required_capability is not None:
+        import unreal
+        from dcc_mcp_unreal.plugin_preflight import require_plugins
+
+        preflight_error = require_plugins(unreal, required_capability)
+        if preflight_error is not None:
+            return preflight_error
+
     from dcc_mcp_unreal import server as server_module
 
     server = server_module._server_instance

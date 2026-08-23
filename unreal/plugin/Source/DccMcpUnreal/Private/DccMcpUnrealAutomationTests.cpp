@@ -22,6 +22,13 @@ bool FDccMcpUnrealNativeSmokeTest::RunTest(const FString& Parameters)
         return false;
     }
 
+    const TArray<FString> EnabledPlugins = UDccMcpAutomationLibrary::GetEnabledPluginNames();
+    if (!EnabledPlugins.Contains(TEXT("DccMcpUnreal")))
+    {
+        AddError(TEXT("Enabled plugin preflight omitted DccMcpUnreal."));
+        return false;
+    }
+
     TSharedPtr<FJsonObject> Result;
     const TSharedRef<TJsonReader<>> Reader =
         TJsonReaderFactory<>::Create(UDccMcpAutomationLibrary::ListAutomationTestsJson(TEXT("DccMcp")));
