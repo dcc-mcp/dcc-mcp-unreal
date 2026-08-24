@@ -20,6 +20,9 @@ public:
     static bool InjectPieKey(const FString& KeyName, bool bPressed);
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool ClickPiePointerButton(const FString& KeyName, float NormalizedX, float NormalizedY);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool InjectPieAxis(const FString& KeyName, float Value);
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")

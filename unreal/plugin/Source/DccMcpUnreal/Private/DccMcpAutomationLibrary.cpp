@@ -25,6 +25,7 @@
 #endif
 #include "Interfaces/IPluginManager.h"
 #include "Materials/MaterialInterface.h"
+#include "Math/UnrealMathUtility.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
@@ -149,9 +150,43 @@ bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EIn
 #endif
 }
 
+bool CanInjectSlatePieInput()
+{
+    // UI-only PIE sessions can have a PlayWorld before the editor exposes a PIE viewport.
+    return IsInGameThread() && GEditor && GEditor->PlayWorld && FSlateApplication::IsInitialized();
+}
+
+bool InjectSlatePieMouseButton(const FKey& Key, bool bPressed, const FVector2D& CursorPosition)
+{
+    FSlateApplication& SlateApplication = FSlateApplication::Get();
+    const TSharedPtr<SWindow> ActiveWindow = SlateApplication.GetActiveTopLevelWindow();
+    if (!ActiveWindow.IsValid() || !ActiveWindow->GetNativeWindow().IsValid())
+    {
+        return false;
+    }
+
+    TSet<FKey> PressedButtons;
+    if (bPressed)
+    {
+        PressedButtons.Add(Key);
+    }
+    FPointerEvent MouseEvent(
+        0,
+        CursorPosition,
+        CursorPosition,
+        PressedButtons,
+        Key,
+        0.0f,
+        FModifierKeysState()
+    );
+    return bPressed
+        ? SlateApplication.ProcessMouseButtonDownEvent(ActiveWindow->GetNativeWindow(), MouseEvent)
+        : SlateApplication.ProcessMouseButtonUpEvent(MouseEvent);
+}
+
 bool InjectSlatePieKey(const FKey& Key, bool bPressed)
 {
-    if (!IsInGameThread() || !GEditor || !GEditor->GetPIEViewport() || !FSlateApplication::IsInitialized())
+    if (!CanInjectSlatePieInput())
     {
         return false;
     }
@@ -159,30 +194,7 @@ bool InjectSlatePieKey(const FKey& Key, bool bPressed)
     FSlateApplication& SlateApplication = FSlateApplication::Get();
     if (Key.IsMouseButton())
     {
-        const TSharedPtr<SWindow> ActiveWindow = SlateApplication.GetActiveTopLevelWindow();
-        if (!ActiveWindow.IsValid() || !ActiveWindow->GetNativeWindow().IsValid())
-        {
-            return false;
-        }
-
-        const FVector2D CursorPosition = SlateApplication.GetCursorPos();
-        TSet<FKey> PressedButtons;
-        if (bPressed)
-        {
-            PressedButtons.Add(Key);
-        }
-        FPointerEvent MouseEvent(
-            0,
-            CursorPosition,
-            CursorPosition,
-            PressedButtons,
-            Key,
-            0.0f,
-            FModifierKeysState()
-        );
-        return bPressed
-            ? SlateApplication.ProcessMouseButtonDownEvent(ActiveWindow->GetNativeWindow(), MouseEvent)
-            : SlateApplication.ProcessMouseButtonUpEvent(MouseEvent);
+        return InjectSlatePieMouseButton(Key, bPressed, SlateApplication.GetCursorPos());
     }
 
     FKeyEvent KeyEvent(Key, FModifierKeysState(), 0, false, 0, 0);
@@ -260,6 +272,69 @@ bool UDccMcpAutomationLibrary::InjectPieKey(const FString& KeyName, bool bPresse
         return InjectPlayerInput(PlayerController, Key, bPressed ? IE_Pressed : IE_Released, bPressed ? 1.0f : 0.0f);
     }
     return InjectSlatePieKey(Key, bPressed);
+}
+
+bool UDccMcpAutomationLibrary::ClickPiePointerButton(const FString& KeyName, float NormalizedX, float NormalizedY)
+{
+    const FKey Key = FKey(FName(*KeyName));
+    if (!CanInjectSlatePieInput() || !Key.IsValid() || !Key.IsMouseButton()
+        || !FMath::IsFinite(NormalizedX) || !FMath::IsFinite(NormalizedY)
+        || NormalizedX < 0.0f || NormalizedX > 1.0f || NormalizedY < 0.0f || NormalizedY > 1.0f)
+    {
+        return false;
+    }
+
+    FSlateApplication& SlateApplication = FSlateApplication::Get();
+    const TSharedPtr<SWindow> ActiveWindow = SlateApplication.GetActiveTopLevelWindow();
+    if (!ActiveWindow.IsValid())
+    {
+        return false;
+    }
+    const FVector2D WindowSize = ActiveWindow->GetSizeInScreen();
+    if (WindowSize.X <= 0.0f || WindowSize.Y <= 0.0f)
+    {
+        return false;
+    }
+    const FVector2D CursorPosition = ActiveWindow->GetPositionInScreen()
+        + FVector2D(NormalizedX * WindowSize.X, NormalizedY * WindowSize.Y);
+
+    // Prime Slate's hover path without moving the OS cursor. SButton's default
+    // DownAndUp click method requires the button to remain hovered on release.
+    // A synthetic positioned click otherwise presses the right widget but does
+    // not execute its OnClicked delegate.
+    TSet<FKey> HoverButtons;
+    FPointerEvent HoverEvent(
+        0,
+        CursorPosition,
+        CursorPosition,
+        HoverButtons,
+        FKey(),
+        0.0f,
+        FModifierKeysState()
+    );
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26
+    const FWidgetPath WidgetsUnderPointer = SlateApplication.LocateWindowUnderMouse(
+        CursorPosition,
+        SlateApplication.GetInteractiveTopLevelWindows(),
+        false
+    );
+#else
+    const FWidgetPath WidgetsUnderPointer = SlateApplication.LocateWindowUnderMouse(
+        CursorPosition,
+        SlateApplication.GetInteractiveTopLevelWindows(),
+        false,
+        0
+    );
+#endif
+    if (!WidgetsUnderPointer.IsValid())
+    {
+        return false;
+    }
+    SlateApplication.RoutePointerMoveEvent(WidgetsUnderPointer, HoverEvent, true);
+
+    const bool bPressedHandled = InjectSlatePieMouseButton(Key, true, CursorPosition);
+    const bool bReleasedHandled = InjectSlatePieMouseButton(Key, false, CursorPosition);
+    return bPressedHandled || bReleasedHandled;
 }
 
 bool UDccMcpAutomationLibrary::InjectPieAxis(const FString& KeyName, float Value)

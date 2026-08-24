@@ -147,9 +147,16 @@ def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
 
     assert "if (PlayerController)" in implementation
     assert "return InjectSlatePieKey(Key, bPressed);" in implementation
-    assert "GEditor->GetPIEViewport()" in implementation
+    assert "GEditor->PlayWorld" in implementation
+    assert "!GEditor->GetPIEViewport()" not in implementation
     assert "ProcessKeyDownEvent" in implementation
     assert "ProcessMouseButtonDownEvent" in implementation
+    assert "ClickPiePointerButton" in implementation
+    assert "GetPositionInScreen" in implementation
+    assert "GetSizeInScreen" in implementation
+    assert "LocateWindowUnderMouse" in implementation
+    assert "RoutePointerMoveEvent" in implementation
+    assert "ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26" in implementation
     assert '"Slate"' in build_rules
     assert '"SlateCore"' in build_rules
 

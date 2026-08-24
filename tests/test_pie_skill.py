@@ -65,6 +65,7 @@ def _fake_unreal_module():
     unreal.DccMcpAutomationLibrary = types.SimpleNamespace(
         inject_pie_key=MagicMock(return_value=True),
         inject_pie_axis=MagicMock(return_value=True),
+        click_pie_pointer_button=MagicMock(return_value=True),
     )
     unreal.register_slate_post_tick_callback = MagicMock(return_value="tick-handle")
     unreal.unregister_slate_post_tick_callback = MagicMock()
@@ -429,6 +430,39 @@ class TestPieInjectInput:
             mod = _import_script("pie_inject_input")
             result = mod.pie_inject_input(input_type="mouse_button", button="left")
             assert result["success"] is True
+
+    def test_mouse_button_at_normalized_position_uses_native_pointer_click(self):
+        """A coordinate-bound click stays inside the active Unreal window."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            mod = _import_script("pie_inject_input")
+            result = mod.pie_inject_input(
+                input_type="mouse_button",
+                button="left",
+                position_x=0.125,
+                position_y=0.235,
+            )
+
+            assert result["success"] is True
+            fake_ue.DccMcpAutomationLibrary.click_pie_pointer_button.assert_called_once_with(
+                "LeftMouseButton", 0.125, 0.235
+            )
+
+    def test_mouse_button_rejects_incomplete_normalized_position(self):
+        """Coordinates are a pair so a click can never drift to an implicit axis."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            mod = _import_script("pie_inject_input")
+            result = mod.pie_inject_input(input_type="mouse_button", button="left", position_x=0.125)
+
+            assert result["success"] is False
+            fake_ue.DccMcpAutomationLibrary.click_pie_pointer_button.assert_not_called()
 
     def test_mouse_move(self):
         """mouse_move injects delta."""
