@@ -55,7 +55,7 @@ def test_first_editor_tick_runs_inside_core_bootstrap_capture(monkeypatch) -> No
             "unreal",
             {
                 "adapter_version": dcc_mcp_unreal.__version__,
-                "min_core_version": "0.20.0",
+                "min_core_version": "0.20.13",
                 "phase": "bootstrap",
                 "log_dir": str(path.parents[3] / ".dcc-mcp" / "bootstrap-errors"),
                 "metadata": {"runtime_mode": "python"},
@@ -89,7 +89,7 @@ def test_manual_startup_helper_uses_the_same_bootstrap_capture(monkeypatch) -> N
             "unreal",
             {
                 "adapter_version": dcc_mcp_unreal.__version__,
-                "min_core_version": "0.20.0",
+                "min_core_version": "0.20.13",
                 "phase": "bootstrap",
                 "log_dir": str(path.parents[3] / ".dcc-mcp" / "bootstrap-errors"),
                 "metadata": {"runtime_mode": "manual-python"},

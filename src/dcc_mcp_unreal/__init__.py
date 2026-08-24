@@ -23,7 +23,7 @@ Skill authoring helpers::
 Requirements:
     - Unreal Engine 4.18+ for the native baseline
     - Python Editor Script Plugin for Python-backed skills
-    - dcc-mcp-core >= 0.20.0
+    - dcc-mcp-core >= 0.20.13
 """
 
 from __future__ import annotations

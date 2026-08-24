@@ -58,7 +58,7 @@ def start() -> None:
         with capture_bootstrap_errors(
             "unreal",
             adapter_version=_adapter_version(),
-            min_core_version="0.20.0",
+            min_core_version="0.20.13",
             phase="bootstrap",
             log_dir=str(_bootstrap_log_dir()),
             metadata={"runtime_mode": "manual-python"},

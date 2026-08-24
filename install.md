@@ -10,7 +10,9 @@ only after `--yes` is present.
 - **Python:** 3.9 or newer for the adapter runtime. Use the selected engine's
   bundled Python for embedded mode; UE 4.x normally uses the standalone
   sidecar instead.
-- **dcc-mcp-core:** 0.20.0 or newer.
+- **dcc-mcp-core:** 0.20.13 or newer. Install SOP schema export remains
+  blocked on `dcc-mcp/dcc-mcp-core#2320`; current adapter tests validate the
+  exact reviewed Draft 2020-12 schema fixture until that API is released.
 - **Platforms:** the lifecycle command and source project-plugin payload work
   on Windows, macOS, and Linux. Published precompiled uplugin ZIPs are Win64.
   The no-system-Python one-command installer is Windows PowerShell only;
@@ -79,9 +81,10 @@ is available. Stable exits are 0 (ok/plan), 10 (preflight), 20 (acquire), 30
 (transaction), 40 (verify), and 50 (loaded artifact requires restart).
 
 The receipt is `<Project>/.dcc-mcp/receipts/unreal.json`. It records the exact
-engine, target interpreter, Core/adapter versions, project registration,
-plugin files and SHA-256 digests, bootstrap log directory, and typed readiness
-probe. It contains no credentials.
+editor image and digest, target interpreter and owned module origins,
+Core/adapter versions, project registration digest, every owned file,
+directory and safe relative link, bootstrap log directory, and the bound typed
+readiness identity. It contains no credentials.
 
 ## Manual path
 
@@ -95,7 +98,8 @@ probe. It contains no credentials.
 6. Start the selected project if the result returns the exact
    `launch-unreal-editor` command. The installer never drives the editor UI or
    terminates an Unreal process.
-7. Run `verify` after the editor/plugin is ready.
+7. Copy the exact running instance UUID and run `verify --instance-id <UUID>`
+   after the selected editor/plugin is ready.
 
 For UE 4.x or another Pythonless runtime, acquire a specific official release;
 never scrape or execute a mutable third-party payload. On Windows, download the
@@ -125,6 +129,7 @@ dcc-mcp-unreal verify \
   --dcc-path "/absolute/path/to/UE_5.7" \
   --python "/absolute/path/to/engine/python" \
   --project "/absolute/path/to/Game.uproject" \
+  --instance-id "<exact-running-instance-uuid>" \
   --json
 ```
 
@@ -132,7 +137,9 @@ Verification checks the receipt, every plugin digest, the target-interpreter
 adapter/Core imports and versions, `.uproject` enablement, captured bootstrap
 errors, and finally Core's bounded readiness probe
 `unreal_automation__mcp_self_check`. A copied plugin, running gateway, or
-transport row alone is not `directly_usable: true`.
+transport row alone is not `directly_usable: true`. The probe must bind the
+selected instance UUID, PID, process-start token, editor image, project,
+mounted plugin, engine version, and adapter/Core module origins.
 
 Without a live licensed Unreal Editor, static install checks can succeed but
 verification truthfully exits 40 with `failure_stage: readiness`. CI exercises
@@ -155,10 +162,11 @@ dcc-mcp-unreal upgrade --dcc-path "/path/to/UE" --python "/path/to/python" --pro
 dcc-mcp-unreal upgrade --dcc-path "/path/to/UE" --python "/path/to/python" --project "/path/to/Game.uproject" --json --yes
 ```
 
-The transaction moves the prior receipted plugin to a same-volume backup,
-commits the staged replacement and receipt, and restores the prior plugin,
-project descriptor, and receipt if commit fails. A real Windows file lock
-returns exit 50; close the reported editor and repeat the command.
+The transaction moves the prior receipted plugin to a same-volume backup and
+keeps the complete prior plugin, project descriptor, and receipt until an
+exact-instance verify succeeds. A mismatched typed probe restores that prior
+state. A real Windows file lock returns exit 50; close the reported editor and
+repeat the command.
 
 ## Uninstall
 
@@ -169,9 +177,10 @@ python -m pip uninstall dcc-mcp-unreal
 ```
 
 Uninstall consumes the receipt, restores the project's previous plugin entry,
-and removes only the receipted plugin root. It refuses an unreceipted/partial
-install or a project entry changed after installation. Repeating uninstall is
-safe and reports `absent`.
+and removes only the receipted plugin root. A complete recovery copy remains
+available until deletion succeeds, so a partial delete failure restores every
+owned byte. It refuses an unreceipted/partial install or a project entry
+changed after installation. Repeating uninstall is safe and reports `absent`.
 
 For the standalone cache, use `uninstall.bat` or `uninstall.sh` from the exact
 downloaded release archive. Remove
@@ -183,13 +192,13 @@ stopped; on macOS/Linux remove only the versioned directory you installed.
 | Result | Diagnosis | Action |
 |---|---|---|
 | Exit 10, host | No `Build.version`, Unreal older than 4.18, or project association mismatch | Pass the exact `--dcc-path` and matching `.uproject`. |
-| Exit 10, Python/Core | Target import failed or Core is below 0.20.0 | Install the wheel/Core into the exact `--python` interpreter. |
+| Exit 10, Python/Core | Target import failed or Core is below 0.20.13 | Install the wheel/Core into the exact `--python` interpreter. |
 | Exit 10, partial | Plugin and receipt disagree or ownership is unknown | Preserve the reported paths; do not delete unknown project content. |
 | Exit 20 | Wheel plugin payload is absent or staged payload is invalid | Reinstall the official wheel from the pinned catalog digest. |
 | Exit 30 | Staging, project registration, receipt commit, rollback, or uninstall failed | Preserve the JSON result and prior receipt; retry only its bounded command. |
 | Exit 40, artifact | A receipted file is missing or its SHA-256 changed | Run a reviewed `install --yes` repair transaction. |
 | Exit 40, bootstrap | The startup hook captured an early exception | Inspect `<Project>/.dcc-mcp/bootstrap-errors/dcc-mcp-unreal.*.host-errors.log`. |
-| Exit 40, readiness | No typed self-check succeeded | Execute the returned editor launch command, wait for plugin startup, then rerun `verify`. |
+| Exit 40, readiness | No exact-instance typed self-check succeeded | Execute the returned editor launch command, obtain that instance UUID, then rerun `verify --instance-id <UUID>`. |
 | Exit 50 | Unreal has a native artifact loaded/locked | Save work, close only the reported Unreal Editor, and repeat the same command. |
 
 Shared diagnosis remains read-only:

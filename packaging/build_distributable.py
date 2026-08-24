@@ -33,7 +33,7 @@ PLUGIN_SOURCE = REPO_ROOT / "unreal" / "plugin" / "DccMcpUnreal.uplugin"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.7"))
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 DEFAULT_CORE_WHEEL_URL = os.environ.get("DCC_MCP_CORE_WHEEL_URL")
-DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.20.0,<1.0.0")
+DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.20.13,<1.0.0")
 GENERATED_HEADER_COMPAT_ENV = "DCC_MCP_UNREAL_GENERATED_HEADER_COMPAT"
 PACKAGE_HEADER_ID = "FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h"
 
