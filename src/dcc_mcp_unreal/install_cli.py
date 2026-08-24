@@ -8,6 +8,7 @@ handoff stays in :mod:`dcc_mcp_unreal._standalone_entry`.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -15,11 +16,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Optional, Sequence
+from urllib.parse import unquote, urlsplit
 
 from .__version__ import __version__
 
@@ -45,9 +48,15 @@ except ImportError:  # Core PR #2320 compatibility until its foundation ships.
 
 DCC_TYPE = "unreal"
 PLUGIN_NAME = "DccMcpUnreal"
-MIN_CORE_VERSION = "0.20.0"
+MIN_CORE_VERSION = "0.20.13"
 MIN_HOST_VERSION = (4, 18, 0)
 RECEIPT_SCHEMA_VERSION = 1
+MAX_VERSION_LENGTH = 64
+MAX_VERSION_COMPONENT = 999999
+MAX_PROBE_OUTPUT_BYTES = 64 * 1024
+MAX_EDITOR_BYTES = 4 * 1024 * 1024 * 1024
+MAX_TRANSACTION_SNAPSHOT_BYTES = 8 * 1024 * 1024
+_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})")
 
 
 class LifecycleError(RuntimeError):
@@ -67,13 +76,57 @@ def _core_version() -> str:
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
-    parts: list[int] = []
-    for component in value.split("."):
-        digits = "".join(character for character in component if character.isdigit())
-        if not digits:
-            break
-        parts.append(int(digits))
-    return tuple(parts)
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_VERSION_LENGTH or _VERSION_RE.fullmatch(value) is None:
+        raise ValueError("version must be a bounded canonical three-component final version")
+    parsed = tuple(int(component) for component in value.split("."))
+    if any(component > MAX_VERSION_COMPONENT for component in parsed):
+        raise ValueError("version must be a bounded canonical three-component final version")
+    return parsed
+
+
+def _project_association_tuple(value: str) -> tuple[int, int, int]:
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_VERSION_LENGTH:
+        raise ValueError("Project EngineAssociation is not a bounded numeric version")
+    if re.fullmatch(r"(?:0|[1-9][0-9]{0,5})(?:\.(?:0|[1-9][0-9]{0,5})){0,2}", value) is None:
+        raise ValueError("Project EngineAssociation is not a bounded numeric version")
+    components = [int(component) for component in value.split(".")]
+    if any(component > MAX_VERSION_COMPONENT for component in components):
+        raise ValueError("Project EngineAssociation is not a bounded numeric version")
+    padded = components + [0, 0]
+    return padded[0], padded[1], padded[2]
+
+
+def _run_bounded_probe(command: Sequence[str], *, timeout: float = 15.0) -> dict[str, Any]:
+    """Run one read-only child probe with bounded time and captured output."""
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        try:
+            process = subprocess.Popen(
+                list(command),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                creationflags=creationflags,
+            )
+        except OSError as exc:
+            return {"success": False, "reason": f"launch failed: {exc.__class__.__name__}"}
+        try:
+            process.wait(timeout=max(0.1, min(float(timeout), 30.0)))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+            return {"success": False, "reason": "probe timed out"}
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read(MAX_PROBE_OUTPUT_BYTES + 1)
+        stderr = stderr_file.read(MAX_PROBE_OUTPUT_BYTES + 1)
+    return {
+        "success": process.returncode == 0,
+        "returncode": int(process.returncode or 0),
+        "stdout": stdout[:MAX_PROBE_OUTPUT_BYTES].decode("utf-8", errors="replace"),
+        "stderr": stderr[:MAX_PROBE_OUTPUT_BYTES].decode("utf-8", errors="replace"),
+        "truncated": len(stdout) > MAX_PROBE_OUTPUT_BYTES or len(stderr) > MAX_PROBE_OUTPUT_BYTES,
+    }
 
 
 def _engine_root(value: str) -> Path:
@@ -88,7 +141,15 @@ def _engine_root(value: str) -> Path:
 def _engine_version(engine_root: Path) -> str:
     build_version = engine_root / "Engine" / "Build" / "Build.version"
     data = json.loads(build_version.read_text(encoding="utf-8-sig"))
-    return ".".join(str(data[key]) for key in ("MajorVersion", "MinorVersion", "PatchVersion"))
+    components = [data[key] for key in ("MajorVersion", "MinorVersion", "PatchVersion")]
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_VERSION_COMPONENT
+        for value in components
+    ):
+        raise ValueError("Unreal Build.version contains a noncanonical version")
+    version = ".".join(str(value) for value in components)
+    _version_tuple(version)
+    return version
 
 
 def _discover_engine_root(override: Optional[str]) -> tuple[Path, str]:
@@ -110,7 +171,7 @@ def _discover_engine_root(override: Optional[str]) -> tuple[Path, str]:
             for candidate in search_root.glob(pattern):
                 try:
                     version = _engine_version(candidate)
-                except (OSError, KeyError, json.JSONDecodeError):
+                except (OSError, ValueError, KeyError, json.JSONDecodeError):
                     continue
                 candidates.append((_version_tuple(version), candidate.resolve()))
     if not candidates:
@@ -150,34 +211,131 @@ def _resolve_python(args: argparse.Namespace, engine_root: Path) -> tuple[Path, 
 
 
 def _target_runtime(python_path: Path) -> dict[str, str]:
-    probe = (
-        "import json,sys,dcc_mcp_core,dcc_mcp_unreal;"
-        "print(json.dumps({'python_version':'.'.join(map(str,sys.version_info[:3])),"
-        "'adapter_version':dcc_mcp_unreal.__version__,"
-        "'core_version':getattr(dcc_mcp_core,'__version__','unknown')}))"
-    )
-    completed = subprocess.run(
-        [str(python_path), "-c", probe],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if completed.returncode != 0:
-        diagnostic = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else "import probe failed"
+    probe = r"""
+import importlib.metadata as m
+import json
+import pathlib
+import sys
+import dcc_mcp_core as core
+import dcc_mcp_unreal as adapter
+
+def identity(distribution_name, module):
+    distribution = m.distribution(distribution_name)
+    files = tuple(distribution.files or ())
+    owned = {str(pathlib.Path(distribution.locate_file(item)).resolve()): str(item) for item in files}
+    origin = pathlib.Path(module.__file__).resolve()
+    direct_url_text = distribution.read_text("direct_url.json")
+    return {
+        "version": distribution.version,
+        "module_version": getattr(module, "__version__", None),
+        "origin": str(origin),
+        "distribution_root": str(pathlib.Path(distribution.locate_file("")).resolve()),
+        "record": owned.get(str(origin)),
+        "direct_url": json.loads(direct_url_text) if direct_url_text else None,
+    }
+
+print(json.dumps({
+    "python_executable": str(pathlib.Path(sys.executable).resolve()),
+    "python_version": ".".join(map(str, sys.version_info[:3])),
+    "adapter": identity("dcc-mcp-unreal", adapter),
+    "core": identity("dcc-mcp-core", core),
+}))
+""".strip()
+    completed = _run_bounded_probe([str(python_path), "-c", probe])
+    if not completed.get("success") or completed.get("truncated"):
+        error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
+        diagnostic = error_lines[-1] if error_lines else "import probe failed"
         raise ValueError(f"Target interpreter cannot import the adapter and Core: {diagnostic}")
     try:
-        runtime = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
+        runtime = json.loads(str(completed.get("stdout") or ""))
+    except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Target interpreter returned an invalid import probe") from exc
-    if runtime.get("adapter_version") != __version__:
+    if not isinstance(runtime, dict):
+        raise ValueError("Target interpreter returned an invalid import probe")
+    adapter = runtime.get("adapter")
+    core = runtime.get("core")
+    if not isinstance(adapter, dict) or not isinstance(core, dict):
+        # Preserve an actionable version-floor result for old synthetic probes.
+        core_version = str(runtime.get("core_version", "unknown"))
+        try:
+            if _version_tuple(core_version) < _version_tuple(MIN_CORE_VERSION):
+                raise ValueError(f"Target interpreter has dcc-mcp-core {core_version}; {MIN_CORE_VERSION}+ is required")
+        except ValueError as exc:
+            if "required" in str(exc):
+                raise
+        raise ValueError("Target interpreter returned an invalid distribution identity probe")
+    adapter_version = str(adapter.get("version") or "unknown")
+    module_version = str(adapter.get("module_version") or "unknown")
+    if adapter_version != __version__ or module_version != __version__:
         raise ValueError(
-            f"Target interpreter has dcc-mcp-unreal {runtime.get('adapter_version')}, expected {__version__}"
+            f"Target interpreter has dcc-mcp-unreal {adapter_version}/{module_version}, expected {__version__}"
         )
-    core_version = str(runtime.get("core_version", "unknown"))
+    core_version = str(core.get("version") or "unknown")
     if _version_tuple(core_version) < _version_tuple(MIN_CORE_VERSION):
         raise ValueError(f"Target interpreter has dcc-mcp-core {core_version}; {MIN_CORE_VERSION}+ is required")
-    return {str(key): str(value) for key, value in runtime.items()}
+    python_version = str(runtime.get("python_version") or "unknown")
+    _version_tuple(python_version)
+    if Path(str(runtime.get("python_executable") or "")).resolve() != python_path.resolve():
+        raise ValueError("Target interpreter identity changed during the import probe")
+    adapter_origin = _owned_module_origin(adapter, "dcc-mcp-unreal", "dcc_mcp_unreal")
+    core_origin = _owned_module_origin(core, "dcc-mcp-core", "dcc_mcp_core")
+    return {
+        "python_executable": str(python_path.resolve()),
+        "python_version": python_version,
+        "adapter_version": adapter_version,
+        "core_version": core_version,
+        "adapter_origin": adapter_origin,
+        "core_origin": core_origin,
+        "adapter_distribution_root": str(Path(str(adapter["distribution_root"])).resolve()),
+        "core_distribution_root": str(Path(str(core["distribution_root"])).resolve()),
+    }
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _editable_root(value: object) -> Optional[Path]:
+    if not isinstance(value, dict) or not isinstance(value.get("dir_info"), dict):
+        return None
+    url = value.get("url")
+    if value["dir_info"].get("editable") is not True or not isinstance(url, str) or not 0 < len(url) <= 2048:
+        return None
+    parsed = urlsplit(url)
+    if parsed.scheme != "file" or parsed.query or parsed.fragment:
+        return None
+    raw_path = unquote(parsed.path)
+    if re.fullmatch(r"/[A-Za-z]:/.*", raw_path):
+        raw_path = raw_path[1:]
+    root = Path(raw_path).resolve()
+    return root if root.is_dir() else None
+
+
+def _owned_module_origin(identity: dict[str, Any], distribution: str, package: str) -> str:
+    origin = Path(str(identity.get("origin") or "")).resolve()
+    root = Path(str(identity.get("distribution_root") or "")).resolve()
+    record = identity.get("record")
+    valid = (
+        origin.is_file()
+        and origin.stat().st_size > 0
+        and origin.name == "__init__.py"
+        and origin.parent.name == package
+    )
+    if not valid or not root.is_dir():
+        raise ValueError(f"{distribution} module origin is missing or unloadable")
+    if isinstance(record, str) and 0 < len(record) <= 1024:
+        if (root / record).resolve() != origin or not _is_within(origin, root):
+            raise ValueError(f"{distribution} module origin is outside distribution ownership")
+    else:
+        editable = _editable_root(identity.get("direct_url"))
+        candidates = () if editable is None else (editable / "src" / package, editable / package)
+        if not any(origin == (candidate / "__init__.py").resolve() for candidate in candidates):
+            raise ValueError(f"{distribution} module origin is not owned by its distribution")
+    return str(origin)
 
 
 def _plugin_source() -> tuple[Path, str]:
@@ -202,11 +360,46 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _file_manifest(root: Path) -> list[dict[str, str]]:
-    return [
-        {"path": path.relative_to(root).as_posix(), "sha256": _sha256(path)}
-        for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file())
-    ]
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _file_manifest(root: Path) -> list[dict[str, Any]]:
+    """Describe every owned directory, file, and bounded relative symlink."""
+    manifest: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return manifest
+    for current, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in list(directory_names):
+            path = current_path / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                directory_names.remove(name)
+                manifest.append(_link_manifest(path, relative, root))
+            else:
+                manifest.append({"path": relative, "type": "directory"})
+        for name in file_names:
+            path = current_path / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                manifest.append(_link_manifest(path, relative, root))
+            elif path.is_file():
+                size = path.stat().st_size
+                manifest.append({"path": relative, "type": "file", "size": size, "sha256": _sha256(path)})
+            else:
+                raise ValueError(f"unsupported plugin path type: {relative}")
+    return sorted(manifest, key=lambda item: str(item["path"]))
+
+
+def _link_manifest(path: Path, relative: str, root: Path) -> dict[str, Any]:
+    target = os.readlink(path)
+    if not target or len(target) > 4096 or os.path.isabs(target):
+        raise ValueError(f"unsafe plugin symlink: {relative}")
+    resolved = (path.parent / target).resolve()
+    if not _is_within(resolved, root.resolve()):
+        raise ValueError(f"plugin symlink escapes the managed root: {relative}")
+    return {"path": relative, "type": "symlink", "target": target}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -258,16 +451,24 @@ def _read_receipt(path: Path) -> Optional[dict[str, Any]]:
 
 
 def _manifest_matches(plugin_root: Path, receipt: dict[str, Any]) -> tuple[bool, str, bool]:
-    expected = receipt.get("files")
+    expected = receipt.get("ownership")
     if not isinstance(expected, list):
-        return False, "receipt file manifest is missing", False
-    expected_paths = {str(item.get("path")): str(item.get("sha256")) for item in expected if isinstance(item, dict)}
-    actual = {item["path"]: item["sha256"] for item in _file_manifest(plugin_root)}
+        return False, "receipt ownership manifest is missing", False
+    if any(not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in expected):
+        return False, "receipt ownership manifest is invalid", False
+    expected_paths = {str(item["path"]): item for item in expected}
+    if len(expected_paths) != len(expected):
+        return False, "receipt ownership manifest contains duplicate paths", False
+    try:
+        actual_manifest = _file_manifest(plugin_root)
+    except (OSError, ValueError) as exc:
+        return False, str(exc), False
+    actual = {str(item["path"]): item for item in actual_manifest}
     unreceipted = sorted(set(actual) - set(expected_paths))
     if unreceipted:
-        return False, f"plugin contains unreceipted files: {', '.join(unreceipted)}", True
+        return False, f"plugin contains unreceipted paths: {', '.join(unreceipted)}", True
     if expected_paths != actual:
-        return False, "installed plugin files differ from the receipt", False
+        return False, "installed plugin paths differ from the receipt", False
     return True, "", False
 
 
@@ -285,6 +486,14 @@ def _inspect_state(context: dict[str, Any]) -> tuple[str, Optional[dict[str, Any
         return "partial", None, "the install receipt is invalid"
     if receipt.get("plugin_root") != str(plugin_root) or receipt.get("project_file") != str(context["project_file"]):
         return "partial", receipt, "the receipt identifies another project or plugin root"
+    if receipt.get("engine") != {
+        "root": str(context["engine_root"]),
+        "version": context["engine_version"],
+        "editor": context["editor"],
+    }:
+        return "partial", receipt, "the receipt identifies another Unreal engine or editor"
+    if receipt.get("target_runtime") != context["runtime"]:
+        return "partial", receipt, "the receipt identifies another target Python runtime"
     matches, reason, has_unreceipted_files = _manifest_matches(plugin_root, receipt)
     if not matches:
         if has_unreceipted_files:
@@ -303,6 +512,8 @@ def _failure_next_step(args: argparse.Namespace, stage: str) -> dict[str, Any]:
         command.extend(["--python", str(Path(args.python).expanduser().resolve())])
     if args.project:
         command.extend(["--project", str(Path(args.project).expanduser().resolve())])
+    if args.instance_id:
+        command.extend(["--instance-id", args.instance_id])
     return {
         "id": f"retry-{stage}",
         "description": f"Retry {args.verb} after correcting the reported {stage} failure.",
@@ -328,6 +539,32 @@ def _editor_executable(engine_root: Path) -> Optional[Path]:
             engine_root / "Engine" / "Binaries" / "Linux" / "UE4Editor",
         )
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+
+
+def _editor_identity(engine_root: Path) -> dict[str, Any]:
+    editor = _editor_executable(engine_root)
+    if editor is None:
+        raise ValueError("The selected Unreal Engine root has no editor executable")
+    size = editor.stat().st_size
+    if not 0 < size <= MAX_EDITOR_BYTES:
+        raise ValueError("The selected Unreal editor executable is empty or unbounded")
+    with editor.open("rb") as stream:
+        magic = stream.read(4)
+    native = (
+        magic.startswith(b"MZ")
+        or magic == b"\x7fELF"
+        or magic
+        in {
+            b"\xfe\xed\xfa\xce",
+            b"\xfe\xed\xfa\xcf",
+            b"\xce\xfa\xed\xfe",
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe",
+        }
+    )
+    if not native:
+        raise ValueError("The selected Unreal editor executable is not a loadable native image")
+    return {"path": str(editor), "size": size, "sha256": _sha256(editor)}
 
 
 def _readiness_next_step(args: argparse.Namespace, context: dict[str, Any]) -> dict[str, Any]:
@@ -374,11 +611,12 @@ def _resolve_context(args: argparse.Namespace) -> dict[str, Any]:
     engine_version = _engine_version(engine_root)
     if _version_tuple(engine_version) < MIN_HOST_VERSION:
         raise ValueError(f"Unreal Engine {engine_version} is unsupported; 4.18+ is required")
+    editor = _editor_identity(engine_root)
     project_file = _project_file(args.project)
     project = _read_json(project_file)
     association = str(project.get("EngineAssociation") or "").strip()
-    if association and re.fullmatch(r"\d+(?:\.\d+){0,2}", association):
-        associated_version = _version_tuple(association)
+    if association:
+        associated_version = _project_association_tuple(association)
         selected_version = _version_tuple(engine_version)
         if associated_version[:2] != selected_version[:2]:
             raise ValueError(
@@ -388,17 +626,21 @@ def _resolve_context(args: argparse.Namespace) -> dict[str, Any]:
     if not python_path.is_file():
         raise ValueError("The selected target interpreter does not exist")
     runtime = _target_runtime(python_path)
+    instance_id = str(uuid.UUID(args.instance_id)) if args.instance_id else None
     plugin_root = project_file.parent / "Plugins" / PLUGIN_NAME
     receipt_path = project_file.parent / ".dcc-mcp" / "receipts" / "unreal.json"
     return {
         "engine_root": engine_root,
         "engine_version": engine_version,
         "engine_source": engine_source,
+        "editor_path": Path(editor["path"]),
+        "editor": editor,
         "project_file": project_file,
         "project": project,
         "python_path": python_path,
         "python_source": python_source,
         "runtime": runtime,
+        "instance_id": instance_id,
         "plugin_root": plugin_root,
         "receipt_path": receipt_path,
         "bootstrap_log_dir": project_file.parent / ".dcc-mcp" / "bootstrap-errors",
@@ -439,7 +681,7 @@ def _preflight(args: argparse.Namespace) -> tuple[Optional[dict[str, Any]], Opti
 
 
 def _next_command(args: argparse.Namespace, context: dict[str, Any], *, verb: Optional[str] = None) -> list[str]:
-    return [
+    command = [
         "dcc-mcp-unreal",
         verb or args.verb,
         "--json",
@@ -451,6 +693,9 @@ def _next_command(args: argparse.Namespace, context: dict[str, Any], *, verb: Op
         "--project",
         str(context["project_file"]),
     ]
+    if context["instance_id"]:
+        command.extend(["--instance-id", context["instance_id"]])
+    return command
 
 
 def _plan(
@@ -491,9 +736,14 @@ def _plan(
 
 
 def _write_receipt(
-    context: dict[str, Any], previous_entry: Optional[dict[str, Any]], provenance: str
+    context: dict[str, Any],
+    previous_entry: Optional[dict[str, Any]],
+    provenance: str,
+    runtime_identity: Optional[dict[str, Any]] = None,
+    transaction: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     installed_entry = _plugin_entry(_read_json(context["project_file"]))
+    project_bytes = context["project_file"].read_bytes()
     receipt = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "adapter_version": __version__,
@@ -505,11 +755,21 @@ def _write_receipt(
         "target_python": str(context["python_path"]),
         "target_python_version": context["runtime"]["python_version"],
         "core_version": context["runtime"]["core_version"],
-        "files": _file_manifest(context["plugin_root"]),
+        "engine": {
+            "root": str(context["engine_root"]),
+            "version": context["engine_version"],
+            "editor": context["editor"],
+        },
+        "target_runtime": context["runtime"],
+        "ownership": _file_manifest(context["plugin_root"]),
         "registration": {
             "previous_plugin_entry": previous_entry,
             "installed_plugin_entry": installed_entry,
+            "installed_project_sha256": _sha256_bytes(project_bytes),
         },
+        "instance_selector": context["instance_id"],
+        "runtime_identity": runtime_identity,
+        "transaction": transaction,
         "bootstrap_log_dir": str(context["bootstrap_log_dir"]),
         "sidecar": {
             "runtime_handoff": "dcc-mcp-server sidecar --dcc unreal",
@@ -520,6 +780,150 @@ def _write_receipt(
     }
     _atomic_json(context["receipt_path"], receipt)
     return receipt
+
+
+def _encode_snapshot(value: Optional[bytes]) -> Optional[str]:
+    if value is None:
+        return None
+    if len(value) > MAX_TRANSACTION_SNAPSHOT_BYTES:
+        raise LifecycleError(
+            "The prior project transaction snapshot is too large",
+            exit_code=INSTALL_EXIT_INSTALL,
+            stage="install",
+        )
+    return base64.b64encode(value).decode("ascii")
+
+
+def _decode_snapshot(value: object) -> Optional[bytes]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > (MAX_TRANSACTION_SNAPSHOT_BYTES * 4 // 3) + 8:
+        raise LifecycleError(
+            "The pending transaction snapshot is invalid", exit_code=INSTALL_EXIT_INSTALL, stage="verify"
+        )
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise LifecycleError(
+            "The pending transaction snapshot is invalid", exit_code=INSTALL_EXIT_INSTALL, stage="verify"
+        ) from exc
+    if len(decoded) > MAX_TRANSACTION_SNAPSHOT_BYTES:
+        raise LifecycleError(
+            "The pending transaction snapshot is invalid", exit_code=INSTALL_EXIT_INSTALL, stage="verify"
+        )
+    return decoded
+
+
+def _pending_backup(context: dict[str, Any], receipt: dict[str, Any]) -> Optional[Path]:
+    transaction = receipt.get("transaction")
+    if transaction is None:
+        return None
+    if not isinstance(transaction, dict) or transaction.get("state") != "awaiting-bound-verify":
+        raise LifecycleError(
+            "The pending transaction receipt is invalid", exit_code=INSTALL_EXIT_INSTALL, stage="verify"
+        )
+    raw = transaction.get("backup_plugin")
+    backup = Path(str(raw or "")).resolve()
+    parent = context["plugin_root"].parent.resolve()
+    if backup.parent != parent or not backup.name.startswith(f".{PLUGIN_NAME}.backup-") or not backup.is_dir():
+        raise LifecycleError(
+            "The pending transaction backup is missing or unsafe", exit_code=INSTALL_EXIT_INSTALL, stage="verify"
+        )
+    return backup
+
+
+def _rollback_pending(context: dict[str, Any], receipt: dict[str, Any]) -> None:
+    backup = _pending_backup(context, receipt)
+    if backup is None:
+        return
+    transaction = receipt["transaction"]
+    old_project = _decode_snapshot(transaction.get("previous_project"))
+    old_receipt = _decode_snapshot(transaction.get("previous_receipt"))
+    if old_project is None:
+        raise LifecycleError("The pending project snapshot is missing", exit_code=INSTALL_EXIT_INSTALL, stage="verify")
+    plugin_root: Path = context["plugin_root"]
+    if plugin_root.exists():
+        _remove_tree(plugin_root)
+    os.replace(backup, plugin_root)
+    context["project_file"].write_bytes(old_project)
+    receipt_path: Path = context["receipt_path"]
+    if old_receipt is None:
+        receipt_path.unlink(missing_ok=True)
+    else:
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_bytes(old_receipt)
+
+
+def _finalize_pending(context: dict[str, Any], receipt: dict[str, Any], identity: dict[str, Any]) -> None:
+    backup = _pending_backup(context, receipt)
+    finalized = dict(receipt)
+    finalized["runtime_identity"] = identity
+    finalized["transaction"] = None
+    _atomic_json(context["receipt_path"], finalized)
+    if backup is not None:
+        _remove_tree(backup)
+
+
+def _readiness_identity(
+    args: argparse.Namespace,
+    context: dict[str, Any],
+    receipt: dict[str, Any],
+    readiness: dict[str, Any],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Validate that a typed probe belongs to the exact selected editor instance."""
+    selector = context.get("instance_id")
+    if not selector:
+        return None, "an exact --instance-id is required before the install can be directly usable"
+    if readiness.get("success") is not True or readiness.get("ready") is not True:
+        reason = readiness.get("message") or readiness.get("recommended_next_action") or readiness
+        return None, str(reason)
+    entry = readiness.get("entry")
+    probe = readiness.get("probe")
+    if not isinstance(entry, dict) or entry.get("instance_id") != selector:
+        return None, "readiness entry instance_id does not match the selected instance"
+    entry_pid = entry.get("parent_pid")
+    if isinstance(entry_pid, bool) or not isinstance(entry_pid, int) or not 0 < entry_pid <= 2**31 - 1:
+        return None, "readiness entry parent_pid is invalid"
+    if not isinstance(probe, dict) or probe.get("success") is not True:
+        return None, "the selected instance did not return a successful typed readiness probe"
+    result = probe.get("result")
+    probe_context = result.get("context") if isinstance(result, dict) and result.get("success") is True else None
+    identity = probe_context.get("install_identity") if isinstance(probe_context, dict) else None
+    if not isinstance(identity, dict):
+        return None, "typed readiness probe is missing context.install_identity"
+
+    expected = {
+        "instance_id": selector,
+        "host_pid": entry_pid,
+        "editor_executable": str(context["editor_path"]),
+        "project_file": str(context["project_file"]),
+        "plugin_root": str(context["plugin_root"]),
+        "engine_version": context["engine_version"],
+        "adapter_version": __version__,
+        "core_version": context["runtime"]["core_version"],
+        "adapter_origin": context["runtime"]["adapter_origin"],
+        "core_origin": context["runtime"]["core_origin"],
+    }
+    for field, expected_value in expected.items():
+        actual = identity.get(field)
+        if field in {"editor_executable", "project_file", "plugin_root", "adapter_origin", "core_origin"}:
+            try:
+                matches = Path(str(actual)).resolve() == Path(str(expected_value)).resolve()
+            except (OSError, ValueError):
+                matches = False
+        else:
+            matches = actual == expected_value
+        if not matches:
+            return None, f"typed readiness {field} does not match the selected install"
+    token = identity.get("process_start_token")
+    if not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", token) is None:
+        return None, "typed readiness process_start_token is missing or invalid"
+    previous = receipt.get("runtime_identity")
+    if previous is not None and previous != identity:
+        return None, "typed readiness identity changed from the receipted editor process"
+    if receipt.get("instance_selector") not in {None, selector}:
+        return None, "receipt instance selector does not match the selected instance"
+    return dict(identity), None
 
 
 def _remove_tree(path: Path) -> None:
@@ -576,6 +980,8 @@ def _install(
     installed_entry["Enabled"] = True
     moved_previous = False
     committed = False
+    preserve_backup = False
+    verification: Optional[tuple[int, dict[str, Any]]] = None
     try:
         shutil.copytree(source, staging)
         if not (staging / "DccMcpUnreal.uplugin").is_file():
@@ -597,8 +1003,28 @@ def _install(
         os.replace(staging, plugin_root)
         _set_plugin_entry(project, installed_entry)
         _atomic_json(project_file, project)
-        _write_receipt(context, previous_entry, provenance)
-        committed = True
+        pending_transaction = None
+        if moved_previous and not context["instance_id"]:
+            pending_transaction = {
+                "state": "awaiting-bound-verify",
+                "backup_plugin": str(backup),
+                "previous_project": _encode_snapshot(old_project_bytes),
+                "previous_receipt": _encode_snapshot(old_receipt),
+            }
+        new_receipt = _write_receipt(context, previous_entry, provenance, transaction=pending_transaction)
+        new_state, new_receipt, _ = _inspect_state(context)
+        verification = _verify(args, context, new_state, new_receipt)
+        verify_code, _ = verification
+        if verify_code == INSTALL_EXIT_OK:
+            runtime_identity = context.pop("_verified_runtime_identity", None)
+            _write_receipt(context, previous_entry, provenance, runtime_identity)
+            committed = True
+        elif not context["instance_id"]:
+            # A host that is not yet running cannot provide its instance UUID.
+            # Preserve the static install, but keep directly_usable=false and
+            # require the exact selector on the executable verify command.
+            committed = True
+            preserve_backup = pending_transaction is not None
     except LifecycleError:
         raise
     except PermissionError as exc:
@@ -625,11 +1051,11 @@ def _install(
                 receipt_path.write_bytes(old_receipt)
         if staging.exists():
             _remove_tree(staging)
-        if committed and backup.exists():
+        if committed and backup.exists() and not preserve_backup:
             _remove_tree(backup)
 
-    new_state, new_receipt, _ = _inspect_state(context)
-    return _verify(args, context, new_state, new_receipt)
+    assert verification is not None
+    return verification
 
 
 def _bootstrap_error(context: dict[str, Any]) -> Optional[str]:
@@ -649,6 +1075,7 @@ def _verify(
 ) -> tuple[int, dict[str, Any]]:
     failure_stage: Optional[str] = None
     failure_reason: Optional[str] = None
+    verified_identity: Optional[dict[str, Any]] = None
     steps: list[dict[str, Any]] = []
     if state not in {"current", "upgrade"} or receipt is None:
         failure_stage = "receipt"
@@ -666,9 +1093,16 @@ def _verify(
     if failure_stage is None:
         project_entry = _plugin_entry(_read_json(context["project_file"]))
         expected_entry = receipt.get("registration", {}).get("installed_plugin_entry") if receipt else None
-        if project_entry != expected_entry or not project_entry or project_entry.get("Enabled") is not True:
+        expected_project_hash = receipt.get("registration", {}).get("installed_project_sha256") if receipt else None
+        project_hash = _sha256(context["project_file"])
+        if (
+            project_entry != expected_entry
+            or not project_entry
+            or project_entry.get("Enabled") is not True
+            or expected_project_hash != project_hash
+        ):
             failure_stage = "host-enablement"
-            failure_reason = "the .uproject plugin enablement differs from the receipt"
+            failure_reason = "the .uproject plugin registration or project digest differs from the receipt"
             steps.append({"id": "host-enablement", "status": "failed", "message": failure_reason})
         else:
             steps.append({"id": "host-enablement", "status": "ok"})
@@ -686,19 +1120,35 @@ def _verify(
 
             readiness = wait_for_sidecar_ready(
                 dcc_type=DCC_TYPE,
+                instance_id=context["instance_id"],
                 timeout_secs=args.timeout,
                 probe_tool="unreal_automation__mcp_self_check",
             )
         except (ImportError, OSError, ValueError) as exc:
             readiness = {"success": False, "message": str(exc)}
-        if not readiness.get("success"):
+        identity, readiness_reason = _readiness_identity(args, context, receipt or {}, readiness)
+        if readiness_reason is not None:
             failure_stage = "readiness"
-            failure_reason = str(readiness.get("message") or readiness.get("recommended_next_action") or readiness)
+            failure_reason = readiness_reason
             steps.append({"id": "readiness", "status": "failed", "message": failure_reason})
         else:
+            verified_identity = identity
+            context["_verified_runtime_identity"] = identity
             steps.append({"id": "readiness", "status": "ok"})
 
     directly_usable = failure_stage is None
+    if receipt is not None and receipt.get("transaction") is not None and context["instance_id"]:
+        try:
+            if directly_usable and verified_identity is not None:
+                _finalize_pending(context, receipt, verified_identity)
+            else:
+                _rollback_pending(context, receipt)
+        except (OSError, ValueError) as exc:
+            raise LifecycleError(
+                f"Pending install verification transaction failed: {exc}",
+                exit_code=INSTALL_EXIT_INSTALL,
+                stage="verify",
+            ) from exc
     status = "ok" if directly_usable else "failed"
     if directly_usable:
         next_steps = []
@@ -726,17 +1176,27 @@ def _status(
     context: dict[str, Any],
     state: str,
     state_reason: Optional[str],
+    receipt: Optional[dict[str, Any]],
 ) -> tuple[int, dict[str, Any]]:
     failed = state == "partial"
+    pending_verify = isinstance(receipt, dict) and receipt.get("transaction") is not None
     verify = {
         "directly_usable": False,
-        "failure_stage": "preflight" if failed else None,
-        "failure_reason": state_reason if failed else None,
+        "failure_stage": "preflight" if failed else ("readiness" if pending_verify else None),
+        "failure_reason": (
+            state_reason
+            if failed
+            else ("upgrade is awaiting an exact-instance bound verify" if pending_verify else None)
+        ),
     }
     return (INSTALL_EXIT_PREFLIGHT if failed else INSTALL_EXIT_OK), _result(
         status="partial" if failed else "ok",
         steps=[{"id": "status", "status": "failed" if failed else "ok", "message": state_reason or ""}],
-        next_steps=[_failure_next_step(args, "partial-state")] if failed else [],
+        next_steps=(
+            [_failure_next_step(args, "partial-state")]
+            if failed
+            else ([_readiness_next_step(args, context)] if pending_verify else [])
+        ),
         receipt_path=context["receipt_path"] if context["receipt_path"].is_file() else None,
         verify=verify,
         **_context_fields(context, state),
@@ -767,6 +1227,16 @@ def _uninstall(
             verify={"directly_usable": False, "failure_stage": "preflight", "failure_reason": reason},
             **_context_fields(context, state),
         )
+    if receipt.get("transaction") is not None:
+        reason = "uninstall refuses an upgrade that is still awaiting exact-instance verification"
+        return INSTALL_EXIT_PREFLIGHT, _result(
+            status="partial",
+            steps=[{"id": "preflight", "status": "failed", "message": reason}],
+            next_steps=[_readiness_next_step(args, context)],
+            receipt_path=context["receipt_path"],
+            verify={"directly_usable": False, "failure_stage": "preflight", "failure_reason": reason},
+            **_context_fields(context, state),
+        )
     if args.dry_run or not args.yes:
         return _plan(args, context, state, None)
 
@@ -783,6 +1253,7 @@ def _uninstall(
             **_context_fields(context, state),
         )
     backup = plugin_root.parent / f".{PLUGIN_NAME}.uninstall-{uuid.uuid4().hex}"
+    recovery = plugin_root.parent / f".{PLUGIN_NAME}.recovery-{uuid.uuid4().hex}"
     project_file: Path = context["project_file"]
     old_project = project_file.read_bytes()
     receipt_path: Path = context["receipt_path"]
@@ -790,6 +1261,7 @@ def _uninstall(
     committed = False
     moved = False
     try:
+        shutil.copytree(plugin_root, recovery, symlinks=True)
         os.replace(plugin_root, backup)
         moved = True
         project = _read_json(project_file)
@@ -803,6 +1275,7 @@ def _uninstall(
         _set_plugin_entry(project, receipt.get("registration", {}).get("previous_plugin_entry"))
         _atomic_json(project_file, project)
         receipt_path.unlink()
+        _remove_tree(backup)
         committed = True
     except PermissionError as exc:
         raise LifecycleError(
@@ -821,10 +1294,14 @@ def _uninstall(
             project_file.write_bytes(old_project)
             receipt_path.parent.mkdir(parents=True, exist_ok=True)
             receipt_path.write_bytes(old_receipt)
-            if moved and backup.exists() and not plugin_root.exists():
+            if plugin_root.exists():
+                _remove_tree(plugin_root)
+            if recovery.exists():
+                os.replace(recovery, plugin_root)
+            elif moved and backup.exists():
                 os.replace(backup, plugin_root)
-        if committed and backup.exists():
-            _remove_tree(backup)
+        if committed and recovery.exists():
+            _remove_tree(recovery)
     return INSTALL_EXIT_OK, _result(
         status="ok",
         steps=[{"id": "uninstall", "status": "ok"}],
@@ -843,6 +1320,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dcc-path")
     parser.add_argument("--python")
     parser.add_argument("--project", default=os.environ.get("DCC_MCP_UNREAL_PROJECT", os.getcwd()))
+    parser.add_argument("--instance-id")
     parser.add_argument("--timeout", type=float, default=10.0)
     return parser
 
@@ -854,7 +1332,7 @@ def _execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     assert context is not None
     state, receipt, state_reason = _inspect_state(context)
     if args.verb == "status":
-        return _status(args, context, state, state_reason)
+        return _status(args, context, state, state_reason, receipt)
     if args.verb == "verify":
         return _verify(args, context, state, receipt)
     try:

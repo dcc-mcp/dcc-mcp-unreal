@@ -13,7 +13,7 @@ def build_plugin_package(
     mode: str = "native",
     python_executable: str = "",
     core_wheel: str = "",
-    core_spec: str = "dcc-mcp-core>=0.20.0,<1.0.0",
+    core_spec: str = "dcc-mcp-core>=0.20.13,<1.0.0",
     vctoolchain_version: str = "",
     **kwargs,
 ) -> dict:

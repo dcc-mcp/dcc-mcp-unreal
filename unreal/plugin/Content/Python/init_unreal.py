@@ -37,11 +37,13 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "DccMcpUnreal"
+PROCESS_START_TOKEN = globals().get("PROCESS_START_TOKEN") or uuid.uuid4().hex
 
 
 def _resolve_bootstrap_runtime() -> str:
@@ -612,7 +614,7 @@ def _on_first_tick(delta: float) -> None:
             with capture_bootstrap_errors(
                 "unreal",
                 adapter_version=VERSION,
-                min_core_version="0.20.0",
+                min_core_version="0.20.13",
                 phase="bootstrap",
                 log_dir=str(log_dir),
                 metadata={"runtime_mode": _runtime_mode},

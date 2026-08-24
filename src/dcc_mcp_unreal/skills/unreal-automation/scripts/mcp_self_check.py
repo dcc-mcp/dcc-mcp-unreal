@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import sys
 import urllib.request
+import uuid
+from importlib import metadata
+from pathlib import Path
 
 from dcc_mcp_core.skill import skill_entry
 
@@ -26,6 +32,57 @@ def _http_get(url: str) -> dict:
         return json.loads(text)
     except ValueError:
         return {"raw": text}
+
+
+def _canonical_engine_version(value: object) -> str:
+    match = re.match(r"^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:[-+].*)?$", str(value))
+    if match is None:
+        raise ValueError("Unreal returned a noncanonical engine version")
+    return ".".join(match.groups())
+
+
+def _module_origin(module, package: str) -> str:
+    origin = Path(str(getattr(module, "__file__", ""))).resolve()
+    if not origin.is_file() or origin.stat().st_size <= 0 or origin.parent.name != package:
+        raise ValueError(f"{package} runtime module origin is missing or invalid")
+    return str(origin)
+
+
+def _install_identity(server) -> dict:
+    import dcc_mcp_core  # noqa: PLC0415
+    import init_unreal  # noqa: PLC0415
+
+    import dcc_mcp_unreal  # noqa: PLC0415
+    import unreal  # noqa: PLC0415
+
+    instance_id = str(uuid.UUID(str(getattr(server, "instance_id", ""))))
+    process_start_token = getattr(init_unreal, "PROCESS_START_TOKEN", None)
+    if not isinstance(process_start_token, str) or re.fullmatch(r"[A-Fa-f0-9]{32}", process_start_token) is None:
+        raise ValueError("Unreal bootstrap process token is missing or invalid")
+    editor = Path(sys.executable).resolve()
+    if not editor.is_file() or editor.stat().st_size <= 0:
+        raise ValueError("Unreal editor executable identity is unavailable")
+    project = Path(str(unreal.Paths.get_project_file_path())).resolve()
+    if not project.is_file() or project.suffix.lower() != ".uproject":
+        raise ValueError("Unreal active project identity is unavailable")
+    plugin_root = Path(str(unreal.PluginBlueprintLibrary.get_plugin_base_dir("DccMcpUnreal"))).resolve()
+    if not plugin_root.is_dir() or not (plugin_root / "DccMcpUnreal.uplugin").is_file():
+        raise ValueError("Mounted DccMcpUnreal plugin identity is unavailable")
+    adapter_version = metadata.version("dcc-mcp-unreal")
+    core_version = metadata.version("dcc-mcp-core")
+    return {
+        "instance_id": instance_id,
+        "host_pid": os.getpid(),
+        "process_start_token": process_start_token,
+        "editor_executable": str(editor),
+        "project_file": str(project),
+        "plugin_root": str(plugin_root),
+        "engine_version": _canonical_engine_version(unreal.SystemLibrary.get_engine_version()),
+        "adapter_version": adapter_version,
+        "core_version": core_version,
+        "adapter_origin": _module_origin(dcc_mcp_unreal, "dcc_mcp_unreal"),
+        "core_origin": _module_origin(dcc_mcp_core, "dcc_mcp_core"),
+    }
 
 
 @skill_entry
@@ -90,6 +147,7 @@ def mcp_self_check(check_http: bool = True, **kwargs) -> dict:
             tool_count=len(tool_names),
             sample_tools=tool_names[:20],
             http_status=http_status,
+            install_identity=_install_identity(server),
         )
     except Exception as exc:
         return unreal_from_exception(exc, "MCP server self-check failed")

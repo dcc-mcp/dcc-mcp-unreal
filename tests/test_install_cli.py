@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,10 +16,13 @@ except ImportError:  # pragma: no cover - Python 3.9/3.10 CI
 
 import dcc_mcp_core
 import pytest
+from jsonschema import Draft202012Validator
 
 from dcc_mcp_unreal import install_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "adapter-install-sop-v1.schema.json"
+CORE_2320_SCHEMA_SHA256 = "3ca25788439917b4d4c0617230a762f9797756b5b54f45c8c4149f975b90f904"
 
 
 def _assert_sop_v1(result: dict) -> None:
@@ -38,6 +43,11 @@ def _assert_sop_v1(result: dict) -> None:
     for next_step in result["next_steps"]:
         assert set(next_step) >= {"id", "description", "why"}
         assert ("command" in next_step) ^ ("file_edit" in next_step)
+    schema_bytes = SCHEMA_PATH.read_bytes()
+    assert hashlib.sha256(schema_bytes).hexdigest() == CORE_2320_SCHEMA_SHA256
+    schema = json.loads(schema_bytes)
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(result)
 
 
 def _cli_env() -> dict[str, str]:
@@ -76,6 +86,14 @@ def _synthetic_host(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "Sample" / "Sample.uproject"
     project.parent.mkdir()
     project.write_text(json.dumps({"FileVersion": 3, "EngineAssociation": "5.7"}), encoding="utf-8")
+    if sys.platform == "win32":
+        editor = engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
+    elif sys.platform == "darwin":
+        editor = engine / "Engine" / "Binaries" / "Mac" / "UnrealEditor.app" / "Contents" / "MacOS" / "UnrealEditor"
+    else:
+        editor = engine / "Engine" / "Binaries" / "Linux" / "UnrealEditor"
+    editor.parent.mkdir(parents=True)
+    shutil.copyfile(sys.executable, editor)
     return engine, project
 
 
@@ -393,21 +411,22 @@ def test_failed_upgrade_receipt_commit_restores_previous_install(monkeypatch, tm
 def test_target_runtime_rejects_core_below_floor(monkeypatch, tmp_path: Path) -> None:
     python_path = tmp_path / "python"
     python_path.touch()
-    completed = subprocess.CompletedProcess(
-        args=[str(python_path)],
-        returncode=0,
-        stdout=json.dumps(
+    completed = {
+        "success": True,
+        "returncode": 0,
+        "stdout": json.dumps(
             {
                 "python_version": "3.12.0",
                 "adapter_version": install_cli.__version__,
                 "core_version": "0.19.99",
             }
         ),
-        stderr="",
-    )
-    monkeypatch.setattr(install_cli.subprocess, "run", lambda *_args, **_kwargs: completed)
+        "stderr": "",
+        "truncated": False,
+    }
+    monkeypatch.setattr(install_cli, "_run_bounded_probe", lambda *_args, **_kwargs: completed)
 
-    with pytest.raises(ValueError, match=r"0\.20\.0\+"):
+    with pytest.raises(ValueError, match=r"0\.20\.13\+"):
         install_cli._target_runtime(python_path)
 
 
@@ -423,7 +442,7 @@ def test_lifecycle_cli_rejects_core_below_floor(monkeypatch, tmp_path: Path) -> 
     assert failure is not None
     exit_code, result = failure
     assert exit_code == 10
-    assert "0.20.0+" in result["verify"]["failure_reason"]
+    assert "0.20.13+" in result["verify"]["failure_reason"]
 
 
 def test_verify_reports_directly_usable_only_after_typed_probe(monkeypatch, tmp_path: Path) -> None:
@@ -436,18 +455,18 @@ def test_verify_reports_directly_usable_only_after_typed_probe(monkeypatch, tmp_
         sys.executable,
         "--project",
         str(project),
+        "--instance-id",
+        "11111111-1111-1111-1111-111111111111",
         "--timeout",
         "0",
     ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    context = install_cli._resolve_context(install_args)
     monkeypatch.setattr(
         dcc_mcp_core,
         "wait_for_sidecar_ready",
-        lambda **kwargs: {
-            "success": kwargs["probe_tool"] == "unreal_automation__mcp_self_check",
-            "ready": True,
-        },
+        lambda **kwargs: _bound_readiness(context),
     )
-    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
 
     exit_code, result = install_cli._execute(install_args)
 
@@ -468,7 +487,7 @@ def test_readiness_failure_returns_exact_editor_launch_step(tmp_path: Path) -> N
         editor = engine / "Engine" / "Binaries" / "Mac" / "UnrealEditor.app" / "Contents" / "MacOS" / "UnrealEditor"
     else:
         editor = engine / "Engine" / "Binaries" / "Linux" / "UnrealEditor"
-    editor.parent.mkdir(parents=True)
+    editor.parent.mkdir(parents=True, exist_ok=True)
     editor.touch()
     common = [
         "--json",
@@ -570,3 +589,433 @@ def test_repair_refuses_unreceipted_files_inside_plugin_root(tmp_path: Path) -> 
     assert result["install_state"] == "partial"
     assert "unreceipted" in result["verify"]["failure_reason"]
     assert user_file.read_text(encoding="utf-8") == "preserve me"
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "0.20.13rc1",
+        "garbage0.20.13",
+        "0.20.13suffix",
+        " 0.20.13",
+        "0.20",
+        "0.20.13.1",
+        "0." + "9" * 5000 + ".1",
+    ),
+)
+def test_versions_are_bounded_canonical_finals(value: str) -> None:
+    with pytest.raises(ValueError, match="canonical"):
+        install_cli._version_tuple(value)
+
+
+def test_zero_byte_editor_is_not_a_usable_host(tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    editor = install_cli._editor_executable(engine)
+    assert editor is not None
+    editor.write_bytes(b"")
+    args = install_cli._parser().parse_args(
+        [
+            "status",
+            "--json",
+            "--dcc-path",
+            str(engine),
+            "--python",
+            sys.executable,
+            "--project",
+            str(project),
+        ]
+    )
+
+    context, failure = install_cli._preflight(args)
+
+    assert context is None
+    assert failure is not None
+    assert failure[0] == 10
+    assert "editor" in failure[1]["verify"]["failure_reason"].lower()
+
+
+def test_manifest_owns_directories_and_rejects_unexpected_empty_directory(tmp_path: Path) -> None:
+    root = tmp_path / "plugin"
+    (root / "Content" / "Python").mkdir(parents=True)
+    (root / "Content" / "Python" / "init_unreal.py").write_text("pass\n", encoding="utf-8")
+    manifest = install_cli._file_manifest(root)
+    assert {item["type"] for item in manifest} == {"directory", "file"}
+    receipt = {"ownership": manifest}
+    assert install_cli._manifest_matches(root, receipt)[:2] == (True, "")
+
+    (root / "StudioOwnedEmpty").mkdir()
+    matches, reason, has_unreceipted = install_cli._manifest_matches(root, receipt)
+
+    assert matches is False
+    assert has_unreceipted is True
+    assert "unreceipted" in reason
+
+
+def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, tmp_path: Path) -> None:
+    python_path = tmp_path / "python"
+    python_path.touch()
+    site = tmp_path / "site-packages"
+    shadow_origin = tmp_path / "shadow" / "dcc_mcp_unreal" / "__init__.py"
+    core_origin = site / "dcc_mcp_core" / "__init__.py"
+    shadow_origin.parent.mkdir(parents=True)
+    core_origin.parent.mkdir(parents=True)
+    shadow_origin.write_text("# shadow\n", encoding="utf-8")
+    core_origin.write_text("# core\n", encoding="utf-8")
+    completed = {
+        "success": True,
+        "returncode": 0,
+        "stdout": json.dumps(
+            {
+                "python_executable": str(python_path.resolve()),
+                "python_version": "3.12.0",
+                "adapter": {
+                    "version": install_cli.__version__,
+                    "module_version": install_cli.__version__,
+                    "origin": str(shadow_origin.resolve()),
+                    "distribution_root": str(site.resolve()),
+                    "record": "dcc_mcp_unreal/__init__.py",
+                    "direct_url": None,
+                },
+                "core": {
+                    "version": install_cli.MIN_CORE_VERSION,
+                    "module_version": None,
+                    "origin": str(core_origin.resolve()),
+                    "distribution_root": str(site.resolve()),
+                    "record": "dcc_mcp_core/__init__.py",
+                    "direct_url": None,
+                },
+            }
+        ),
+        "stderr": "",
+        "truncated": False,
+    }
+    monkeypatch.setattr(install_cli, "_run_bounded_probe", lambda *_args, **_kwargs: completed)
+
+    with pytest.raises(ValueError, match="origin"):
+        install_cli._target_runtime(python_path)
+
+
+def _bound_readiness(context: dict, *, instance_id: str = "11111111-1111-1111-1111-111111111111") -> dict:
+    identity = {
+        "instance_id": instance_id,
+        "host_pid": 4242,
+        "process_start_token": "unreal-start-token",
+        "editor_executable": str(context["editor_path"]),
+        "project_file": str(context["project_file"]),
+        "plugin_root": str(context["plugin_root"]),
+        "engine_version": context["engine_version"],
+        "adapter_version": install_cli.__version__,
+        "core_version": context["runtime"]["core_version"],
+        "adapter_origin": context["runtime"]["adapter_origin"],
+        "core_origin": context["runtime"]["core_origin"],
+    }
+    return {
+        "success": True,
+        "ready": True,
+        "entry": {"instance_id": instance_id, "parent_pid": 4242},
+        "probe": {"success": True, "result": {"success": True, "context": {"install_identity": identity}}},
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("instance_id", "22222222-2222-2222-2222-222222222222"),
+        ("host_pid", 5151),
+        ("process_start_token", "bad"),
+        ("editor_executable", "foreign-editor"),
+        ("project_file", "foreign-project"),
+        ("plugin_root", "foreign-plugin"),
+        ("engine_version", "5.6.0"),
+        ("adapter_version", "0.0.1"),
+        ("core_version", "0.0.1"),
+        ("adapter_origin", "foreign-adapter"),
+        ("core_origin", "foreign-core"),
+    ),
+)
+def test_readiness_identity_rejects_each_foreign_runtime_axis(tmp_path: Path, field: str, replacement: object) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    args = install_cli._parser().parse_args(
+        [
+            "verify",
+            "--dcc-path",
+            str(engine),
+            "--python",
+            sys.executable,
+            "--project",
+            str(project),
+            "--instance-id",
+            "11111111-1111-1111-1111-111111111111",
+        ]
+    )
+    context = install_cli._resolve_context(args)
+    readiness = _bound_readiness(context)
+    readiness["probe"]["result"]["context"]["install_identity"][field] = replacement
+
+    identity, reason = install_cli._readiness_identity(
+        args,
+        context,
+        {"instance_selector": context["instance_id"], "runtime_identity": None},
+        readiness,
+    )
+
+    assert identity is None
+    assert reason is not None
+    assert field in reason
+
+
+def test_receipted_process_token_rejects_pid_reuse(tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    args = install_cli._parser().parse_args(
+        [
+            "verify",
+            "--dcc-path",
+            str(engine),
+            "--python",
+            sys.executable,
+            "--project",
+            str(project),
+            "--instance-id",
+            "11111111-1111-1111-1111-111111111111",
+        ]
+    )
+    context = install_cli._resolve_context(args)
+    readiness = _bound_readiness(context)
+    previous = dict(readiness["probe"]["result"]["context"]["install_identity"])
+    readiness["probe"]["result"]["context"]["install_identity"]["process_start_token"] = "replacement-start-token"
+
+    identity, reason = install_cli._readiness_identity(
+        args,
+        context,
+        {"instance_selector": context["instance_id"], "runtime_identity": previous},
+        readiness,
+    )
+
+    assert identity is None
+    assert reason == "typed readiness identity changed from the receipted editor process"
+
+
+def test_verify_rejects_foreign_project_instance(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--instance-id",
+        "11111111-1111-1111-1111-111111111111",
+        "--timeout",
+        "0",
+    ]
+    args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    context = install_cli._resolve_context(args)
+    readiness = _bound_readiness(context)
+    readiness["probe"]["result"]["context"]["install_identity"]["project_file"] = str(
+        (tmp_path / "Foreign.uproject").resolve()
+    )
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: readiness)
+
+    exit_code, result = install_cli._execute(args)
+
+    assert exit_code == 40
+    assert result["verify"]["directly_usable"] is False
+    assert "project_file" in result["verify"]["failure_reason"]
+    assert not (project.parent / "Plugins" / "DccMcpUnreal").exists()
+    assert not (project.parent / ".dcc-mcp" / "receipts" / "unreal.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("verb", "extra", "expected_exit"),
+    (
+        ("install", ["--dry-run"], 0),
+        ("status", [], 0),
+        ("verify", [], 40),
+        ("uninstall", ["--yes"], 0),
+        ("upgrade", ["--dry-run"], 0),
+    ),
+)
+def test_all_public_verbs_validate_against_core_draft_schema(
+    tmp_path: Path, verb: str, extra: list[str], expected_exit: int
+) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    args = install_cli._parser().parse_args(
+        [
+            verb,
+            "--json",
+            "--dcc-path",
+            str(engine),
+            "--python",
+            sys.executable,
+            "--project",
+            str(project),
+            "--timeout",
+            "0",
+            *extra,
+        ]
+    )
+
+    exit_code, result = install_cli._execute(args)
+
+    assert exit_code == expected_exit
+    _assert_sop_v1(result)
+
+
+def test_upgrade_keeps_prior_install_until_bound_verify_succeeds(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--instance-id",
+        "11111111-1111-1111-1111-111111111111",
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    context = install_cli._resolve_context(install_args)
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
+    assert install_cli._execute(install_args)[0] == 0
+    plugin_root = context["plugin_root"]
+    receipt_path = context["receipt_path"]
+    prior_files = install_cli._file_manifest(plugin_root)
+    prior_project = project.read_bytes()
+    prior_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    prior_receipt["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(prior_receipt), encoding="utf-8")
+    prior_receipt_bytes = receipt_path.read_bytes()
+    foreign = _bound_readiness(context)
+    foreign["probe"]["result"]["context"]["install_identity"]["plugin_root"] = str(
+        (tmp_path / "ForeignPlugin").resolve()
+    )
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: foreign)
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+
+    exit_code, result = install_cli._execute(upgrade_args)
+
+    assert exit_code == 40
+    assert "plugin_root" in result["verify"]["failure_reason"]
+    assert install_cli._file_manifest(plugin_root) == prior_files
+    assert project.read_bytes() == prior_project
+    assert receipt_path.read_bytes() == prior_receipt_bytes
+    assert not list(plugin_root.parent.glob(".DccMcpUnreal.*-*"))
+
+
+def test_upgrade_without_live_selector_keeps_rollback_until_later_bound_verify(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    assert install_cli._execute(install_args)[0] == 40
+    context = install_cli._resolve_context(install_args)
+    plugin_root = context["plugin_root"]
+    receipt_path = context["receipt_path"]
+    prior_files = install_cli._file_manifest(plugin_root)
+    prior_project = project.read_bytes()
+    prior_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    prior_receipt["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(prior_receipt), encoding="utf-8")
+    prior_receipt_bytes = receipt_path.read_bytes()
+
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+    exit_code, _ = install_cli._execute(upgrade_args)
+    pending_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 40
+    assert pending_receipt["transaction"]["state"] == "awaiting-bound-verify"
+    assert Path(pending_receipt["transaction"]["backup_plugin"]).is_dir()
+    status_args = install_cli._parser().parse_args(["status", *common])
+    status_code, status_result = install_cli._execute(status_args)
+    uninstall_args = install_cli._parser().parse_args(["uninstall", *common, "--yes"])
+    uninstall_code, uninstall_result = install_cli._execute(uninstall_args)
+
+    assert status_code == 0
+    assert status_result["verify"]["failure_stage"] == "readiness"
+    assert status_result["next_steps"][0]["id"] == "launch-unreal-editor"
+    assert uninstall_code == 10
+    assert "awaiting exact-instance" in uninstall_result["verify"]["failure_reason"]
+    assert Path(pending_receipt["transaction"]["backup_plugin"]).is_dir()
+
+    verify_args = install_cli._parser().parse_args(
+        [
+            "verify",
+            *common,
+            "--instance-id",
+            "11111111-1111-1111-1111-111111111111",
+        ]
+    )
+    verify_context = install_cli._resolve_context(verify_args)
+    foreign = _bound_readiness(verify_context)
+    foreign["probe"]["result"]["context"]["install_identity"]["project_file"] = str(
+        (tmp_path / "Foreign.uproject").resolve()
+    )
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: foreign)
+
+    exit_code, result = install_cli._execute(verify_args)
+
+    assert exit_code == 40
+    assert "project_file" in result["verify"]["failure_reason"]
+    assert install_cli._file_manifest(plugin_root) == prior_files
+    assert project.read_bytes() == prior_project
+    assert receipt_path.read_bytes() == prior_receipt_bytes
+    assert not list(plugin_root.parent.glob(".DccMcpUnreal.*-*"))
+
+
+def test_uninstall_delete_failure_restores_every_owned_byte(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--instance-id",
+        "11111111-1111-1111-1111-111111111111",
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    context = install_cli._resolve_context(install_args)
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
+    assert install_cli._execute(install_args)[0] == 0
+    plugin_root = context["plugin_root"]
+    receipt_path = context["receipt_path"]
+    prior_files = install_cli._file_manifest(plugin_root)
+    prior_project = project.read_bytes()
+    prior_receipt = receipt_path.read_bytes()
+    real_remove = install_cli._remove_tree
+
+    def fail_quarantine(path: Path) -> None:
+        if ".uninstall-" in path.name:
+            victim = next(item for item in path.rglob("*") if item.is_file())
+            victim.unlink()
+            raise OSError("injected partial quarantine delete")
+        real_remove(path)
+
+    monkeypatch.setattr(install_cli, "_remove_tree", fail_quarantine)
+    uninstall_args = install_cli._parser().parse_args(["uninstall", *common, "--yes"])
+
+    exit_code, result = install_cli._execute(uninstall_args)
+
+    assert exit_code == 30
+    assert result["verify"]["failure_stage"] == "uninstall"
+    assert install_cli._file_manifest(plugin_root) == prior_files
+    assert project.read_bytes() == prior_project
+    assert receipt_path.read_bytes() == prior_receipt

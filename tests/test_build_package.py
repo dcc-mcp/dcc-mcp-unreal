@@ -64,7 +64,7 @@ def test_local_core_version_must_meet_plugin_minimum(tmp_path):
     try:
         module.validate_local_core(core)
     except ValueError as exc:
-        assert "0.20.0" in str(exc)
+        assert "0.20.13" in str(exc)
     else:
         raise AssertionError("stale local core must be rejected")
 

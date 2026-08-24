@@ -92,7 +92,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Run lifecycle and bootstrap contract tests
-        run: python -m pytest tests/test_install_cli.py tests/test_bootstrap_diagnostics.py -q
+        run: python -m pytest tests/test_install_cli.py tests/test_unreal_install_identity.py tests/test_bootstrap_diagnostics.py -q
 
       - name: Build and inspect wheel lifecycle payload
         run: |

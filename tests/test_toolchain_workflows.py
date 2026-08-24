@@ -191,7 +191,7 @@ def test_build_workflow_vendors_the_base_core_wheel() -> None:
 
 
 def test_core_floor_includes_explicit_ui_control_resume_fix() -> None:
-    requirement = "dcc-mcp-core>=0.20.0,<1.0.0"
+    requirement = "dcc-mcp-core>=0.20.13,<1.0.0"
 
     assert requirement in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert requirement in BUILD_PACKAGE_SCRIPT.read_text(encoding="utf-8")

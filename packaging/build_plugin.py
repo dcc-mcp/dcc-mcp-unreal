@@ -18,8 +18,8 @@ PLUGIN_SOURCE = REPO_ROOT / "unreal" / "plugin"
 DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "DccMcpUnreal"
 DEFAULT_UE_ROOT = Path(os.environ.get("UE_ROOT", r"C:\Program Files\Epic Games\UE_5.2"))
 DEFAULT_CORE_ROOT = Path(os.environ.get("DCC_MCP_CORE_ROOT", str(REPO_ROOT.parent / "dcc-mcp-core")))
-DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.20.0,<1.0.0")
-MIN_CORE_VERSION = (0, 20, 0)
+DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.20.13,<1.0.0")
+MIN_CORE_VERSION = (0, 20, 13)
 DEFAULT_CORE_WHEEL = os.environ.get("DCC_MCP_CORE_WHEEL")
 
 
