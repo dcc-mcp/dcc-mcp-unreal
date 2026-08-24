@@ -9,6 +9,11 @@
 #include "Editor.h"
 #include "Dom/JsonObject.h"
 #include "Engine/StaticMesh.h"
+#include "GameFramework/PlayerController.h"
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+#include "GameFramework/PlayerInput.h"
+#endif
+#include "InputCoreTypes.h"
 #if ENGINE_MAJOR_VERSION >= 5
 #include "GeometryCollection/GeometryCollectionActor.h"
 #include "GeometryCollection/GeometryCollectionAlgo.h"
@@ -119,6 +124,21 @@ FString SerializeJson(const TSharedRef<FJsonObject>& Root)
     FJsonSerializer::Serialize(Root, Writer);
     return Output;
 }
+
+APlayerController* GetPiePlayerController()
+{
+    UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+    return PlayWorld ? PlayWorld->GetFirstPlayerController() : nullptr;
+}
+
+bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float Value)
+{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    return PlayerController->InputKey(FInputKeyParams(Key, Event, static_cast<double>(Value), false));
+#else
+    return PlayerController->InputKey(Key, Event, Value, false);
+#endif
+}
 } // namespace
 
 TArray<FString> UDccMcpAutomationLibrary::GetEnabledPluginNames()
@@ -174,6 +194,28 @@ FString UDccMcpAutomationLibrary::ListAutomationTestsJson(const FString& Filter)
     Root->SetArrayField(TEXT("tests"), Tests);
 
     return SerializeJson(Root);
+}
+
+bool UDccMcpAutomationLibrary::InjectPieKey(const FString& KeyName, bool bPressed)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    const FKey Key = FKey(FName(*KeyName));
+    if (!PlayerController || !Key.IsValid())
+    {
+        return false;
+    }
+    return InjectPlayerInput(PlayerController, Key, bPressed ? IE_Pressed : IE_Released, bPressed ? 1.0f : 0.0f);
+}
+
+bool UDccMcpAutomationLibrary::InjectPieAxis(const FString& KeyName, float Value)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    const FKey Key = FKey(FName(*KeyName));
+    if (!PlayerController || !Key.IsValid())
+    {
+        return false;
+    }
+    return InjectPlayerInput(PlayerController, Key, IE_Axis, Value);
 }
 
 FString UDccMcpAutomationLibrary::GetFabSessionStatusJson()

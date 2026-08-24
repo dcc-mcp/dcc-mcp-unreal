@@ -16,6 +16,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Automation")
     static FString ListAutomationTestsJson(const FString& Filter);
 
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool InjectPieKey(const FString& KeyName, bool bPressed);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool InjectPieAxis(const FString& KeyName, float Value);
+
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static FString GetFabSessionStatusJson();
 

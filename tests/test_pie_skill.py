@@ -62,6 +62,13 @@ def _fake_unreal_module():
     unreal.EditorLevelLibrary = MagicMock()
     unreal.SystemLibrary = MagicMock()
 
+    unreal.DccMcpAutomationLibrary = types.SimpleNamespace(
+        inject_pie_key=MagicMock(return_value=True),
+        inject_pie_axis=MagicMock(return_value=True),
+    )
+    unreal.register_slate_post_tick_callback = MagicMock(return_value="tick-handle")
+    unreal.unregister_slate_post_tick_callback = MagicMock()
+
     # Paths
     unreal.Paths = MagicMock()
     unreal.Paths.project_dir.return_value = "/tmp/FakeProject"
@@ -364,20 +371,60 @@ class TestPieInjectInput:
         result = mod.pie_inject_input(input_type="key_press", key="")
         assert result["success"] is False
 
-    def test_key_press(self):
-        """key_press injects via console command."""
+    def test_key_press_uses_native_pie_bridge(self):
+        """key_press targets the possessed PIE player through the native bridge."""
         _ensure_fresh_helpers()
         with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             _ensure_fresh_helpers()
             mod = _import_script("pie_inject_input")
             result = mod.pie_inject_input(input_type="key_press", key="W")
             assert result["success"] is True
             assert "W" in str(result.get("context", {}).get("key", ""))
+            fake_ue.DccMcpAutomationLibrary.inject_pie_key.assert_called_once_with("W", True)
+
+    def test_key_press_fails_closed_outside_pie(self):
+        """Acknowledgement is not returned when there is no active PIE world."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = False
+            mod = _import_script("pie_inject_input")
+            result = mod.pie_inject_input(input_type="key_press", key="W")
+            assert result["success"] is False
+            fake_ue.DccMcpAutomationLibrary.inject_pie_key.assert_not_called()
+
+    def test_key_tap_schedules_release_without_blocking_the_game_thread(self):
+        """A held tap releases on a later Slate tick instead of sleeping the PIE thread."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            mod = _import_script("pie_inject_input")
+            with patch.object(mod.time, "monotonic", side_effect=[100.0, 101.1]):
+                result = mod.pie_inject_input(input_type="key_tap", key="W", duration=1.0)
+                callback = fake_ue.register_slate_post_tick_callback.call_args.args[0]
+                callback(0.016)
+
+            assert result["success"] is True
+            assert result["context"]["release_scheduled"] is True
+            assert fake_ue.DccMcpAutomationLibrary.inject_pie_key.call_args_list == [
+                (("W", True),),
+                (("W", False),),
+            ]
+            fake_ue.unregister_slate_post_tick_callback.assert_called_once_with("tick-handle")
 
     def test_mouse_button(self):
         """mouse_button injects via resolved key name."""
         _ensure_fresh_helpers()
         with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             _ensure_fresh_helpers()
             mod = _import_script("pie_inject_input")
             result = mod.pie_inject_input(input_type="mouse_button", button="left")
@@ -387,10 +434,17 @@ class TestPieInjectInput:
         """mouse_move injects delta."""
         _ensure_fresh_helpers()
         with _patch_unreal():
+            import unreal as fake_ue
+
+            fake_ue._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
             _ensure_fresh_helpers()
             mod = _import_script("pie_inject_input")
             result = mod.pie_inject_input(input_type="mouse_move", delta_x=10.0, delta_y=20.0)
             assert result["success"] is True
+            assert fake_ue.DccMcpAutomationLibrary.inject_pie_axis.call_args_list == [
+                (("MouseX", 10.0),),
+                (("MouseY", 20.0),),
+            ]
 
     def test_key_name_resolution(self):
         """Common short key names resolve to Unreal key names."""
