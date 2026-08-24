@@ -83,6 +83,15 @@ def _capture_world(unreal, playing_in_editor: bool):
     return unreal.EditorLevelLibrary.get_editor_world()
 
 
+def _high_res_shot_command(filepath: str, resolution_x: int, resolution_y: int) -> str:
+    """Build the UE HighResShot grammar with its required size argument."""
+    size = "{}x{}".format(int(resolution_x), int(resolution_y))
+    if resolution_x <= 0 or resolution_y <= 0:
+        size = "1"
+    console_filepath = filepath.replace("\\", "/").replace('"', '\\"')
+    return 'HighResShot {} filename="{}"'.format(size, console_filepath)
+
+
 @skill_entry
 def pie_capture_screenshot(
     filepath: str = "",
@@ -146,10 +155,7 @@ def pie_capture_screenshot(
 
         # Fallback: HighResShot console command
         world = _capture_world(unreal, playing_in_editor)
-        if resolution_x > 0 and resolution_y > 0:
-            cmd = "HighResShot {}x{} filename={}".format(int(resolution_x), int(resolution_y), filepath)
-        else:
-            cmd = "HighResShot filename={}".format(filepath)
+        cmd = _high_res_shot_command(filepath, resolution_x, resolution_y)
 
         job_id = _create_screenshot_job(filepath, "console_command")
         unreal.SystemLibrary.execute_console_command(world, cmd)
