@@ -1,8 +1,9 @@
 """Capture a viewport screenshot to a PNG file.
 
-Uses Unreal Engine's AutomationLibrary (take_high_res_screenshot) when available,
-falls back to the HighResShot console command. Saves to the specified path or a
-timestamped default in the project Saved/Screenshots directory.
+Uses Unreal Engine's AutomationLibrary (take_high_res_screenshot) outside PIE.
+While PIE is running, queues the HighResShot console command against the game
+world so the main-thread MCP request can return before the next frame. Saves to
+the specified path or a timestamped default in Saved/Screenshots.
 """
 
 from __future__ import annotations
@@ -54,6 +55,34 @@ def _default_screenshot_path() -> str:
     return os.path.join(saved_dir, "pie_{}.png".format(timestamp))
 
 
+def _is_playing_in_editor(unreal) -> bool:
+    """Return whether PIE is active without assuming every supported UE API exists."""
+    get_subsystem = getattr(unreal, "get_editor_subsystem", None)
+    subsystem_type = getattr(unreal, "LevelEditorSubsystem", None)
+    if not callable(get_subsystem) or subsystem_type is None:
+        return False
+
+    subsystem = get_subsystem(subsystem_type)
+    is_playing = getattr(subsystem, "is_in_play_in_editor", None)
+    return bool(is_playing()) if callable(is_playing) else False
+
+
+def _capture_world(unreal, playing_in_editor: bool):
+    """Resolve the game world during PIE and the editor world otherwise."""
+    get_subsystem = getattr(unreal, "get_editor_subsystem", None)
+    subsystem_type = getattr(unreal, "UnrealEditorSubsystem", None)
+    if callable(get_subsystem) and subsystem_type is not None:
+        subsystem = get_subsystem(subsystem_type)
+        getter_name = "get_game_world" if playing_in_editor else "get_editor_world"
+        getter = getattr(subsystem, getter_name, None)
+        if callable(getter):
+            world = getter()
+            if world is not None:
+                return world
+
+    return unreal.EditorLevelLibrary.get_editor_world()
+
+
 @skill_entry
 def pie_capture_screenshot(
     filepath: str = "",
@@ -88,8 +117,16 @@ def pie_capture_screenshot(
     try:
         import unreal  # noqa: PLC0415
 
-        # Preferred path: AutomationLibrary high-res screenshot
-        if hasattr(unreal, "AutomationLibrary") and hasattr(unreal.AutomationLibrary, "take_high_res_screenshot"):
+        playing_in_editor = _is_playing_in_editor(unreal)
+
+        # AutomationLibrary can wait for a later frame while its Python call still owns
+        # Unreal's main thread. During PIE, use the queue-only console path so the MCP
+        # request returns immediately and callers can poll the adapter-owned job.
+        if (
+            not playing_in_editor
+            and hasattr(unreal, "AutomationLibrary")
+            and hasattr(unreal.AutomationLibrary, "take_high_res_screenshot")
+        ):
             job_id = _create_screenshot_job(filepath, "automation_library")
             unreal.AutomationLibrary.take_high_res_screenshot(
                 resolution_x if resolution_x > 0 else 0,
@@ -108,7 +145,7 @@ def pie_capture_screenshot(
             )
 
         # Fallback: HighResShot console command
-        world = unreal.EditorLevelLibrary.get_editor_world()
+        world = _capture_world(unreal, playing_in_editor)
         if resolution_x > 0 and resolution_y > 0:
             cmd = "HighResShot {}x{} filename={}".format(int(resolution_x), int(resolution_y), filepath)
         else:
