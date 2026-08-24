@@ -639,6 +639,26 @@ class TestPieCaptureScreenshot:
         assert result["context"]["job_id"].startswith("pie_screenshot_")
         assert "requested" in result["message"].lower()
 
+    def test_capture_during_pie_avoids_blocking_automation_library(self, tmp_path):
+        """PIE capture queues HighResShot so the main-thread tool call can return immediately."""
+        _ensure_fresh_helpers()
+        with _patch_unreal():
+            fake = sys.modules["unreal"]
+            fake._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            mod = _import_script("pie_capture_screenshot")
+
+            result = mod.pie_capture_screenshot(filepath=str(tmp_path / "pie.png"))
+
+            fake.AutomationLibrary.take_high_res_screenshot.assert_not_called()
+            fake.SystemLibrary.execute_console_command.assert_called_once_with(
+                fake._fake_game_world,
+                "HighResShot filename={}".format(os.path.abspath(tmp_path / "pie.png")),
+            )
+
+        assert result["success"] is True
+        assert result["context"]["method"] == "console_command"
+        assert result["context"]["capture_pending"] is True
+
     def test_screenshot_job_completes_only_after_png_exists(self, tmp_path):
         _ensure_fresh_helpers()
         filepath = tmp_path / "automation.png"
