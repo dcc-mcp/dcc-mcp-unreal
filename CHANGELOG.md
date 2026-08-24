@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.1...v0.3.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* support PIE menu input ([94ccbd8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/94ccbd8a6b1f75e26c5912c2a05f0f5e75ed4916))
+* support positioned PIE menu clicks ([#184](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/184)) ([4fd5031](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4fd5031f56ff3ac2b89324edf63c5801505ae9b3))
+
 ## [0.3.1](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.0...v0.3.1) (2026-08-24)
 
 
