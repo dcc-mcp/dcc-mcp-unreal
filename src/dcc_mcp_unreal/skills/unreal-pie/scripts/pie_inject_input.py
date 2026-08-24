@@ -7,11 +7,32 @@ PIE viewport.
 
 from __future__ import annotations
 
+import time
+
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_error, unreal_from_exception, unreal_success
 
 _VALID_INPUT_TYPES = {"key_press", "key_release", "key_tap", "mouse_button", "mouse_move", "mouse_scroll"}
+
+
+def _is_pie_active(unreal) -> bool:
+    subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    return bool(subsystem and subsystem.is_in_play_in_editor())
+
+
+def _pie_bridge(unreal):
+    bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
+    if bridge is None or not callable(getattr(bridge, "inject_pie_key", None)):
+        return None
+    return bridge
+
+
+def _injection_unavailable_error() -> dict:
+    return unreal_error(
+        "Cannot inject input: no active PIE player is available",
+        possible_solutions=["Start a PIE session and wait for its player controller before injecting input."],
+    )
 
 
 def _resolve_key_name(key: str) -> str:
@@ -46,24 +67,13 @@ def _inject_key_press(key: str) -> dict:
     import unreal  # noqa: PLC0415
 
     resolved = _resolve_key_name(key)
-    # Use the InputProcessor subsystem
-    input_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
-    if input_subsystem is not None:
-        # Use console command - the most reliable cross-version path
-        cmd = "InputKey {}".format(resolved)
-        unreal.SystemLibrary.execute_console_command(
-            unreal.EditorLevelLibrary.get_editor_world(),
-            cmd,
-        )
-        return unreal_success(
-            "Key press injected: {}".format(resolved),
-            key=resolved,
-            resolved_from=key if key != resolved else None,
-        )
-
-    return unreal_error(
-        "Cannot inject input: no input subsystem available",
-        possible_solutions=["Ensure a PIE session is active."],
+    bridge = _pie_bridge(unreal)
+    if not _is_pie_active(unreal) or bridge is None or not bridge.inject_pie_key(resolved, True):
+        return _injection_unavailable_error()
+    return unreal_success(
+        "Key press injected: {}".format(resolved),
+        key=resolved,
+        resolved_from=key if key != resolved else None,
     )
 
 
@@ -72,11 +82,9 @@ def _inject_key_release(key: str) -> dict:
     import unreal  # noqa: PLC0415
 
     resolved = _resolve_key_name(key)
-    cmd = "InputKey {} Release".format(resolved)
-    unreal.SystemLibrary.execute_console_command(
-        unreal.EditorLevelLibrary.get_editor_world(),
-        cmd,
-    )
+    bridge = _pie_bridge(unreal)
+    if not _is_pie_active(unreal) or bridge is None or not bridge.inject_pie_key(resolved, False):
+        return _injection_unavailable_error()
     return unreal_success(
         "Key release injected: {}".format(resolved),
         key=resolved,
@@ -84,17 +92,52 @@ def _inject_key_release(key: str) -> dict:
 
 
 def _inject_key_tap(key: str, duration: float = 0.0) -> dict:
-    """Inject a key press followed by release."""
-    _inject_key_press(key)
-    if duration > 0:
-        import time
+    """Inject a key press and schedule release without blocking the game thread."""
+    press_result = _inject_key_press(key)
+    if not press_result.get("success"):
+        return press_result
 
-        time.sleep(min(duration, 5.0))
-    _inject_key_release(key)
+    resolved = _resolve_key_name(key)
+    hold_seconds = max(0.0, min(float(duration), 5.0))
+    if hold_seconds <= 0.0:
+        return _inject_key_release(key)
+
+    import dcc_mcp_unreal  # noqa: PLC0415
+    import unreal  # noqa: PLC0415
+
+    register_tick = getattr(unreal, "register_slate_post_tick_callback", None)
+    unregister_tick = getattr(unreal, "unregister_slate_post_tick_callback", None)
+    if not callable(register_tick) or not callable(unregister_tick):
+        _inject_key_release(key)
+        return unreal_error("Cannot schedule PIE key release: Slate tick callbacks are unavailable")
+
+    release_at = time.monotonic() + hold_seconds
+    handle_holder = {}
+
+    def _release_on_tick(_delta_seconds: float = 0.0) -> None:
+        if time.monotonic() < release_at:
+            return
+        try:
+            _inject_key_release(resolved)
+        finally:
+            handle = handle_holder.get("handle")
+            if handle is not None:
+                unregister_tick(handle)
+                pending = getattr(dcc_mcp_unreal, "_pending_pie_input_releases", {})
+                pending.pop(handle, None)
+
+    handle = register_tick(_release_on_tick)
+    handle_holder["handle"] = handle
+    pending = getattr(dcc_mcp_unreal, "_pending_pie_input_releases", None)
+    if pending is None:
+        pending = {}
+        setattr(dcc_mcp_unreal, "_pending_pie_input_releases", pending)
+    pending[handle] = _release_on_tick
     return unreal_success(
         "Key tap injected: {}".format(_resolve_key_name(key)),
-        key=_resolve_key_name(key),
-        duration=duration,
+        key=resolved,
+        duration=hold_seconds,
+        release_scheduled=True,
     )
 
 
@@ -115,10 +158,13 @@ def _inject_mouse_move(delta_x: float, delta_y: float) -> dict:
     """Inject mouse movement delta."""
     import unreal  # noqa: PLC0415
 
-    # Use console command for mouse move — the most portable approach
-    world = unreal.EditorLevelLibrary.get_editor_world()
-    cmd = "SlateDebugger.MouseMove {} {}".format(int(delta_x), int(delta_y))
-    unreal.SystemLibrary.execute_console_command(world, cmd)
+    bridge = _pie_bridge(unreal)
+    if not _is_pie_active(unreal) or bridge is None:
+        return _injection_unavailable_error()
+    if delta_x and not bridge.inject_pie_axis("MouseX", float(delta_x)):
+        return _injection_unavailable_error()
+    if delta_y and not bridge.inject_pie_axis("MouseY", float(delta_y)):
+        return _injection_unavailable_error()
     return unreal_success(
         "Mouse move injected",
         delta_x=delta_x,
@@ -130,9 +176,13 @@ def _inject_mouse_scroll(scroll_delta: float) -> dict:
     """Inject mouse scroll wheel delta."""
     import unreal  # noqa: PLC0415
 
-    world = unreal.EditorLevelLibrary.get_editor_world()
-    cmd = "SlateDebugger.MouseScroll {}".format(int(scroll_delta))
-    unreal.SystemLibrary.execute_console_command(world, cmd)
+    bridge = _pie_bridge(unreal)
+    if (
+        not _is_pie_active(unreal)
+        or bridge is None
+        or not bridge.inject_pie_axis("MouseWheelAxis", float(scroll_delta))
+    ):
+        return _injection_unavailable_error()
     return unreal_success(
         "Mouse scroll injected",
         scroll_delta=scroll_delta,
