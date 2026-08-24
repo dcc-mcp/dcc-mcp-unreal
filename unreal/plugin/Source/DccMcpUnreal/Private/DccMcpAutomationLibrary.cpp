@@ -134,6 +134,13 @@ APlayerController* GetPiePlayerController()
 bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float Value)
 {
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    if (Event == IE_Axis)
+    {
+        constexpr float AxisDeltaTime = 1.0f / 60.0f;
+        return PlayerController->InputKey(
+            FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false)
+        );
+    }
     return PlayerController->InputKey(FInputKeyParams(Key, Event, static_cast<double>(Value), false));
 #else
     return PlayerController->InputKey(Key, Event, Value, false);

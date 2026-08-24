@@ -128,6 +128,15 @@ def test_native_bridge_exposes_read_only_enabled_plugin_names() -> None:
     assert "IPluginManager::Get().GetEnabledPlugins()" in implementation
 
 
+def test_native_bridge_injects_ue5_axis_input_as_a_sampled_axis_event() -> None:
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "if (Event == IE_Axis)" in implementation
+    assert "FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false)" in implementation
+
+
 def test_queue_render_fails_before_loading_assets_when_plugin_is_missing(tmp_path: Path) -> None:
     unreal = types.ModuleType("unreal")
     unreal.DccMcpAutomationLibrary = types.SimpleNamespace(get_enabled_plugin_names=lambda: [])
