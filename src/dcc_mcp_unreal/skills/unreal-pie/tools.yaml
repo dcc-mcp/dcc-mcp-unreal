@@ -58,6 +58,20 @@ tools:
           enum: [left, right, middle, thumb, thumb2]
           description: Mouse button name (used with mouse_button input_type).
           default: left
+        position_x:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: >-
+            Optional horizontal position for mouse_button, normalized across
+            the active Unreal window. Must be paired with position_y.
+        position_y:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: >-
+            Optional vertical position for mouse_button, normalized across
+            the active Unreal window. Must be paired with position_x.
         delta_x:
           type: number
           description: Horizontal mouse movement delta (used with mouse_move).

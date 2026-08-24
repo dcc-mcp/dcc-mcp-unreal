@@ -141,7 +141,7 @@ def _inject_key_tap(key: str, duration: float = 0.0) -> dict:
     )
 
 
-def _inject_mouse_button(button: str) -> dict:
+def _inject_mouse_button(button: str, position_x=None, position_y=None) -> dict:
     """Inject a mouse button click (press + release)."""
     button_map = {
         "left": "LeftMouseButton",
@@ -151,7 +151,32 @@ def _inject_mouse_button(button: str) -> dict:
         "thumb2": "ThumbMouseButton2",
     }
     resolved = button_map.get(button, button)
-    return _inject_key_tap(resolved, duration=0.05)
+    if position_x is None and position_y is None:
+        return _inject_key_tap(resolved, duration=0.05)
+    if position_x is None or position_y is None:
+        return unreal_error("position_x and position_y must be provided together for a positioned PIE click")
+    try:
+        normalized_x = float(position_x)
+        normalized_y = float(position_y)
+    except (TypeError, ValueError):
+        return unreal_error("position_x and position_y must be numbers between 0.0 and 1.0")
+    if not (0.0 <= normalized_x <= 1.0 and 0.0 <= normalized_y <= 1.0):
+        return unreal_error("position_x and position_y must be between 0.0 and 1.0")
+
+    import unreal  # noqa: PLC0415
+
+    bridge = _pie_bridge(unreal)
+    click_pointer = getattr(bridge, "click_pie_pointer_button", None) if bridge is not None else None
+    if not _is_pie_active(unreal) or not callable(click_pointer):
+        return _injection_unavailable_error()
+    if not click_pointer(resolved, normalized_x, normalized_y):
+        return unreal_error("The positioned PIE mouse click was not handled by the active Slate window")
+    return unreal_success(
+        "Mouse button clicked at normalized PIE window position",
+        button=resolved,
+        position_x=normalized_x,
+        position_y=normalized_y,
+    )
 
 
 def _inject_mouse_move(delta_x: float, delta_y: float) -> dict:
@@ -208,6 +233,8 @@ def pie_inject_input(
     delta_y: float = 0.0,
     scroll_delta: float = 0.0,
     duration: float = 0.0,
+    position_x=None,
+    position_y=None,
     **kwargs,
 ) -> dict:
     """Inject controlled input into the active PIE viewport.
@@ -220,6 +247,8 @@ def pie_inject_input(
         delta_y: Vertical mouse movement.
         scroll_delta: Scroll wheel delta.
         duration: Hold duration for key_tap in seconds.
+        position_x: Optional normalized active-window X coordinate for mouse_button.
+        position_y: Optional normalized active-window Y coordinate for mouse_button.
     """
     if not input_type or not str(input_type).strip():
         return missing_param_error("input_type")
@@ -247,7 +276,7 @@ def pie_inject_input(
                 return missing_param_error("key")
             return handler(key, duration)
         elif input_type == "mouse_button":
-            return handler(button)
+            return handler(button, position_x, position_y)
         elif input_type == "mouse_move":
             return handler(delta_x, delta_y)
         elif input_type == "mouse_scroll":
