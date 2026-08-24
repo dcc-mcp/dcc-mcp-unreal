@@ -706,12 +706,28 @@ class TestPieCaptureScreenshot:
             fake.AutomationLibrary.take_high_res_screenshot.assert_not_called()
             fake.SystemLibrary.execute_console_command.assert_called_once_with(
                 fake._fake_game_world,
-                "HighResShot filename={}".format(os.path.abspath(tmp_path / "pie.png")),
+                'HighResShot 1 filename="{}"'.format(os.path.abspath(tmp_path / "pie.png").replace("\\", "/")),
             )
 
         assert result["success"] is True
         assert result["context"]["method"] == "console_command"
         assert result["context"]["capture_pending"] is True
+
+    def test_pie_capture_quotes_filepath_and_preserves_explicit_resolution(self, tmp_path):
+        """HighResShot receives its required size plus a quoted filename value."""
+        _ensure_fresh_helpers()
+        filepath = tmp_path / "capture folder" / "pie frame.png"
+        with _patch_unreal():
+            fake = sys.modules["unreal"]
+            fake._fake_level_editor_subsystem.is_in_play_in_editor.return_value = True
+            mod = _import_script("pie_capture_screenshot")
+
+            mod.pie_capture_screenshot(filepath=str(filepath), resolution_x=1280, resolution_y=720)
+
+            fake.SystemLibrary.execute_console_command.assert_called_once_with(
+                fake._fake_game_world,
+                'HighResShot 1280x720 filename="{}"'.format(os.path.abspath(filepath).replace("\\", "/")),
+            )
 
     def test_screenshot_job_completes_only_after_png_exists(self, tmp_path):
         _ensure_fresh_helpers()
