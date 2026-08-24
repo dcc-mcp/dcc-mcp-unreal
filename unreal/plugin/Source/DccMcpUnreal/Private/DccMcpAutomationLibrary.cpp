@@ -9,6 +9,7 @@
 #include "Editor.h"
 #include "Dom/JsonObject.h"
 #include "Engine/StaticMesh.h"
+#include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerController.h"
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 #include "GameFramework/PlayerInput.h"
@@ -32,6 +33,7 @@
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
+#include "Widgets/SWindow.h"
 
 namespace
 {
@@ -146,6 +148,48 @@ bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EIn
     return PlayerController->InputKey(Key, Event, Value, false);
 #endif
 }
+
+bool InjectSlatePieKey(const FKey& Key, bool bPressed)
+{
+    if (!IsInGameThread() || !GEditor || !GEditor->GetPIEViewport() || !FSlateApplication::IsInitialized())
+    {
+        return false;
+    }
+
+    FSlateApplication& SlateApplication = FSlateApplication::Get();
+    if (Key.IsMouseButton())
+    {
+        const TSharedPtr<SWindow> ActiveWindow = SlateApplication.GetActiveTopLevelWindow();
+        if (!ActiveWindow.IsValid() || !ActiveWindow->GetNativeWindow().IsValid())
+        {
+            return false;
+        }
+
+        const FVector2D CursorPosition = SlateApplication.GetCursorPos();
+        TSet<FKey> PressedButtons;
+        if (bPressed)
+        {
+            PressedButtons.Add(Key);
+        }
+        FPointerEvent MouseEvent(
+            0,
+            CursorPosition,
+            CursorPosition,
+            PressedButtons,
+            Key,
+            0.0f,
+            FModifierKeysState()
+        );
+        return bPressed
+            ? SlateApplication.ProcessMouseButtonDownEvent(ActiveWindow->GetNativeWindow(), MouseEvent)
+            : SlateApplication.ProcessMouseButtonUpEvent(MouseEvent);
+    }
+
+    FKeyEvent KeyEvent(Key, FModifierKeysState(), 0, false, 0, 0);
+    return bPressed
+        ? SlateApplication.ProcessKeyDownEvent(KeyEvent)
+        : SlateApplication.ProcessKeyUpEvent(KeyEvent);
+}
 } // namespace
 
 TArray<FString> UDccMcpAutomationLibrary::GetEnabledPluginNames()
@@ -207,11 +251,15 @@ bool UDccMcpAutomationLibrary::InjectPieKey(const FString& KeyName, bool bPresse
 {
     APlayerController* PlayerController = GetPiePlayerController();
     const FKey Key = FKey(FName(*KeyName));
-    if (!PlayerController || !Key.IsValid())
+    if (!Key.IsValid())
     {
         return false;
     }
-    return InjectPlayerInput(PlayerController, Key, bPressed ? IE_Pressed : IE_Released, bPressed ? 1.0f : 0.0f);
+    if (PlayerController)
+    {
+        return InjectPlayerInput(PlayerController, Key, bPressed ? IE_Pressed : IE_Released, bPressed ? 1.0f : 0.0f);
+    }
+    return InjectSlatePieKey(Key, bPressed);
 }
 
 bool UDccMcpAutomationLibrary::InjectPieAxis(const FString& KeyName, float Value)

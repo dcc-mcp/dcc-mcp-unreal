@@ -45,6 +45,8 @@ public class DccMcpUnreal : ModuleRules
                 "Networking",
                 "Projects",
                 "Sockets",
+                "Slate",
+                "SlateCore",
                 "UnrealEd",
             }
         );

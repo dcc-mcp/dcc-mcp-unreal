@@ -137,6 +137,23 @@ def test_native_bridge_injects_ue5_axis_input_as_a_sampled_axis_event() -> None:
     assert "FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false)" in implementation
 
 
+def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+    build_rules = (ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "if (PlayerController)" in implementation
+    assert "return InjectSlatePieKey(Key, bPressed);" in implementation
+    assert "GEditor->GetPIEViewport()" in implementation
+    assert "ProcessKeyDownEvent" in implementation
+    assert "ProcessMouseButtonDownEvent" in implementation
+    assert '"Slate"' in build_rules
+    assert '"SlateCore"' in build_rules
+
+
 def test_queue_render_fails_before_loading_assets_when_plugin_is_missing(tmp_path: Path) -> None:
     unreal = types.ModuleType("unreal")
     unreal.DccMcpAutomationLibrary = types.SimpleNamespace(get_enabled_plugin_names=lambda: [])
