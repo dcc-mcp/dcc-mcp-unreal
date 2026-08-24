@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+_PLUGIN_NAME = "DccMcpUnreal"
 
 
 def _resolve_bootstrap_runtime() -> str:
@@ -80,6 +81,27 @@ _configure_app_ui()
 # ---------------------------------------------------------------------------
 
 
+def _plugin_root() -> Path:
+    """Resolve the mounted plugin root without requiring a ``__file__`` global."""
+    try:
+        import unreal  # noqa: PLC0415
+
+        plugin_library = getattr(unreal, "PluginBlueprintLibrary", None)
+        get_base_dir = getattr(plugin_library, "get_plugin_base_dir", None)
+        if callable(get_base_dir):
+            base_dir = get_base_dir(_PLUGIN_NAME)
+            if base_dir:
+                return Path(str(base_dir)).resolve()
+    except Exception as exc:
+        logger.debug("[dcc-mcp-unreal] Mounted plugin root lookup failed: %s", exc)
+
+    script_path = globals().get("__file__")
+    if script_path:
+        return Path(str(script_path)).resolve().parent.parent.parent
+
+    raise RuntimeError("Unable to resolve the mounted DccMcpUnreal plugin root")
+
+
 def _ensure_package_importable() -> None:
     """Add the plugin's python/ directory to sys.path.
 
@@ -88,10 +110,7 @@ def _ensure_package_importable() -> None:
     ``dcc_mcp_core``.  Unreal does not automatically add plugin subdirectories
     to sys.path, so we do it here.
     """
-    # This script lives in <plugin_root>/Content/Python/
-    # The python/ package directory is at <plugin_root>/python/
-    content_python_dir = Path(__file__).resolve().parent
-    plugin_root = content_python_dir.parent.parent  # Content/Python -> Content -> plugin root
+    plugin_root = _plugin_root()
     python_dir = plugin_root / "python"
 
     # Development fallback for this repository's local test project:
@@ -162,7 +181,7 @@ VERSION = _get_version()
 
 
 def _bootstrap_log_dir() -> Path:
-    plugin_root = Path(__file__).resolve().parent.parent.parent
+    plugin_root = _plugin_root()
     project_root = plugin_root.parent.parent if plugin_root.parent.name == "Plugins" else plugin_root.parent
     return project_root / ".dcc-mcp" / "bootstrap-errors"
 

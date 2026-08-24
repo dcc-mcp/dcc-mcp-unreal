@@ -559,6 +559,34 @@ def test_unreal_bootstrap_skips_embedded_server_when_sidecar_is_selected():
     assert 'if _runtime_mode == "sidecar":' in source
 
 
+def test_unreal_bootstrap_resolves_plugin_root_without_file_global(monkeypatch, tmp_path):
+    """UE startup-script execution may omit __file__; the mounted plugin remains authoritative."""
+    callbacks = []
+    requested_plugins = []
+    plugin_root = tmp_path / "DccMcpUnreal"
+    (plugin_root / "python").mkdir(parents=True)
+
+    fake_unreal = types.SimpleNamespace(
+        PluginBlueprintLibrary=types.SimpleNamespace(
+            get_plugin_base_dir=lambda name: requested_plugins.append(name) or str(plugin_root)
+        ),
+        SystemLibrary=types.SimpleNamespace(get_engine_version=lambda: "5.5.4"),
+        is_editor=lambda: True,
+        register_slate_post_tick_callback=lambda callback: callbacks.append(callback) or "tick-handle",
+    )
+    monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    script = Path(__file__).parents[1] / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py"
+    namespace = {"__name__": "dcc_mcp_unreal_fileless_startup"}
+    exec(compile(script.read_text(encoding="utf-8"), str(script), "exec"), namespace)
+
+    assert namespace["_bootstrap_log_dir"]() == tmp_path / ".dcc-mcp" / "bootstrap-errors"
+    assert requested_plugins == ["DccMcpUnreal", "DccMcpUnreal"]
+    assert sys.path[0] == str(plugin_root / "python")
+    assert len(callbacks) == 1
+
+
 def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(monkeypatch):
     """Worker dispatch must queue work without touching Slate from that worker."""
     from dcc_mcp_unreal.server import UnrealMainThreadDispatcher
