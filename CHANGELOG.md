@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.1](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.0...v0.3.1) (2026-08-24)
+
+
+### Features
+
+* add Unreal install lifecycle ([b4a7cc7](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b4a7cc76aba75a4130636963f10706021faa68a7))
+* add Unreal plugin preflight ([a5d9c6a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a5d9c6aaa4cd81a8884d7e341e4a74591eab1d6f))
+* **unreal-assets:** add typed static Groom import ([#167](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/167)) ([63fa7e8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/63fa7e8581f609e9f8782599d29f22b85112a45e))
+* **unreal-assets:** expose Groom topology counts ([#162](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/162)) ([5f0077d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5f0077da33a79e1edacb8e75360313ffc6a33a1a))
+* **unreal-assets:** safely import versioned groom caches ([#164](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/164)) ([15b5da0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/15b5da0bd9f955c3d52d4a275336f045139256e5))
+* **unreal-hair:** add typed Groom Cache binding ([#168](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/168)) ([1f49336](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1f4933690958a8df5a6efc047401cc56c3295765))
+* **unreal-umg:** add UMG Widget Blueprint authoring skill ([16a7a49](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/16a7a493062beb3705f1f3ade83c5a7cb90f21c7))
+
+
+### Bug Fixes
+
+* harden Unreal install lifecycle ([5c34433](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5c34433991a0a8524182bdf53f6d94accdbc21c2))
+* inject PIE input through player controller ([#178](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/178)) ([e71cefb](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/e71cefbc8a904cc709a0321f27b9b3fd90ece0ea))
+* keep PIE screenshot capture non-blocking ([#176](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/176)) ([e2fa278](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/e2fa278311eaf7529b8126d2b27e5994596c73be))
+* pass valid PIE screenshot command ([#180](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/180)) ([f769e1d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f769e1d242d9504812e1a9607d5230fd736ce35c))
+* **pie:** expose screenshot artifact readiness ([#170](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/170)) ([6c9811e](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6c9811ee78877fcc5a67a5eaf659952a10b3bfcf))
+* **pie:** keep jobs across isolated script loads ([#171](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/171)) ([980713d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/980713dd388efefae42f85cd2770d32dd3acef85))
+* resolve Unreal plugin root without file globals ([#177](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/177)) ([90d7c33](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/90d7c33ad52f139a8ad85f4bca8f1bbea403b557))
+
 ## [0.3.0](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.2.17...v0.3.0) (2026-08-12)
 
 
