@@ -39,6 +39,7 @@ public class DccMcpUnreal : ModuleRules
                 "Core",
                 "CoreUObject",
                 "ApplicationCore",
+                "AIModule",
                 "Engine",
                 "InputCore",
                 "AssetRegistry",

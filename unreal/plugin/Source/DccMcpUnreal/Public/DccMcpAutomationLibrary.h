@@ -28,6 +28,21 @@ public:
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool InjectPieLook(float DeltaX, float DeltaY);
 
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool NavigatePieToActor(const FString& ActorName);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool NavigatePieToLocation(const FVector& TargetLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool StartPieInputSteering(const FString& ActorName);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool StartPieInputSteeringToLocation(const FVector& TargetLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool StopPieNavigation();
+
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static FString GetFabSessionStatusJson();
 

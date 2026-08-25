@@ -1,6 +1,12 @@
 #include "DccMcpAutomationLibrary.h"
 
 #include "Runtime/Launch/Resources/Version.h"
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 20
+#include "AI/Navigation/NavigationSystem.h"
+#else
+#include "Blueprint/AIBlueprintHelperLibrary.h"
+#endif
+#include "Containers/Ticker.h"
 #if ENGINE_MAJOR_VERSION >= 5
 #include "AssetRegistry/AssetRegistryModule.h"
 #else
@@ -12,7 +18,9 @@
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 #include "GameFramework/PlayerInput.h"
@@ -36,6 +44,7 @@
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Templates/SharedPointer.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -46,6 +55,35 @@ namespace
 constexpr TCHAR FabModuleName[] = TEXT("Fab");
 constexpr TCHAR FabApiClassPath[] = TEXT("/Script/Fab.FabBrowserApi");
 constexpr TCHAR FabListingPrefix[] = TEXT("https://fab.com/plugins/ue5/listings/");
+
+#if ENGINE_MAJOR_VERSION >= 5
+using FDccMcpCoreTicker = FTSTicker;
+using FDccMcpTickerHandle = FTSTicker::FDelegateHandle;
+#else
+using FDccMcpCoreTicker = FTicker;
+using FDccMcpTickerHandle = FDelegateHandle;
+#endif
+FDccMcpTickerHandle PieInputSteeringTickerHandle;
+
+struct FDccMcpInputSteeringState
+{
+    explicit FDccMcpInputSteeringState(TArray<FVector>&& InWaypoints)
+        : Waypoints(MoveTemp(InWaypoints))
+    {
+    }
+
+    TArray<FVector> Waypoints;
+    int32 WaypointIndex = 1;
+};
+
+void StopPieInputSteeringTicker()
+{
+    if (PieInputSteeringTickerHandle.IsValid())
+    {
+        FDccMcpCoreTicker::GetCoreTicker().RemoveTicker(PieInputSteeringTickerHandle);
+        PieInputSteeringTickerHandle.Reset();
+    }
+}
 
 UClass* ResolveFabApiClass()
 {
@@ -239,6 +277,106 @@ APlayerController* GetPiePlayerController()
         }
     }
     return nullptr;
+}
+
+AActor* FindPieActorByName(UWorld* World, const FString& ActorName)
+{
+    if (!World || ActorName.IsEmpty())
+    {
+        return nullptr;
+    }
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Candidate = *It;
+        if (IsValid(Candidate) && Candidate->GetName().Equals(ActorName, ESearchCase::CaseSensitive))
+        {
+            return Candidate;
+        }
+    }
+    return nullptr;
+}
+
+TArray<FVector> FindNavigationWaypoints(APawn* Pawn, const FVector& TargetLocation)
+{
+    return {Pawn->GetActorLocation(), TargetLocation};
+}
+
+bool StartPieInputSteeringInternal(
+    APlayerController* PlayerController,
+    APawn* Pawn,
+    const FVector& TargetLocation,
+    AActor* TargetActor
+)
+{
+    if (!PlayerController || !Pawn || TargetLocation.ContainsNaN())
+    {
+        return false;
+    }
+    UWorld* World = PlayerController->GetWorld();
+    if (!World || Pawn->GetWorld() != World || (TargetActor && TargetActor->GetWorld() != World))
+    {
+        return false;
+    }
+
+    TArray<FVector> Waypoints = FindNavigationWaypoints(Pawn, TargetLocation);
+    StopPieInputSteeringTicker();
+    PlayerController->StopMovement();
+    const TWeakObjectPtr<APlayerController> WeakController(PlayerController);
+    const TWeakObjectPtr<APawn> WeakPawn(Pawn);
+    const TWeakObjectPtr<AActor> WeakTarget(TargetActor);
+    const bool bTrackActor = TargetActor != nullptr;
+    const TSharedRef<FDccMcpInputSteeringState> SteeringState =
+        MakeShareable(new FDccMcpInputSteeringState(MoveTemp(Waypoints)));
+    PieInputSteeringTickerHandle = FDccMcpCoreTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateLambda(
+            [WeakController, WeakPawn, WeakTarget, bTrackActor, TargetLocation, SteeringState](float)
+            {
+                APlayerController* Controller = WeakController.Get();
+                APawn* ControlledPawn = WeakPawn.Get();
+                if (!Controller || !ControlledPawn)
+                {
+                    return false;
+                }
+
+                FVector CurrentTarget = TargetLocation;
+                if (bTrackActor)
+                {
+                    AActor* Target = WeakTarget.Get();
+                    if (!Target || ControlledPawn->GetWorld() != Target->GetWorld())
+                    {
+                        return false;
+                    }
+                    CurrentTarget = Target->GetActorLocation();
+                    SteeringState->Waypoints.Last() = CurrentTarget;
+                }
+
+                const FVector PawnLocation = ControlledPawn->GetActorLocation();
+                while (SteeringState->WaypointIndex < SteeringState->Waypoints.Num() - 1
+                    && FVector::DistSquared2D(
+                           PawnLocation,
+                           SteeringState->Waypoints[SteeringState->WaypointIndex]
+                       )
+                        <= FMath::Square(100.0f))
+                {
+                    ++SteeringState->WaypointIndex;
+                }
+                const FVector SteeringTarget = SteeringState->WaypointIndex < SteeringState->Waypoints.Num()
+                    ? SteeringState->Waypoints[SteeringState->WaypointIndex]
+                    : CurrentTarget;
+                FVector Direction = SteeringTarget - PawnLocation;
+                Direction.Z = 0.0f;
+                if (!Direction.Normalize())
+                {
+                    return true;
+                }
+                const FRotator CurrentRotation = Controller->GetControlRotation();
+                Controller->SetControlRotation(FRotator(CurrentRotation.Pitch, Direction.Rotation().Yaw, 0.0f));
+                ControlledPawn->AddMovementInput(Direction, 1.0f, false);
+                return true;
+            }
+        )
+    );
+    return PieInputSteeringTickerHandle.IsValid();
 }
 
 bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float Value)
@@ -490,6 +628,86 @@ bool UDccMcpAutomationLibrary::InjectPieLook(float DeltaX, float DeltaY)
     {
         PlayerController->AddPitchInput(-DeltaY);
     }
+    return true;
+}
+
+bool UDccMcpAutomationLibrary::NavigatePieToActor(const FString& ActorName)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+    if (!IsInGameThread() || !PlayerController || !World || ActorName.IsEmpty())
+    {
+        return false;
+    }
+
+    AActor* TargetActor = FindPieActorByName(World, ActorName);
+    if (!TargetActor || !PlayerController->GetPawn())
+    {
+        return false;
+    }
+
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 20
+    UNavigationSystem::SimpleMoveToActor(PlayerController, TargetActor);
+#else
+    UAIBlueprintHelperLibrary::SimpleMoveToActor(PlayerController, TargetActor);
+#endif
+    return true;
+}
+
+bool UDccMcpAutomationLibrary::NavigatePieToLocation(const FVector& TargetLocation)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    if (!IsInGameThread() || !PlayerController || !PlayerController->GetPawn() || TargetLocation.ContainsNaN())
+    {
+        return false;
+    }
+
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 20
+    UNavigationSystem::SimpleMoveToLocation(PlayerController, TargetLocation);
+#else
+    UAIBlueprintHelperLibrary::SimpleMoveToLocation(PlayerController, TargetLocation);
+#endif
+    return true;
+}
+
+bool UDccMcpAutomationLibrary::StartPieInputSteering(const FString& ActorName)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!IsInGameThread() || !PlayerController || !World || !Pawn || ActorName.IsEmpty())
+    {
+        return false;
+    }
+
+    AActor* TargetActor = FindPieActorByName(World, ActorName);
+    if (!TargetActor)
+    {
+        return false;
+    }
+    return StartPieInputSteeringInternal(PlayerController, Pawn, TargetActor->GetActorLocation(), TargetActor);
+}
+
+bool UDccMcpAutomationLibrary::StartPieInputSteeringToLocation(const FVector& TargetLocation)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!IsInGameThread() || !PlayerController || !Pawn || TargetLocation.ContainsNaN())
+    {
+        return false;
+    }
+    return StartPieInputSteeringInternal(PlayerController, Pawn, TargetLocation, nullptr);
+}
+
+bool UDccMcpAutomationLibrary::StopPieNavigation()
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    if (!IsInGameThread() || !PlayerController)
+    {
+        return false;
+    }
+    StopPieInputSteeringTicker();
+    PlayerController->StopMovement();
     return true;
 }
 

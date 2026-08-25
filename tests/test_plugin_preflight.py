@@ -151,6 +151,48 @@ def test_native_bridge_exposes_deterministic_player_controller_look_input() -> N
     assert "PlayerController->AddPitchInput(-DeltaY);" in implementation
 
 
+def test_native_bridge_exposes_navigation_actions() -> None:
+    header = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Public" / "DccMcpAutomationLibrary.h"
+    ).read_text(encoding="utf-8")
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+    build_rules = (ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "static bool NavigatePieToActor(const FString& ActorName);" in header
+    assert "static bool NavigatePieToLocation(const FVector& TargetLocation);" in header
+    assert "static bool StartPieInputSteering(const FString& ActorName);" in header
+    assert "static bool StartPieInputSteeringToLocation(const FVector& TargetLocation);" in header
+    assert "static bool StopPieNavigation();" in header
+    assert "UDccMcpAutomationLibrary::NavigatePieToActor" in implementation
+    assert "UAIBlueprintHelperLibrary::SimpleMoveToActor" in implementation
+    assert "UNavigationSystem::SimpleMoveToActor" in implementation
+    assert "UDccMcpAutomationLibrary::NavigatePieToLocation" in implementation
+    assert "UAIBlueprintHelperLibrary::SimpleMoveToLocation" in implementation
+    assert "UNavigationSystem::SimpleMoveToLocation" in implementation
+    assert "UDccMcpAutomationLibrary::StartPieInputSteering" in implementation
+    assert "UDccMcpAutomationLibrary::StartPieInputSteeringToLocation" in implementation
+    assert "WaypointIndex" in implementation
+    assert "ControlledPawn->AddMovementInput(Direction, 1.0f, false);" in implementation
+    assert "StopPieInputSteeringTicker();" in implementation
+    assert "using FDccMcpTickerHandle = FTSTicker::FDelegateHandle;" in implementation
+    assert "using FDccMcpTickerHandle = FDelegateHandle;" in implementation
+    assert "FDccMcpTickerHandle PieInputSteeringTickerHandle;" in implementation
+    assert "FDccMcpCoreTicker::FDelegateHandle PieInputSteeringTickerHandle;" not in implementation
+    assert '"AIModule"' in build_rules
+
+
+def test_plugin_bootstrap_loads_project_local_skills() -> None:
+    bootstrap = (ROOT / "unreal" / "plugin" / "Content" / "Python" / "init_unreal.py").read_text(encoding="utf-8")
+
+    assert "def _project_skill_paths() -> List[str]:" in bootstrap
+    assert 'Path(str(project_dir)).resolve() / ".dcc-mcp" / "skills"' in bootstrap
+    assert "extra_skill_paths=_project_skill_paths()" in bootstrap
+
+
 def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
     implementation = (
         ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"

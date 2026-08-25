@@ -1,0 +1,234 @@
+tools:
+  - name: playtest_episode_control
+    description: >-
+      Start, inspect, or finish an in-memory PIE playtest episode. Episode
+      selectors define the bounded structured observation returned by the
+      other playtest-agent tools.
+    source_file: scripts/playtest_episode_control.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [start, current, finish]
+        episode_id:
+          type: string
+          default: ""
+        include_pawns:
+          type: boolean
+          default: true
+        include_hidden:
+          type: boolean
+          default: false
+          description: Include actors hidden in game. Disabled by default so dormant entities are not treated as actionable.
+        include_components:
+          type: boolean
+          default: false
+          description: Include bounded actor-component names, classes, and requested scalar attributes.
+        class_contains:
+          type: array
+          items: {type: string}
+          maxItems: 16
+          default: []
+        exclude_class_contains:
+          type: array
+          items: {type: string}
+          maxItems: 16
+          default: []
+          description: Exclude matching actor classes after positive selectors, such as non-actionable debris.
+        name_contains:
+          type: array
+          items: {type: string}
+          maxItems: 16
+          default: []
+        tags:
+          type: array
+          items: {type: string}
+          maxItems: 16
+          default: []
+        attribute_names:
+          type: array
+          items: {type: string}
+          maxItems: 24
+          default: []
+        max_entities:
+          type: integer
+          minimum: 1
+          maximum: 128
+          default: 64
+        max_distance:
+          type: number
+          minimum: 0
+          maximum: 1000000
+          default: 0
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_playtest_agent__playtest_observe]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: playtest_observe
+    description: >-
+      Return a bounded structured observation of the player and selected PIE
+      entities without taking or requiring a screenshot.
+    source_file: scripts/playtest_observe.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    read_only: true
+    destructive: false
+    idempotent: true
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: false
+    input_schema:
+      type: object
+      required: [episode_id]
+      properties:
+        episode_id: {type: string}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_playtest_agent__playtest_execute_action]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: playtest_execute_action
+    description: >-
+      Execute one bounded semantic gameplay action in the active PIE world.
+      Navigation follows Unreal navigation and never teleports the player.
+    source_file: scripts/playtest_execute_action.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [episode_id, action]
+      properties:
+        episode_id: {type: string}
+        action:
+          type: string
+          enum: [ensure_player_control, navigate_to_entity, navigate_to_location, face_entity, face_location, attack_primary_entity, attack_secondary_entity, melee_entity, explosive_entity, skill_entity, move_relative, stop_navigation, interact, attack_primary, attack_secondary, melee, explosive, skill, reload, jump, wait]
+        direction:
+          type: string
+          enum: [forward, backward, left, right]
+          default: forward
+          description: Camera-relative gameplay direction used only by move_relative.
+        target_name:
+          type: string
+          default: ""
+        target_name_contains:
+          type: string
+          default: ""
+        target_class_contains:
+          type: string
+          default: ""
+        target_exclude_class_contains:
+          type: array
+          items: {type: string}
+          maxItems: 16
+          default: []
+          description: Reject matching target classes even when another selector matches.
+        target_include_hidden:
+          type: boolean
+          default: false
+          description: Allow targeting actors hidden in game. Disabled by default.
+        target_tags:
+          type: array
+          items: {type: string}
+          maxItems: 8
+          default: []
+        target_location:
+          type: object
+          description: Explicit world-space point used by navigate_to_location or face_location.
+          required: [x, y, z]
+          properties:
+            x: {type: number, minimum: -1000000, maximum: 1000000}
+            y: {type: number, minimum: -1000000, maximum: 1000000}
+            z: {type: number, minimum: -1000000, maximum: 1000000}
+          additionalProperties: false
+        acceptance_radius:
+          type: number
+          minimum: 10
+          maximum: 10000
+          default: 125
+        duration:
+          type: number
+          minimum: 0
+          maximum: 5
+          default: 0.05
+          description: Hold duration for finite gameplay input, including move_relative.
+        timeout_seconds:
+          type: number
+          minimum: 0.1
+          maximum: 120
+          default: 30
+        require_line_of_sight:
+          type: boolean
+          default: true
+          description: Reject targeted attacks before input when the player controller has no line of sight.
+        stall_seconds:
+          type: number
+          minimum: 0.5
+          maximum: 30
+          default: 4
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_playtest_agent__playtest_poll_action]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: playtest_poll_action
+    description: >-
+      Poll a semantic playtest action and return its structured transition.
+      Navigation reports completed, blocked, or timed_out from engine state.
+    source_file: scripts/playtest_poll_action.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 10
+    read_only: false
+    destructive: false
+    idempotent: true
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+      open_world_hint: false
+    input_schema:
+      type: object
+      required: [episode_id, action_id]
+      properties:
+        episode_id: {type: string}
+        action_id: {type: string}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [success, message, context]
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_playtest_agent__playtest_observe]
+      on-failure: [dcc_diagnostics__audit_log]
