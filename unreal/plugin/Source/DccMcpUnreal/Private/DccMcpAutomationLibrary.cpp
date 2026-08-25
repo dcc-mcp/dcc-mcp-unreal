@@ -8,11 +8,15 @@
 #endif
 #include "Editor.h"
 #include "Dom/JsonObject.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerController.h"
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 #include "GameFramework/PlayerInput.h"
+#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #endif
 #include "InputCoreTypes.h"
 #if ENGINE_MAJOR_VERSION >= 5
@@ -34,6 +38,7 @@
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 #include "Widgets/SWindow.h"
 
 namespace
@@ -128,32 +133,149 @@ FString SerializeJson(const TSharedRef<FJsonObject>& Root)
     return Output;
 }
 
+bool HasPieWorld()
+{
+    if (GEditor && GEditor->PlayWorld)
+    {
+        return true;
+    }
+    if (!GEngine)
+    {
+        return false;
+    }
+    for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
+    {
+        if (WorldContext.WorldType == EWorldType::PIE && WorldContext.World())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+APlayerController* ResolveLocalPlayerController(UWorld* World, UGameInstance* GameInstance)
+{
+    if (!World)
+    {
+        return nullptr;
+    }
+    if (GameInstance)
+    {
+        if (APlayerController* PlayerController = GameInstance->GetFirstLocalPlayerController(World))
+        {
+            return PlayerController;
+        }
+    }
+    if (GEngine)
+    {
+        if (APlayerController* PlayerController = GEngine->GetFirstLocalPlayerController(World))
+        {
+            return PlayerController;
+        }
+    }
+    return World->GetFirstPlayerController();
+}
+
+bool IsPlayableWorld(const UWorld* World)
+{
+    return World
+        && (World->WorldType == EWorldType::PIE
+            || World->WorldType == EWorldType::Game
+            || World->WorldType == EWorldType::GamePreview);
+}
+
 APlayerController* GetPiePlayerController()
 {
     UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
-    return PlayWorld ? PlayWorld->GetFirstPlayerController() : nullptr;
+    if (PlayWorld)
+    {
+        if (APlayerController* PlayerController = ResolveLocalPlayerController(PlayWorld, PlayWorld->GetGameInstance()))
+        {
+            return PlayerController;
+        }
+    }
+
+    // During PIE travel, PlayWorld can briefly keep the server or previous world while
+    // the playable client world is already active. Resolve that world from the engine's
+    // authoritative contexts so input survives level transitions.
+    if (!GEngine)
+    {
+        return nullptr;
+    }
+    for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
+    {
+        if (WorldContext.WorldType != EWorldType::PIE
+            && WorldContext.WorldType != EWorldType::Game
+            && WorldContext.WorldType != EWorldType::GamePreview)
+        {
+            continue;
+        }
+        UWorld* PieWorld = WorldContext.World();
+        if (!PieWorld || PieWorld == PlayWorld)
+        {
+            continue;
+        }
+        if (APlayerController* PlayerController = ResolveLocalPlayerController(
+                PieWorld,
+                WorldContext.OwningGameInstance
+            ))
+        {
+            return PlayerController;
+        }
+    }
+
+    // A traveling PIE client can temporarily detach its playable world from the
+    // engine context list. The object registry remains authoritative for live
+    // controllers, so use it as the final local-player fallback.
+    for (TObjectIterator<APlayerController> It; It; ++It)
+    {
+        APlayerController* PlayerController = *It;
+        if (IsValid(PlayerController)
+            && !PlayerController->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject)
+            && PlayerController->IsLocalController()
+            && IsPlayableWorld(PlayerController->GetWorld()))
+        {
+            return PlayerController;
+        }
+    }
+    return nullptr;
 }
 
 bool InjectPlayerInput(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float Value)
 {
+    if (!PlayerController || !PlayerController->PlayerInput)
+    {
+        return false;
+    }
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    const FInputDeviceId InputDevice = IPlatformInputDeviceMapper::Get().GetPrimaryInputDeviceForUser(
+        PlayerController->GetPlatformUserId()
+    );
     if (Event == IE_Axis)
     {
         constexpr float AxisDeltaTime = 1.0f / 60.0f;
-        return PlayerController->InputKey(
-            FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false)
+        PlayerController->InputKey(
+            FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false, InputDevice)
         );
     }
-    return PlayerController->InputKey(FInputKeyParams(Key, Event, static_cast<double>(Value), false));
+    else
+    {
+        PlayerController->InputKey(FInputKeyParams(Key, Event, static_cast<double>(Value), false, InputDevice));
+    }
 #else
-    return PlayerController->InputKey(Key, Event, Value, false);
+    PlayerController->InputKey(Key, Event, Value, false);
 #endif
+    // UPlayerInput returns whether an action mapping consumed the event, not
+    // whether the key state was updated. Axis-only digital mappings (for
+    // example, strafe keys) legitimately return false after accepting input.
+    return true;
 }
 
 bool CanInjectSlatePieInput()
 {
-    // UI-only PIE sessions can have a PlayWorld before the editor exposes a PIE viewport.
-    return IsInGameThread() && GEditor && GEditor->PlayWorld && FSlateApplication::IsInitialized();
+    // UI-only and traveling PIE sessions may not expose GEditor->PlayWorld even
+    // though an authoritative PIE world context is already active.
+    return IsInGameThread() && HasPieWorld() && FSlateApplication::IsInitialized();
 }
 
 bool InjectSlatePieMouseButton(const FKey& Key, bool bPressed, const FVector2D& CursorPosition)
