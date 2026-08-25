@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.3](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.2...v0.3.3) (2026-08-25)
+
+
+### Features
+
+* add structured PIE playtest agent ([#188](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/188)) ([6d2dc80](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6d2dc801de4b1a9f940ae4561914c2c601e29a71))
+
+
+### Bug Fixes
+
+* make PIE look input deterministic ([9177009](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/917700963f6c5866d152985997aec605941712d4))
+
 ## [0.3.2](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.1...v0.3.2) (2026-08-24)
 
 
