@@ -134,7 +134,7 @@ def test_native_bridge_injects_ue5_axis_input_as_a_sampled_axis_event() -> None:
     ).read_text(encoding="utf-8")
 
     assert "if (Event == IE_Axis)" in implementation
-    assert "FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false)" in implementation
+    assert "FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false, InputDevice)" in implementation
 
 
 def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
@@ -159,6 +159,41 @@ def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
     assert "ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26" in implementation
     assert '"Slate"' in build_rules
     assert '"SlateCore"' in build_rules
+
+
+def test_native_bridge_resolves_player_after_pie_world_transition() -> None:
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert '#include "Engine/Engine.h"' in implementation
+    assert "GEngine->GetWorldContexts()" in implementation
+    assert "WorldContext.WorldType != EWorldType::PIE" in implementation
+    assert "WorldContext.World()" in implementation
+    assert "bool HasPieWorld()" in implementation
+    assert "IsInGameThread() && HasPieWorld() && FSlateApplication::IsInitialized()" in implementation
+    assert "GetFirstLocalPlayerController" in implementation
+    assert "WorldContext.OwningGameInstance" in implementation
+    assert "TObjectIterator<APlayerController>" in implementation
+    assert "PlayerController->IsLocalController()" in implementation
+
+
+def test_native_bridge_acknowledges_axis_only_digital_key_delivery() -> None:
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+    build_rules = (ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "DccMcpUnreal.Build.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert '#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"' in implementation
+    assert "IPlatformInputDeviceMapper::Get().GetPrimaryInputDeviceForUser(" in implementation
+    assert "PlayerController->GetPlatformUserId()" in implementation
+    assert "if (!PlayerController || !PlayerController->PlayerInput)" in implementation
+    assert "FInputKeyParams(Key, Event, static_cast<double>(Value), false, InputDevice)" in implementation
+    assert "whether the key state was updated" in implementation
+    assert "return true;" in implementation
+    assert '"ApplicationCore"' in build_rules
 
 
 def test_queue_render_fails_before_loading_assets_when_plugin_is_missing(tmp_path: Path) -> None:
