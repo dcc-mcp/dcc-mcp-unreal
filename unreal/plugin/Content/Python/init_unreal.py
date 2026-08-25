@@ -39,7 +39,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "DccMcpUnreal"
@@ -199,6 +199,21 @@ def _clear_bootstrap_errors(log_dir: Path) -> None:
             logger.warning("[dcc-mcp-unreal] Could not clear stale bootstrap error %s: %s", error_log, exc)
 
 
+def _project_skill_paths() -> List[str]:
+    """Return the conventional project-local DCC-MCP skill root when present."""
+    try:
+        import unreal  # noqa: PLC0415
+
+        project_dir = unreal.Paths.project_dir()
+        if not project_dir:
+            return []
+        skill_root = Path(str(project_dir)).resolve() / ".dcc-mcp" / "skills"
+        return [str(skill_root)] if skill_root.is_dir() else []
+    except Exception as exc:
+        logger.debug("[dcc-mcp-unreal] Project-local skill discovery skipped: %s", exc)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Server helpers
 # ---------------------------------------------------------------------------
@@ -210,7 +225,10 @@ def _start() -> None:
         import dcc_mcp_unreal  # noqa: PLC0415
 
         server_name = os.environ.get("DCC_MCP_UNREAL_SERVER_NAME", "unreal-mcp")
-        _handle = dcc_mcp_unreal.start_server(server_name=server_name)
+        _handle = dcc_mcp_unreal.start_server(
+            server_name=server_name,
+            extra_skill_paths=_project_skill_paths(),
+        )
         import unreal as ue  # noqa: PLC0415
 
         ue.log(f"[dcc-mcp-unreal] v{VERSION} MCP server started at {_handle.mcp_url()}")
