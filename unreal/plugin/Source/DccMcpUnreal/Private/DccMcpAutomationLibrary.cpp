@@ -470,6 +470,29 @@ bool UDccMcpAutomationLibrary::InjectPieAxis(const FString& KeyName, float Value
     return InjectPlayerInput(PlayerController, Key, IE_Axis, Value);
 }
 
+bool UDccMcpAutomationLibrary::InjectPieLook(float DeltaX, float DeltaY)
+{
+    APlayerController* PlayerController = GetPiePlayerController();
+    if (!PlayerController || !FMath::IsFinite(DeltaX) || !FMath::IsFinite(DeltaY))
+    {
+        return false;
+    }
+
+    // A one-shot raw MouseX/MouseY sample can be cleared before the next
+    // ProcessPlayerInput pass when an MCP request is dispatched late in the
+    // editor frame. AddController input is the engine's deterministic,
+    // possessed-player route and is consumed by the normal controller tick.
+    if (!FMath::IsNearlyZero(DeltaX))
+    {
+        PlayerController->AddYawInput(DeltaX);
+    }
+    if (!FMath::IsNearlyZero(DeltaY))
+    {
+        PlayerController->AddPitchInput(-DeltaY);
+    }
+    return true;
+}
+
 FString UDccMcpAutomationLibrary::GetFabSessionStatusJson()
 {
     const TSharedPtr<IPlugin> FabPlugin = IPluginManager::Get().FindPlugin(FabModuleName);

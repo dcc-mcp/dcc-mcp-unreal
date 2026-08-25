@@ -180,18 +180,17 @@ def _inject_mouse_button(button: str, position_x=None, position_y=None) -> dict:
 
 
 def _inject_mouse_move(delta_x: float, delta_y: float) -> dict:
-    """Inject mouse movement delta."""
+    """Inject deterministic look input into the possessed PIE controller."""
     import unreal  # noqa: PLC0415
 
     bridge = _pie_bridge(unreal)
-    if not _is_pie_active(unreal) or bridge is None:
+    inject_look = getattr(bridge, "inject_pie_look", None) if bridge is not None else None
+    if not _is_pie_active(unreal) or not callable(inject_look):
         return _injection_unavailable_error()
-    if delta_x and not bridge.inject_pie_axis("MouseX", float(delta_x)):
-        return _injection_unavailable_error()
-    if delta_y and not bridge.inject_pie_axis("MouseY", float(delta_y)):
+    if not inject_look(float(delta_x), float(delta_y)):
         return _injection_unavailable_error()
     return unreal_success(
-        "Mouse move injected",
+        "PIE look input injected",
         delta_x=delta_x,
         delta_y=delta_y,
     )
