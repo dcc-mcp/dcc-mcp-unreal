@@ -37,7 +37,8 @@ log sampling, performance monitoring, and async Automation Test job execution.
 ## Scripts
 
 - `pie_control` — Enter, pause, resume, or exit PIE.
-- `pie_inject_input` — Inject keyboard/mouse input into the PIE viewport.
+- `pie_inject_input` — Inject keyboard, pointer, scroll, or deterministic
+  possessed-controller look input into PIE.
 - `pie_capture_screenshot` — Capture the active viewport to a file.
 - `pie_snapshot_log` — Snapshot the Output Log buffer.
 - `pie_get_status` — Query PIE state and performance counters.

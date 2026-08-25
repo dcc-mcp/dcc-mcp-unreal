@@ -137,6 +137,20 @@ def test_native_bridge_injects_ue5_axis_input_as_a_sampled_axis_event() -> None:
     assert "FInputKeyParams(Key, static_cast<double>(Value), AxisDeltaTime, 1, false, InputDevice)" in implementation
 
 
+def test_native_bridge_exposes_deterministic_player_controller_look_input() -> None:
+    header = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Public" / "DccMcpAutomationLibrary.h"
+    ).read_text(encoding="utf-8")
+    implementation = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "static bool InjectPieLook(float DeltaX, float DeltaY);" in header
+    assert "bool UDccMcpAutomationLibrary::InjectPieLook(float DeltaX, float DeltaY)" in implementation
+    assert "PlayerController->AddYawInput(DeltaX);" in implementation
+    assert "PlayerController->AddPitchInput(-DeltaY);" in implementation
+
+
 def test_native_bridge_routes_pre_player_pie_key_events_through_slate() -> None:
     implementation = (
         ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"

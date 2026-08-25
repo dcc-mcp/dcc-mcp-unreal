@@ -25,6 +25,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool InjectPieAxis(const FString& KeyName, float Value);
 
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool InjectPieLook(float DeltaX, float DeltaY);
+
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static FString GetFabSessionStatusJson();
 

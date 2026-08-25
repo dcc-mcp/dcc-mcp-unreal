@@ -74,11 +74,15 @@ tools:
             the active Unreal window. Must be paired with position_x.
         delta_x:
           type: number
-          description: Horizontal mouse movement delta (used with mouse_move).
+          description: >-
+            Horizontal possessed-controller look delta (used with mouse_move).
+            Positive values turn right.
           default: 0.0
         delta_y:
           type: number
-          description: Vertical mouse movement delta (used with mouse_move).
+          description: >-
+            Vertical possessed-controller look delta (used with mouse_move).
+            Positive values look down.
           default: 0.0
         scroll_delta:
           type: number
