@@ -390,6 +390,31 @@ Or use the environment variable:
 set DCC_MCP_UNREAL_SKILL_PATHS=C:\my\studio\unreal-skills;C:\shared\skills
 ```
 
+### Verifying mutation effects
+
+Calling an Unreal event only proves that dispatch was accepted. Project-local
+mutation and recovery tools should capture the same bounded scalar fields
+before and after the call, then use `verified_effect_result` so `success` means
+the requested effect was observed:
+
+```python
+from dcc_mcp_unreal import verified_effect_result
+
+return verified_effect_result(
+    operation="advance encounter",
+    before=before_state,
+    after=after_state,
+    required_fields=("encounter_index", "remaining_enemy_count"),
+)
+```
+
+If every required field is unchanged, the result is `success: false` with
+`error_code: postcondition_not_met`. Missing observations also fail closed with
+`error_code: postcondition_unobservable`. Do not automatically retry a
+`postcondition_not_met` result unless a newly observed precondition changes.
+For asynchronous effects, poll the named operation to a terminal state before
+capturing `after_state`.
+
 ---
 
 ## Architecture Overview

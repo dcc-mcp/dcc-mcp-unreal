@@ -19,6 +19,7 @@ Skill authoring helpers::
         require_param, missing_param_error,
         actor_to_dict, vector_to_list, rotator_to_list,
     )
+    from dcc_mcp_unreal import verified_effect_result
 
 Requirements:
     - Unreal Engine 4.18+ for the native baseline
@@ -53,6 +54,7 @@ from dcc_mcp_unreal.api import (
 from dcc_mcp_unreal.capabilities import UNREAL_CAPABILITIES_DICT, unreal_capabilities
 from dcc_mcp_unreal.compatibility import unreal_compatibility
 from dcc_mcp_unreal.server import UnrealMcpServer, start_server, stop_server
+from dcc_mcp_unreal.verified_effect import verified_effect_result
 
 __all__ = [
     "__version__",
@@ -89,4 +91,6 @@ __all__ = [
     "unreal_capabilities",
     "UNREAL_CAPABILITIES_DICT",
     "unreal_compatibility",
+    # Project mutation postconditions
+    "verified_effect_result",
 ]
