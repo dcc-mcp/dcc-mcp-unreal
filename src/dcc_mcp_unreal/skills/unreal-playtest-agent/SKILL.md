@@ -32,6 +32,21 @@ Use this skill to drive gameplay QA from Unreal Engine state instead of treating
 5. Evaluate project-specific rewards and oracles in a project-local Skill.
 6. Finish the episode and retain the returned transition trace.
 
+## Combat Telemetry
+
+Observations include bounded `telemetry` for the player and selected entities.
+Built-in property aliases cover common health, maximum-health, magazine,
+reserve-ammo, and cooldown names on actors or their components. Projects can
+add canonical fields through `telemetry_aliases` without adding game-specific
+code to the adapter. Canonical fields ending in `_cooldown_remaining` also
+populate `action_availability`.
+
+Completed actions report `telemetry_deltas`. Combat actions additionally
+report `combat_feedback` and `damage_events` derived from observed health
+changes. These are observation deltas, not engine damage-delegate events; a
+target disappearing or taking shield-only damage remains inconclusive unless
+the project exposes corresponding telemetry aliases.
+
 Screenshots and DCC-CUA recordings remain useful as checkpoint evidence and visual fallbacks. They are not required for each decision step.
 
 ## Boundaries

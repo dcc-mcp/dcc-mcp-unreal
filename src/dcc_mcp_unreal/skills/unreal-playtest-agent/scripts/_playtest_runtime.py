@@ -12,6 +12,14 @@ from typing import Any
 
 import dcc_mcp_unreal as _adapter_package
 from dcc_mcp_unreal.pie_session import require_pie_context
+from dcc_mcp_unreal.playtest_telemetry import (
+    COMBAT_ACTIONS,
+    build_action_availability,
+    combat_feedback,
+    normalize_telemetry_aliases,
+    read_actor_telemetry,
+    telemetry_deltas,
+)
 
 if not hasattr(_adapter_package, "_playtest_episode_registry"):
     _adapter_package._playtest_episode_registry = {}  # type: ignore[attr-defined]
@@ -163,6 +171,7 @@ def _entity(
     actor: Any,
     player_location: Any,
     attribute_names: list[str],
+    telemetry_aliases: dict[str, list[str]],
     *,
     include_components: bool = False,
 ) -> dict[str, Any]:
@@ -184,6 +193,7 @@ def _entity(
         "distance_to_player": _distance(location, player_location),
         "tags": _actor_tags(actor),
         "attributes": _attributes(actor, attribute_names),
+        "telemetry": read_actor_telemetry(unreal, actor, telemetry_aliases),
     }
     if include_components:
         result["components"] = _components(unreal, actor, attribute_names)
@@ -360,6 +370,7 @@ def observe(selectors: dict[str, Any]) -> dict[str, Any]:
 
     max_distance = float(selectors.get("max_distance", 0) or 0)
     attribute_names = list(selectors.get("attribute_names", []))[:24]
+    telemetry_aliases = normalize_telemetry_aliases(selectors.get("telemetry_aliases"))
     include_components = bool(selectors.get("include_components", False))
     entities = []
     for actor in unique.values():
@@ -368,6 +379,7 @@ def observe(selectors: dict[str, Any]) -> dict[str, Any]:
             actor,
             player_location,
             attribute_names,
+            telemetry_aliases,
             include_components=include_components,
         )
         item["line_of_sight"] = _line_of_sight(controller, actor)
@@ -383,11 +395,14 @@ def observe(selectors: dict[str, Any]) -> dict[str, Any]:
         player,
         player_location,
         attribute_names,
+        telemetry_aliases,
         include_components=include_components,
     )
     rotation_getter = getattr(controller, "get_control_rotation", None)
     if callable(rotation_getter):
         player_state["control_rotation"] = _rotator(rotation_getter())
+
+    action_availability = build_action_availability(player_state["telemetry"])
 
     observation = {
         "schema": "dcc-mcp-playtest-observation-v1",
@@ -395,6 +410,7 @@ def observe(selectors: dict[str, Any]) -> dict[str, Any]:
         "time_seconds": float(unreal.GameplayStatics.get_time_seconds(world)),
         "runtime": _runtime_state(unreal, world, controller, player),
         "player": player_state,
+        "action_availability": action_availability,
         "entity_count": len(entities),
         "entity_classes": dict(sorted(Counter(item["class"] for item in entities).items())),
         "entities": entities,
@@ -404,6 +420,11 @@ def observe(selectors: dict[str, Any]) -> dict[str, Any]:
 
 
 def _selector_config(**kwargs) -> dict[str, Any]:
+    project_telemetry_aliases = kwargs.get("telemetry_aliases")
+    normalize_telemetry_aliases(project_telemetry_aliases)
+    project_telemetry_aliases = {
+        str(key): [str(name) for name in names] for key, names in (project_telemetry_aliases or {}).items()
+    }
     return {
         "include_pawns": bool(kwargs.get("include_pawns", True)),
         "include_hidden": bool(kwargs.get("include_hidden", False)),
@@ -413,6 +434,7 @@ def _selector_config(**kwargs) -> dict[str, Any]:
         "name_contains": [str(item) for item in kwargs.get("name_contains", [])][:16],
         "tags": [str(item) for item in kwargs.get("tags", [])][:16],
         "attribute_names": [str(item) for item in kwargs.get("attribute_names", [])][:24],
+        "telemetry_aliases": project_telemetry_aliases,
         "max_entities": max(1, min(int(kwargs.get("max_entities", 64)), 128)),
         "max_distance": max(0.0, min(float(kwargs.get("max_distance", 0)), 1_000_000.0)),
     }
@@ -792,6 +814,9 @@ def _finalize(episode: dict[str, Any], action: dict[str, Any], status: str, afte
         if cleanup_errors:
             extra["cleanup_errors"] = cleanup_errors
     action["status"] = status
+    observed_deltas = telemetry_deltas(action["before"], after)
+    if action["action"] in COMBAT_ACTIONS:
+        extra.update(combat_feedback(action, after, observed_deltas))
     transition = {
         "action_id": action["action_id"],
         "action": action["action"],
@@ -802,6 +827,7 @@ def _finalize(episode: dict[str, Any], action: dict[str, Any], status: str, afte
         "after_hash": after["observation_hash"],
         "player_location_delta": _location_delta(action["before"], after),
         "entity_count_delta": int(after["entity_count"]) - int(action["before"]["entity_count"]),
+        "telemetry_deltas": observed_deltas,
         "after": after,
         **extra,
     }

@@ -46,6 +46,7 @@ class _Actor:
         self.rotation = _Rotator()
         self.tags = list(tags)
         self.attributes = dict(attributes or {})
+        self.components = []
 
     def get_name(self):
         return self._name
@@ -67,6 +68,9 @@ class _Actor:
 
     def get_velocity(self):
         return _Vector()
+
+    def get_components_by_class(self, _component_class):
+        return list(self.components)
 
     def get_editor_property(self, name):
         if name == "tags":
@@ -183,6 +187,9 @@ def _load_runtime(monkeypatch, *, reports_pie=True):
     class Actor:
         pass
 
+    class ActorComponent:
+        pass
+
     class Pawn:
         pass
 
@@ -247,6 +254,7 @@ def _load_runtime(monkeypatch, *, reports_pie=True):
     unreal = types.SimpleNamespace(
         log=lambda _message: None,
         Actor=Actor,
+        ActorComponent=ActorComponent,
         Pawn=Pawn,
         PlayerController=PlayerController,
         PlayerStart=PlayerStart,
@@ -321,6 +329,9 @@ def test_tools_manifest_declares_episode_observe_act_poll_contract():
     target_location = by_name["playtest_execute_action"]["input_schema"]["properties"]["target_location"]
     assert target_location["required"] == ["x", "y", "z"]
     assert target_location["additionalProperties"] is False
+    telemetry_aliases = episode_properties["telemetry_aliases"]
+    assert telemetry_aliases["maxProperties"] == 24
+    assert telemetry_aliases["additionalProperties"]["maxItems"] == 8
 
 
 def test_dependency_manifest_uses_skill_ids_only():
@@ -365,6 +376,117 @@ def test_observe_returns_bounded_entities_and_scalar_attributes(monkeypatch):
     assert [item["name"] for item in observation["entities"]] == ["Door_0", "Enemy_0"]
     assert observation["entities"][1]["attributes"] == {"health": 40.0}
     assert observation["observation_hash"].startswith("sha256:")
+
+
+def test_observe_exposes_default_health_ammo_and_cooldown_telemetry(monkeypatch):
+    runtime, player, enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    player.attributes.update({"MaxHealth": 125.0, "SkillCooldownRemaining": 3.2})
+    player.components.append(
+        _Actor(
+            "WeaponComponent_0",
+            "WeaponComponent",
+            _Vector(),
+            attributes={"CurrentAmmo": 8, "ReserveAmmo": 24},
+        )
+    )
+    enemy.attributes["MaxHealth"] = 80.0
+
+    observation = runtime.observe({"include_pawns": True, "max_entities": 8})
+
+    assert observation["player"]["telemetry"] == {
+        "health": 100.0,
+        "max_health": 125.0,
+        "magazine": 8,
+        "reserve_ammo": 24,
+        "skill_cooldown_remaining": 3.2,
+    }
+    assert observation["entities"][0]["telemetry"] == {
+        "health": 40.0,
+        "max_health": 80.0,
+    }
+    assert observation["action_availability"] == {"skill": {"ready": False, "remaining_seconds": 3.2}}
+
+
+def test_observe_supports_bounded_project_telemetry_aliases(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    player.attributes["UltimateCooldown"] = 1.5
+
+    episode = runtime.start_episode(
+        include_pawns=True,
+        max_entities=8,
+        telemetry_aliases={"ultimate_cooldown_remaining": ["UltimateCooldown"]},
+    )
+
+    assert episode["observation"]["player"]["telemetry"]["ultimate_cooldown_remaining"] == 1.5
+    assert episode["observation"]["action_availability"] == {"ultimate": {"ready": False, "remaining_seconds": 1.5}}
+
+
+def test_episode_rejects_unsafe_telemetry_alias_names(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+
+    invalid_aliases = [
+        {"bad-key": ["Health"]},
+        {"health": []},
+        {"field_{}".format(index): ["Health"] for index in range(25)},
+    ]
+    for aliases in invalid_aliases:
+        try:
+            runtime.start_episode(telemetry_aliases=aliases)
+        except ValueError as exc:
+            assert "telemetry" in str(exc)
+        else:
+            raise AssertionError("expected unsafe telemetry aliases to fail closed")
+
+
+def test_episode_accepts_maximum_bounded_project_telemetry_aliases(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    aliases = {"field_{}".format(index): ["health"] for index in range(24)}
+
+    episode = runtime.start_episode(telemetry_aliases=aliases)
+
+    assert episode["observation"]["player"]["telemetry"]["field_23"] == 100.0
+
+
+def test_attack_transition_reports_observed_damage_and_resource_deltas(monkeypatch):
+    runtime, player, enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [300.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    player.attributes.update({"CurrentAmmo": 8, "ReserveAmmo": 24})
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "attack_primary_entity",
+        target_name="Enemy_0",
+        duration=0,
+    )
+    enemy.attributes["health"] = 25.0
+    player.attributes["CurrentAmmo"] = 7
+    clock[0] = 300.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["combat_feedback"] == {
+        "observed_hit": True,
+        "damage_dealt": 15.0,
+        "target": "Enemy_0",
+    }
+    assert transition["damage_events"] == [
+        {
+            "source": "Player_0",
+            "target": "Enemy_0",
+            "amount": 15.0,
+            "time_seconds": 12.5,
+            "observed": True,
+        }
+    ]
+    assert {
+        (item["scope"], item["actor"], item["field"], item["before"], item["after"], item["delta"])
+        for item in transition["telemetry_deltas"]
+    } == {
+        ("player", "Player_0", "magazine", 8, 7, -1.0),
+        ("entity", "Enemy_0", "health", 40.0, 25.0, -15.0),
+    }
 
 
 def test_observe_excludes_hidden_entities_by_default_and_can_opt_in(monkeypatch):
