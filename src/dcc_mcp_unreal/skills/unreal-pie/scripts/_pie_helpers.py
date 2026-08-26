@@ -12,6 +12,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import dcc_mcp_unreal as _adapter_package
+from dcc_mcp_unreal.pie_session import get_pie_world as _get_active_pie_world
+from dcc_mcp_unreal.pie_session import is_pie_active as _is_active_pie_world
 
 # ---------------------------------------------------------------------------
 # Process-scoped job registry
@@ -111,30 +113,18 @@ def get_level_editor_subsystem():
 
 
 def get_pie_world():
-    """Return the PIE world if a PIE session is active, else the editor world.
+    """Return the active PIE game world, or None.
 
     Returns:
         A ``unreal.World`` object or None.
     """
-    try:
-        import unreal  # noqa: PLC0415
-
-        editor_subsystem = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-        if editor_subsystem is not None:
-            pie_world = editor_subsystem.get_game_world()
-            if pie_world is not None:
-                return pie_world
-            return editor_subsystem.get_editor_world()
-        return unreal.EditorLevelLibrary.get_editor_world()
-    except Exception:
-        return None
+    return _get_active_pie_world()
 
 
 def is_pie_active() -> bool:
     """Return True if a PIE session is currently active (playing or paused)."""
     try:
-        editor_subsystem = get_level_editor_subsystem()
-        return bool(editor_subsystem and editor_subsystem.is_in_play_in_editor())
+        return _is_active_pie_world()
     except Exception:
         return False
 

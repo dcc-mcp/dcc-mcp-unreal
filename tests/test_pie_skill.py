@@ -84,7 +84,9 @@ def _fake_unreal_module():
 
     _fake_unreal_editor_subsystem = MagicMock(spec_set=["get_game_world", "get_editor_world"])
     _fake_game_world = MagicMock()
-    _fake_unreal_editor_subsystem.get_game_world.return_value = _fake_game_world
+    _fake_unreal_editor_subsystem.get_game_world.side_effect = lambda: (
+        _fake_game_world if _fake_level_editor_subsystem.is_in_play_in_editor() else None
+    )
     _fake_unreal_editor_subsystem.get_editor_world.return_value = MagicMock()
 
     unreal.LevelEditorSubsystem = MagicMock()

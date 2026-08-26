@@ -127,7 +127,7 @@ class _Widget:
         return True
 
 
-def _load_runtime(monkeypatch):
+def _load_runtime(monkeypatch, *, reports_pie=True):
     player = _Actor("Player_0", "PlayerPawn", _Vector(), attributes={"health": 100.0})
     enemy = _Actor("Enemy_0", "EnemyPawn", _Vector(1000, 0, 0), attributes={"health": 40.0})
     door = _Actor("Door_0", "TestDoor", _Vector(250, 100, 0), tags=("Interactable",))
@@ -149,7 +149,7 @@ def _load_runtime(monkeypatch):
 
     class LevelEditorSubsystem:
         def is_in_play_in_editor(self):
-            return True
+            return reports_pie
 
     class UnrealEditorSubsystem:
         def get_game_world(self):
@@ -245,12 +245,14 @@ def _load_runtime(monkeypatch):
         return UnrealEditorSubsystem()
 
     unreal = types.SimpleNamespace(
+        log=lambda _message: None,
         Actor=Actor,
         Pawn=Pawn,
         PlayerController=PlayerController,
         PlayerStart=PlayerStart,
         UserWidget=UserWidget,
         WidgetBlueprintLibrary=WidgetBlueprintLibrary,
+        EditorLevelLibrary=types.SimpleNamespace(get_game_world=lambda: world),
         LevelEditorSubsystem=LevelEditorSubsystem,
         UnrealEditorSubsystem=UnrealEditorSubsystem,
         GameplayStatics=GameplayStatics,
@@ -273,6 +275,17 @@ def _load_runtime(monkeypatch):
     spec.loader.exec_module(module)
     module._EPISODES.clear()
     return module, player, enemy, door, controller, key_events, navigation_calls
+
+
+def test_observe_uses_shared_game_world_when_pie_flag_is_transient(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(
+        monkeypatch,
+        reports_pie=False,
+    )
+
+    observation = runtime.observe({"include_pawns": True, "max_entities": 8})
+
+    assert observation["world"] == "TestWorld"
 
 
 def test_tools_manifest_declares_episode_observe_act_poll_contract():
