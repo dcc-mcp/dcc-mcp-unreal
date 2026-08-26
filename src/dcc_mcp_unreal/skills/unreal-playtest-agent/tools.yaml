@@ -59,6 +59,20 @@ tools:
           items: {type: string}
           maxItems: 24
           default: []
+        telemetry_aliases:
+          type: object
+          maxProperties: 24
+          default: {}
+          description: >-
+            Optional canonical telemetry fields mapped to bounded Unreal actor
+            or component property-name candidates. Built-in aliases cover
+            common health, ammo, and cooldown properties.
+          additionalProperties:
+            type: array
+            minItems: 1
+            maxItems: 8
+            uniqueItems: true
+            items: {type: string, minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_]+$"}
         max_entities:
           type: integer
           minimum: 1
@@ -81,7 +95,8 @@ tools:
   - name: playtest_observe
     description: >-
       Return a bounded structured observation of the player and selected PIE
-      entities without taking or requiring a screenshot.
+      entities, including configured combat telemetry and action availability,
+      without taking or requiring a screenshot.
     source_file: scripts/playtest_observe.py
     execution: sync
     affinity: main
@@ -204,7 +219,8 @@ tools:
   - name: playtest_poll_action
     description: >-
       Poll a semantic playtest action and return its structured transition.
-      Navigation reports completed, blocked, or timed_out from engine state.
+      Navigation reports completed, blocked, or timed_out from engine state;
+      combat transitions include observed telemetry deltas and damage feedback.
     source_file: scripts/playtest_poll_action.py
     execution: sync
     affinity: main
