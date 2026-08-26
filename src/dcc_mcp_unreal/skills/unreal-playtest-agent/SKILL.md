@@ -47,6 +47,20 @@ changes. These are observation deltas, not engine damage-delegate events; a
 target disappearing or taking shield-only damage remains inconclusive unless
 the project exposes corresponding telemetry aliases.
 
+## Project Mutation Postconditions
+
+Project-local recovery and mutation tools must not treat successful event
+dispatch as a successful gameplay effect. Capture the same bounded scalar
+state before and after the operation and return
+`dcc_mcp_unreal.verified_effect_result(...)` with explicit `required_fields`.
+The helper returns success only when at least one named field changes. An
+unchanged state returns `postcondition_not_met` and is not automatically
+retryable; a missing observation returns `postcondition_unobservable`.
+
+For asynchronous mutations, expose or use a named polling call and evaluate
+the postcondition only after it reaches a terminal state. Never return success
+while `verification_required` remains outstanding.
+
 Screenshots and DCC-CUA recordings remain useful as checkpoint evidence and visual fallbacks. They are not required for each decision step.
 
 ## Boundaries
