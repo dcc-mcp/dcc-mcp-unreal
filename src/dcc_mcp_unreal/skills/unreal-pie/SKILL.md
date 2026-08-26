@@ -33,6 +33,9 @@ log sampling, performance monitoring, and async Automation Test job execution.
   polled for status and cancelled.
 - **Reproducible evidence** — screenshots, log snapshots, and performance
   samples are timestamped and self-contained.
+- **One session contract** — adapter and project-owned skills import
+  `dcc_mcp_unreal.pie_session` so active-world detection, actor lookup, and
+  retryable `pie_session_unavailable` errors remain consistent.
 
 ## Scripts
 

@@ -623,16 +623,22 @@ def actor_to_dict(actor: Any) -> Dict[str, Any]:
 
 
 def find_level_actor(actor_name: str) -> Optional[Any]:
-    """Return the first current-level actor matching an exact label or object name.
+    """Return the first active-world actor matching an exact label or object name.
 
     UE 5.8 removed ``EditorLevelLibrary.find_actor_by_label_in_level``. Prefer
-    ``EditorActorSubsystem`` and retain the older list API only as a fallback
-    for supported UE 5.0-era hosts.
+    the active PIE game world, then ``EditorActorSubsystem``, and retain the
+    older list API only as a fallback for supported UE 5.0-era hosts.
     """
     if not actor_name:
         return None
 
     unreal = require_unreal()
+    from dcc_mcp_unreal.pie_session import find_pie_actor
+
+    runtime_actor = find_pie_actor(actor_name, unreal)
+    if runtime_actor is not None:
+        return runtime_actor
+
     actors = []
     get_subsystem = getattr(unreal, "get_editor_subsystem", None)
     subsystem_class = getattr(unreal, "EditorActorSubsystem", None)

@@ -30,6 +30,10 @@ Tools for actor-level operations in the active Unreal Editor level.
 - `delete_actor` - Delete an actor from the level by name.
 - `get_actor_transform` - Get the world-space location, rotation, and scale of an actor.
 - `set_actor_transform` - Set the world-space location, rotation, and/or scale of an actor.
+
+Actor lookup targets the active PIE game world while play is running and
+falls back to the editor level otherwise. `list_actors`, transform tools, and
+project-owned playtest skills therefore use the same exact actor names.
 - `configure_sky_light` - Assign an imported HDR TextureCube to a level Sky Light.
 - `configure_light` - Set allowlisted intensity, color, temperature, and softness controls on a light.
 - `configure_camera_exposure` - Disable eye adaptation and lock a camera to a fixed manual exposure.

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dcc_mcp_core.skill import skill_entry, skill_success
 
+from dcc_mcp_unreal.pie_session import get_pie_actors, get_pie_world
+
 
 @skill_entry
 def list_actors(actor_class_filter: str = "", **kwargs) -> dict:
@@ -17,7 +19,11 @@ def list_actors(actor_class_filter: str = "", **kwargs) -> dict:
     """
     import unreal  # noqa: PLC0415 — imported inside skill (not always available)
 
-    all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
+    pie_world = get_pie_world(unreal)
+    if pie_world is not None:
+        all_actors = get_pie_actors(unreal, world=pie_world)
+    else:
+        all_actors = unreal.EditorLevelLibrary.get_all_level_actors()
 
     if actor_class_filter:
         actors = [a for a in all_actors if actor_class_filter.lower() in a.get_class().get_name().lower()]

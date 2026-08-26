@@ -11,6 +11,7 @@ from collections import Counter
 from typing import Any
 
 import dcc_mcp_unreal as _adapter_package
+from dcc_mcp_unreal.pie_session import require_pie_context
 
 if not hasattr(_adapter_package, "_playtest_episode_registry"):
     _adapter_package._playtest_episode_registry = {}  # type: ignore[attr-defined]
@@ -52,19 +53,8 @@ def _unreal():
 
 
 def _pie_context():
-    unreal = _unreal()
-    level_editor = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
-    if not level_editor or not level_editor.is_in_play_in_editor():
-        raise RuntimeError("No active PIE session is available")
-    editor = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-    world = editor.get_game_world() if editor is not None else None
-    if world is None:
-        raise RuntimeError("The active PIE game world is unavailable")
-    controller = unreal.GameplayStatics.get_player_controller(world, 0)
-    pawn = unreal.GameplayStatics.get_player_pawn(world, 0)
-    if controller is None or pawn is None:
-        raise RuntimeError("The active PIE player controller or pawn is unavailable")
-    return unreal, world, controller, pawn
+    context = require_pie_context(_unreal())
+    return context.unreal, context.world, context.controller, context.pawn
 
 
 def _class_name(value: Any) -> str:

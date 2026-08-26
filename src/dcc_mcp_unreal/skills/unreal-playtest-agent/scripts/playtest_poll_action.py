@@ -6,6 +6,7 @@ from _playtest_runtime import poll_action
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_from_exception, unreal_success
+from dcc_mcp_unreal.pie_session import PieSessionUnavailableError, pie_session_error
 
 
 @skill_entry
@@ -21,5 +22,7 @@ def playtest_poll_action(episode_id: str = "", action_id: str = "", **kwargs) ->
             episode_id=episode_id,
             transition=transition,
         )
+    except PieSessionUnavailableError as exc:
+        return pie_session_error(exc)
     except Exception as exc:
         return unreal_from_exception(exc, "Failed to poll the structured PIE semantic action")
