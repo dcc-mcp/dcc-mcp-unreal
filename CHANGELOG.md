@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.4](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.3...v0.3.4) (2026-08-26)
+
+
+### Features
+
+* add reusable playtest combat telemetry ([#190](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/190)) ([4d4272c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4d4272c159f79ae19c53262766ec737b6c6806f7))
+
+
+### Bug Fixes
+
+* unify PIE session actor resolution ([f7da9e1](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f7da9e1e9ab390fb99c55de20a7f0eae53fc2e34))
+* verify project mutation postconditions ([a028b91](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a028b910580499086e5e88aaa9e15f4ceb68759f))
+
 ## [0.3.3](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.2...v0.3.3) (2026-08-25)
 
 
