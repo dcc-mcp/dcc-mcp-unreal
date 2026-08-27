@@ -948,10 +948,74 @@ def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, 
         "stderr": "",
         "truncated": False,
     }
-    monkeypatch.setattr(install_cli, "_run_bounded_probe", lambda *_args, **_kwargs: completed)
+    commands: list[list[str]] = []
+
+    def capture_probe(command: list[str]) -> dict:
+        commands.append(command)
+        return completed
+
+    monkeypatch.setattr(install_cli, "_run_bounded_probe", capture_probe)
 
     with pytest.raises(ValueError, match="origin"):
         install_cli._target_runtime(python_path)
+
+    assert commands[0][1:3] == ["-I", "-c"]
+    assert commands[0][-1] == ""
+    assert "from dcc_mcp_unreal.install_cli" not in commands[0][3]
+
+
+def test_target_runtime_does_not_execute_a_shadowed_probe(monkeypatch, tmp_path: Path) -> None:
+    legitimate_report = install_cli._runtime_probe()
+    forged_source = tmp_path / "forged-source"
+    forged_origin = forged_source / "src" / "dcc_mcp_unreal" / "__init__.py"
+    forged_payload = forged_source / "unreal" / "plugin"
+    forged_site = tmp_path / "forged-site-packages"
+    forged_origin.parent.mkdir(parents=True)
+    forged_payload.mkdir(parents=True)
+    forged_site.mkdir()
+    forged_origin.write_text("# forged source\n", encoding="utf-8")
+    (forged_payload / "DccMcpUnreal.uplugin").write_text(
+        json.dumps({"FileVersion": 3, "VersionName": install_cli.__version__}), encoding="utf-8"
+    )
+    (forged_payload / "attacker-controlled.py").write_text("raise SystemExit('payload ran')\n", encoding="utf-8")
+    legitimate_report["adapter"] = {
+        "name": "dcc-mcp-unreal",
+        "version": install_cli.__version__,
+        "module_version": install_cli.__version__,
+        "origin": str(forged_origin),
+        "distribution_root": str(forged_site),
+        "records": [],
+        "payload_records": [],
+        "direct_url": {"url": forged_source.as_uri(), "dir_info": {}},
+    }
+    encoded = base64.b64encode(json.dumps(legitimate_report).encode("utf-8")).decode("ascii")
+
+    shadow_package = tmp_path / "shadow" / "dcc_mcp_unreal"
+    shadow_package.mkdir(parents=True)
+    (shadow_package / "__init__.py").write_text("# shadow package\n", encoding="utf-8")
+    marker = tmp_path / "shadow-probe-ran.txt"
+    stdlib_marker = tmp_path / "shadow-stdlib-ran.txt"
+    (shadow_package.parent / "json.py").write_text(
+        f"open({str(stdlib_marker)!r}, 'w', encoding='utf-8').write('shadow stdlib executed')\n",
+        encoding="utf-8",
+    )
+    (shadow_package / "install_cli.py").write_text(
+        "import base64, json\n"
+        f"MARKER = {str(marker)!r}\n"
+        f"REPORT = {encoded!r}\n"
+        "def _runtime_probe():\n"
+        "    open(MARKER, 'w', encoding='utf-8').write('shadow executed')\n"
+        "    return json.loads(base64.b64decode(REPORT))\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(shadow_package.parent)
+    accepted = install_cli._target_runtime(Path(sys.executable))
+
+    assert not marker.exists()
+    assert not stdlib_marker.exists()
+    assert accepted["adapter_origin"] != str(forged_origin)
+    assert accepted["plugin_payload"]["root"] != str(forged_payload)
 
 
 def _distribution_identity(

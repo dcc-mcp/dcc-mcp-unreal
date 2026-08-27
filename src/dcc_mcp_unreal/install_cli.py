@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -334,8 +335,26 @@ def _validate_target_runtime_probe(runtime: dict[str, Any], python_path: Path) -
 
 
 def _target_runtime(python_path: Path) -> dict[str, str]:
-    probe = "import json; from dcc_mcp_unreal.install_cli import _runtime_probe; print(json.dumps(_runtime_probe()))"
-    completed = _run_bounded_probe([str(python_path), "-c", probe])
+    probe = "\n".join(
+        (
+            "from __future__ import annotations",
+            "import json",
+            "import os",
+            "import sys",
+            "from pathlib import Path",
+            "from typing import Any",
+            "trusted_overlay = sys.argv[1]",
+            "if trusted_overlay:",
+            "    sys.path.insert(0, trusted_overlay)",
+            inspect.getsource(_probe_distribution_identity),
+            inspect.getsource(_runtime_probe),
+            "print(json.dumps(_runtime_probe()))",
+        )
+    )
+    trusted_overlay = ""
+    if python_path.resolve() == Path(sys.executable).resolve():
+        trusted_overlay = str(Path(__file__).resolve().parents[1])
+    completed = _run_bounded_probe([str(python_path), "-I", "-c", probe, trusted_overlay])
     if not completed.get("success") or completed.get("truncated"):
         error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
         diagnostic = error_lines[-1] if error_lines else "import probe failed"
