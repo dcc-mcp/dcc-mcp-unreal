@@ -211,21 +211,13 @@ def _resolve_python(args: argparse.Namespace, engine_root: Path) -> tuple[Path, 
     raise ValueError("No Unreal target interpreter was found; pass --python with the exact executable")
 
 
-def _target_runtime(python_path: Path) -> dict[str, str]:
-    probe = r"""
-import csv
-import importlib.metadata as m
-import io
-import json
-import os
-import pathlib
-import sys
-import dcc_mcp_core as core
-import dcc_mcp_unreal as adapter
+def _probe_distribution_identity(distribution_name: str, module: Any) -> dict[str, Any]:
+    import csv
+    import importlib.metadata as metadata
+    import io
 
-def identity(distribution_name, module):
-    distribution = m.distribution(distribution_name)
-    origin = pathlib.Path(os.path.abspath(module.__file__))
+    distribution = metadata.distribution(distribution_name)
+    origin = Path(os.path.abspath(module.__file__))
     normalized_origin = os.path.normcase(os.path.normpath(str(origin)))
     records = []
     payload_records = []
@@ -236,7 +228,7 @@ def identity(distribution_name, module):
         if len(row) != 3:
             continue
         raw_path, raw_hash, raw_size = row
-        located = pathlib.Path(os.path.abspath(distribution.locate_file(raw_path)))
+        located = Path(os.path.abspath(distribution.locate_file(raw_path)))
         normalized_located = os.path.normcase(os.path.normpath(str(located)))
         record = {
             "located": str(located),
@@ -258,30 +250,28 @@ def identity(distribution_name, module):
         "version": distribution.version,
         "module_version": getattr(module, "__version__", None),
         "origin": str(origin),
-        "distribution_root": str(pathlib.Path(os.path.abspath(distribution.locate_file("")))),
+        "distribution_root": str(Path(os.path.abspath(distribution.locate_file("")))),
         "records": records,
         "payload_records": payload_records,
         "direct_url": json.loads(direct_url_text) if direct_url_text else None,
     }
 
-print(json.dumps({
-    "python_executable": str(pathlib.Path(sys.executable).resolve()),
-    "python_version": ".".join(map(str, sys.version_info[:3])),
-    "adapter": identity("dcc-mcp-unreal", adapter),
-    "core": identity("dcc-mcp-core", core),
-}))
-""".strip()
-    completed = _run_bounded_probe([str(python_path), "-c", probe])
-    if not completed.get("success") or completed.get("truncated"):
-        error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
-        diagnostic = error_lines[-1] if error_lines else "import probe failed"
-        raise ValueError(f"Target interpreter cannot import the adapter and Core: {diagnostic}")
-    try:
-        runtime = json.loads(str(completed.get("stdout") or ""))
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("Target interpreter returned an invalid import probe") from exc
-    if not isinstance(runtime, dict):
-        raise ValueError("Target interpreter returned an invalid import probe")
+
+def _runtime_probe() -> dict[str, Any]:
+    import dcc_mcp_core as core
+
+    import dcc_mcp_unreal as adapter
+
+    return {
+        "python_executable": str(Path(sys.executable).resolve()),
+        "python_version": ".".join(map(str, sys.version_info[:3])),
+        "cache_tag": sys.implementation.cache_tag,
+        "adapter": _probe_distribution_identity("dcc-mcp-unreal", adapter),
+        "core": _probe_distribution_identity("dcc-mcp-core", core),
+    }
+
+
+def _validate_target_runtime_probe(runtime: dict[str, Any], python_path: Path) -> dict[str, str]:
     adapter = runtime.get("adapter")
     core = runtime.get("core")
     if not isinstance(adapter, dict) or not isinstance(core, dict):
@@ -331,7 +321,7 @@ print(json.dumps({
             "plugin_payload": {
                 "root": str(plugin_payload_root),
                 "provenance": payload_provenance,
-                "cache_tag": sys.implementation.cache_tag,
+                "cache_tag": runtime.get("cache_tag"),
                 "ownership_root": str(
                     adapter_source_root
                     if adapter_source_root is not None
@@ -341,6 +331,22 @@ print(json.dumps({
             },
         }
     )
+
+
+def _target_runtime(python_path: Path) -> dict[str, str]:
+    probe = "import json; from dcc_mcp_unreal.install_cli import _runtime_probe; print(json.dumps(_runtime_probe()))"
+    completed = _run_bounded_probe([str(python_path), "-c", probe])
+    if not completed.get("success") or completed.get("truncated"):
+        error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
+        diagnostic = error_lines[-1] if error_lines else "import probe failed"
+        raise ValueError(f"Target interpreter cannot import the adapter and Core: {diagnostic}")
+    try:
+        runtime = json.loads(str(completed.get("stdout") or ""))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("Target interpreter returned an invalid import probe") from exc
+    if not isinstance(runtime, dict):
+        raise ValueError("Target interpreter returned an invalid import probe")
+    return _validate_target_runtime_probe(runtime, python_path)
 
 
 def _is_within(path: Path, root: Path) -> bool:
