@@ -224,16 +224,29 @@ import dcc_mcp_unreal as adapter
 def identity(distribution_name, module):
     distribution = m.distribution(distribution_name)
     files = tuple(distribution.files or ())
-    owned = {}
+    origin = pathlib.Path(os.path.abspath(module.__file__))
+    normalized_origin = os.path.normcase(os.path.normpath(str(origin)))
+    records = []
+    payload_records = []
+    packaged_payload = origin.parent / "_plugin"
+    normalized_payload = os.path.normcase(os.path.normpath(str(packaged_payload)))
     for item in files:
         located = pathlib.Path(os.path.abspath(distribution.locate_file(item)))
-        owned[str(located)] = {
+        normalized_located = os.path.normcase(os.path.normpath(str(located)))
+        record = {
+            "located": str(located),
             "path": str(item),
             "hash": f"{item.hash.mode}={item.hash.value}" if item.hash is not None else None,
             "size": item.size,
         }
-    origin = pathlib.Path(os.path.abspath(module.__file__))
-    record = owned.get(str(origin))
+        if normalized_located == normalized_origin:
+            records.append({key: record[key] for key in ("path", "hash", "size")})
+        try:
+            inside_payload = os.path.commonpath((normalized_located, normalized_payload)) == normalized_payload
+        except ValueError:
+            inside_payload = False
+        if inside_payload:
+            payload_records.append(record)
     direct_url_text = distribution.read_text("direct_url.json")
     return {
         "name": distribution.metadata.get("Name"),
@@ -241,9 +254,8 @@ def identity(distribution_name, module):
         "module_version": getattr(module, "__version__", None),
         "origin": str(origin),
         "distribution_root": str(pathlib.Path(os.path.abspath(distribution.locate_file("")))),
-        "record": record["path"] if record else None,
-        "record_hash": record["hash"] if record else None,
-        "record_size": record["size"] if record else None,
+        "records": records,
+        "payload_records": payload_records,
         "direct_url": json.loads(direct_url_text) if direct_url_text else None,
     }
 
@@ -292,16 +304,37 @@ print(json.dumps({
         raise ValueError("Target interpreter identity changed during the import probe")
     adapter_origin = _owned_module_origin(adapter, "dcc-mcp-unreal", "dcc_mcp_unreal")
     core_origin = _owned_module_origin(core, "dcc-mcp-core", "dcc_mcp_core")
-    return {
-        "python_executable": str(python_path.resolve()),
-        "python_version": python_version,
-        "adapter_version": adapter_version,
-        "core_version": core_version,
-        "adapter_origin": adapter_origin,
-        "core_origin": core_origin,
-        "adapter_distribution_root": str(Path(str(adapter["distribution_root"])).resolve()),
-        "core_distribution_root": str(Path(str(core["distribution_root"])).resolve()),
-    }
+    adapter_source_root = _local_source_root(adapter.get("direct_url"))
+    if adapter_source_root is None:
+        plugin_payload_root = Path(adapter_origin).parent / "_plugin"
+        payload_provenance = "wheel"
+    else:
+        plugin_payload_root = adapter_source_root / "unreal" / "plugin"
+        payload_provenance = "source-checkout"
+    if not (plugin_payload_root / "DccMcpUnreal.uplugin").is_file():
+        raise ValueError("Target dcc-mcp-unreal distribution does not contain the Unreal plugin payload")
+    return _bind_target_payload(
+        {
+            "python_executable": str(python_path.resolve()),
+            "python_version": python_version,
+            "adapter_version": adapter_version,
+            "core_version": core_version,
+            "adapter_origin": adapter_origin,
+            "core_origin": core_origin,
+            "adapter_distribution_root": str(Path(str(adapter["distribution_root"])).resolve()),
+            "core_distribution_root": str(Path(str(core["distribution_root"])).resolve()),
+            "plugin_payload": {
+                "root": str(plugin_payload_root),
+                "provenance": payload_provenance,
+                "ownership_root": str(
+                    adapter_source_root
+                    if adapter_source_root is not None
+                    else Path(str(adapter["distribution_root"])).absolute()
+                ),
+                "records": adapter.get("payload_records") if adapter_source_root is None else None,
+            },
+        }
+    )
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -372,61 +405,60 @@ def _assert_plain_owned_path(path: Path, root: Path, distribution: str) -> os.st
 
 
 def _record_digest_matches(origin: Path, record_hash: object) -> bool:
-    if record_hash is None:
-        return True
+    return _record_hash_matches_digest(_sha256(origin), record_hash)
+
+
+def _record_hash_matches_digest(digest: str, record_hash: object) -> bool:
     if not isinstance(record_hash, str) or not record_hash.startswith("sha256="):
         return False
     expected = record_hash.removeprefix("sha256=").rstrip("=")
-    actual = base64.urlsafe_b64encode(bytes.fromhex(_sha256(origin))).decode("ascii").rstrip("=")
+    actual = base64.urlsafe_b64encode(bytes.fromhex(digest)).decode("ascii").rstrip("=")
     return actual == expected
 
 
 def _owned_module_origin(identity: dict[str, Any], distribution: str, package: str) -> str:
     origin = Path(os.path.abspath(str(identity.get("origin") or "")))
     root = Path(os.path.abspath(str(identity.get("distribution_root") or "")))
-    record = identity.get("record")
     if _normalized_distribution_name(identity.get("name")) != _normalized_distribution_name(distribution):
         raise ValueError(f"{distribution} distribution identity does not match the requested product")
     if identity.get("version") != identity.get("module_version") and identity.get("module_version") is not None:
         raise ValueError(f"{distribution} distribution and module versions do not match")
     if origin.name != "__init__.py" or origin.parent.name != package or not root.is_dir():
         raise ValueError(f"{distribution} module origin is missing or unloadable")
-    if isinstance(record, str) and 0 < len(record) <= 1024:
-        record_path = Path(record)
+    source_root = _local_source_root(identity.get("direct_url"))
+    if source_root is not None:
+        candidates = (source_root / "src" / package, source_root / package)
+        if not any(origin == Path(os.path.abspath(candidate / "__init__.py")) for candidate in candidates):
+            raise ValueError(f"{distribution} module origin is not owned by its distribution")
+        _assert_plain_owned_path(origin, source_root, distribution)
+    else:
+        direct_url = identity.get("direct_url")
+        if isinstance(direct_url, dict) and "dir_info" in direct_url:
+            raise ValueError(f"{distribution} module origin is not owned by its distribution")
+        records = identity.get("records")
+        if not isinstance(records, list) or len(records) != 1 or not isinstance(records[0], dict):
+            raise ValueError(f"{distribution} module origin requires exactly one matching RECORD entry")
+        record = records[0]
+        if set(record) != {"path", "hash", "size"}:
+            raise ValueError(f"{distribution} module origin has an invalid RECORD entry")
+        record_path = Path(str(record.get("path") or ""))
         if record_path.is_absolute() or any(part == ".." for part in record_path.parts):
             raise ValueError(f"{distribution} module origin is outside distribution ownership")
         expected_origin = Path(os.path.abspath(root / record_path))
         if expected_origin != origin:
             raise ValueError(f"{distribution} module origin is outside distribution ownership")
         details = _assert_plain_owned_path(origin, root, distribution)
-        record_size = identity.get("record_size")
-        if record_size is not None and (
-            not isinstance(record_size, int) or isinstance(record_size, bool) or record_size != details.st_size
+        record_size = record.get("size")
+        if (
+            not isinstance(record_size, int)
+            or isinstance(record_size, bool)
+            or record_size <= 0
+            or record_size != details.st_size
         ):
             raise ValueError(f"{distribution} module origin does not match distribution metadata")
-        if not _record_digest_matches(origin, identity.get("record_hash")):
+        if not _record_digest_matches(origin, record.get("hash")):
             raise ValueError(f"{distribution} module origin does not match distribution metadata")
-    else:
-        source_root = _local_source_root(identity.get("direct_url"))
-        candidates = () if source_root is None else (source_root / "src" / package, source_root / package)
-        if not any(origin == Path(os.path.abspath(candidate / "__init__.py")) for candidate in candidates):
-            raise ValueError(f"{distribution} module origin is not owned by its distribution")
-        _assert_plain_owned_path(origin, source_root, distribution)
     return str(origin)
-
-
-def _plugin_source() -> tuple[Path, str]:
-    packaged = Path(__file__).resolve().parent / "_plugin"
-    source_checkout = Path(__file__).resolve().parents[2] / "unreal" / "plugin"
-    if (packaged / "DccMcpUnreal.uplugin").is_file():
-        return packaged, "wheel"
-    if (source_checkout / "DccMcpUnreal.uplugin").is_file():
-        return source_checkout, "source-checkout"
-    raise LifecycleError(
-        "The installed wheel does not contain the Unreal plugin payload",
-        exit_code=INSTALL_EXIT_ACQUIRE,
-        stage="acquire",
-    )
 
 
 def _sha256(path: Path) -> str:
@@ -439,6 +471,261 @@ def _sha256(path: Path) -> str:
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _path_identity(path: Path) -> dict[str, int]:
+    details = path.lstat()
+    return {
+        "device": int(details.st_dev),
+        "inode": int(details.st_ino),
+        "mode": int(details.st_mode),
+        "ctime_ns": int(details.st_ctime_ns),
+    }
+
+
+def _assert_plain_payload_path(path: Path, ownership_root: Path) -> os.stat_result:
+    if not _is_within(path, ownership_root):
+        raise ValueError("target plugin payload is outside distribution ownership")
+    current = path
+    while True:
+        if _is_link_or_reparse(current):
+            raise ValueError("target plugin payload crosses a link or reparse boundary")
+        if current == ownership_root:
+            break
+        current = current.parent
+    return path.lstat()
+
+
+def _payload_snapshot(root: Path, ownership_root: Path) -> dict[str, Any]:
+    root = Path(os.path.abspath(root))
+    ownership_root = Path(os.path.abspath(ownership_root))
+    root_details = _assert_plain_payload_path(root, ownership_root)
+    if not stat.S_ISDIR(root_details.st_mode):
+        raise ValueError("target plugin payload is missing or not a directory")
+    manifest: list[dict[str, Any]] = [{"path": ".", "type": "directory", "identity": _path_identity(root)}]
+    for current, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in sorted(directory_names):
+            path = current_path / name
+            details = _assert_plain_payload_path(path, ownership_root)
+            if not stat.S_ISDIR(details.st_mode):
+                raise ValueError("target plugin payload contains an unsupported directory entry")
+            if name == "__pycache__":
+                directory_names.remove(name)
+                continue
+            manifest.append(
+                {
+                    "path": path.relative_to(root).as_posix(),
+                    "type": "directory",
+                    "identity": _path_identity(path),
+                }
+            )
+        for name in sorted(file_names):
+            path = current_path / name
+            details = _assert_plain_payload_path(path, ownership_root)
+            if not stat.S_ISREG(details.st_mode):
+                raise ValueError("target plugin payload contains an unsupported file entry")
+            if details.st_nlink != 1:
+                raise ValueError("target plugin payload contains an unsupported hardlink identity")
+            manifest.append(
+                {
+                    "path": path.relative_to(root).as_posix(),
+                    "type": "file",
+                    "identity": _path_identity(path),
+                    "size": details.st_size,
+                    "sha256": _sha256(path),
+                }
+            )
+    return {
+        "root": str(root),
+        "ownership_root": str(ownership_root),
+        "manifest": sorted(manifest, key=lambda item: (str(item["path"]), str(item["type"]))),
+    }
+
+
+def _payload_content_manifest(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    manifest = snapshot.get("manifest")
+    if not isinstance(manifest, list):
+        raise ValueError("target plugin payload snapshot is invalid")
+    return [
+        {key: value for key, value in item.items() if key != "identity"}
+        for item in manifest
+        if isinstance(item, dict) and item.get("path") != "."
+    ]
+
+
+def _assert_installed_payload_records(
+    root: Path, distribution_root: Path, snapshot: dict[str, Any], records: object
+) -> None:
+    if not isinstance(records, list):
+        raise ValueError("installed target plugin payload requires RECORD ownership")
+    expected_files = {
+        os.path.normcase(os.path.normpath(str(root / str(item["path"])))): item
+        for item in snapshot["manifest"]
+        if isinstance(item, dict) and item.get("type") == "file"
+    }
+    matches: dict[str, list[dict[str, Any]]] = {path: [] for path in expected_files}
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {"located", "path", "hash", "size"}:
+            raise ValueError("installed target plugin payload has an invalid RECORD entry")
+        record_path = Path(str(record.get("path") or ""))
+        if record_path.is_absolute() or any(part == ".." for part in record_path.parts):
+            raise ValueError("installed target plugin payload RECORD escapes distribution ownership")
+        located = Path(os.path.abspath(str(record.get("located") or "")))
+        if located != Path(os.path.abspath(distribution_root / record_path)):
+            raise ValueError("installed target plugin payload RECORD path is inconsistent")
+        normalized = os.path.normcase(os.path.normpath(str(located)))
+        try:
+            relative = located.relative_to(root)
+        except ValueError:
+            relative = None
+        if relative is not None and "__pycache__" in relative.parts and relative.suffix == ".pyc":
+            continue
+        if normalized not in matches:
+            raise ValueError("installed target plugin payload RECORD contains an unexpected entry")
+        matches[normalized].append(record)
+    for normalized, expected in expected_files.items():
+        entries = matches[normalized]
+        if len(entries) != 1:
+            raise ValueError("installed target plugin payload requires exactly one matching RECORD entry per file")
+        entry = entries[0]
+        record_size = entry.get("size")
+        if (
+            not isinstance(record_size, int)
+            or isinstance(record_size, bool)
+            or record_size < 0
+            or record_size != expected.get("size")
+            or not _record_hash_matches_digest(str(expected.get("sha256") or ""), entry.get("hash"))
+        ):
+            raise ValueError("installed target plugin payload does not match RECORD metadata")
+
+
+def _copy_payload_snapshot(source: Path, destination: Path, snapshot: dict[str, Any]) -> None:
+    destination.mkdir()
+    manifest = snapshot.get("manifest")
+    if not isinstance(manifest, list):
+        raise ValueError("target plugin payload snapshot is invalid")
+    for item in manifest:
+        if not isinstance(item, dict) or item.get("path") == ".":
+            continue
+        relative = Path(str(item["path"]))
+        target = destination / relative
+        if item.get("type") == "directory":
+            target.mkdir(parents=True, exist_ok=False)
+        elif item.get("type") == "file":
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / relative, target)
+        else:
+            raise ValueError("target plugin payload snapshot is invalid")
+
+
+def _source_identity_snapshot(source_root: Path, origin: Path) -> dict[str, Any]:
+    source_root = Path(os.path.abspath(source_root))
+    origin = Path(os.path.abspath(origin))
+    details = _assert_plain_owned_path(origin, source_root, "dcc-mcp-unreal")
+    package_root = origin.parent
+    package_details = _assert_plain_payload_path(package_root, source_root)
+    root_details = _assert_plain_payload_path(source_root, source_root)
+    if not stat.S_ISDIR(root_details.st_mode) or not stat.S_ISDIR(package_details.st_mode):
+        raise ValueError("dcc-mcp-unreal source identity is invalid")
+    return {
+        "root": str(source_root),
+        "origin": str(origin),
+        "root_identity": _path_identity(source_root),
+        "package_identity": _path_identity(package_root),
+        "origin_identity": _path_identity(origin),
+        "origin_size": details.st_size,
+        "origin_sha256": _sha256(origin),
+    }
+
+
+def _bind_target_payload(runtime: dict[str, Any]) -> dict[str, Any]:
+    payload = runtime.get("plugin_payload")
+    if not isinstance(payload, dict):
+        raise ValueError("Target distribution returned an invalid Unreal plugin payload identity")
+    root_value = payload.get("root")
+    provenance = payload.get("provenance")
+    if not isinstance(root_value, str) or provenance not in {"wheel", "source-checkout"}:
+        raise ValueError("Target distribution returned an invalid Unreal plugin payload identity")
+    root = Path(os.path.abspath(root_value))
+    ownership_value = payload.get("ownership_root")
+    if ownership_value is None:
+        ownership_root = (
+            Path(str(runtime.get("adapter_distribution_root") or "")) if provenance == "wheel" else root.parent.parent
+        )
+    elif isinstance(ownership_value, str):
+        ownership_root = Path(os.path.abspath(ownership_value))
+    else:
+        raise ValueError("Target distribution returned an invalid Unreal plugin payload identity")
+    captured = _payload_snapshot(root, ownership_root)
+    if provenance == "wheel" and "records" in payload:
+        _assert_installed_payload_records(root, ownership_root, captured, payload.get("records"))
+    expected = payload.get("snapshot")
+    if expected is not None and expected != captured:
+        raise ValueError("Target distribution Unreal plugin payload identity changed")
+    bound_runtime = dict(runtime)
+    bound_runtime["plugin_payload"] = {
+        "root": str(root),
+        "provenance": provenance,
+        "ownership_root": str(ownership_root),
+        "snapshot": captured,
+    }
+    source_identity = runtime.get("adapter_source_identity")
+    if provenance == "source-checkout":
+        current_source = _source_identity_snapshot(
+            Path(str(ownership_root)), Path(str(runtime.get("adapter_origin") or ""))
+        )
+        if source_identity is not None and source_identity != current_source:
+            raise ValueError("Target dcc-mcp-unreal source identity changed")
+        bound_runtime["adapter_source_identity"] = current_source
+    elif source_identity is not None:
+        raise ValueError("Installed target distribution returned an unexpected source identity")
+    return bound_runtime
+
+
+def _assert_bound_payload(payload: dict[str, Any]) -> None:
+    try:
+        current = _payload_snapshot(Path(payload["root"]), Path(payload["ownership_root"]))
+    except (KeyError, OSError, ValueError, TypeError) as exc:
+        raise LifecycleError(
+            f"Target distribution Unreal plugin payload changed: {exc}",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        ) from exc
+    if current != payload.get("snapshot"):
+        raise LifecycleError(
+            "Target distribution Unreal plugin payload identity changed",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        )
+
+
+def _assert_bound_runtime(runtime: dict[str, Any]) -> None:
+    payload = runtime.get("plugin_payload")
+    if not isinstance(payload, dict):
+        raise LifecycleError(
+            "Target distribution returned an invalid Unreal plugin payload identity",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        )
+    _assert_bound_payload(payload)
+    source_identity = runtime.get("adapter_source_identity")
+    if source_identity is None:
+        return
+    try:
+        current = _source_identity_snapshot(Path(str(source_identity["root"])), Path(str(source_identity["origin"])))
+    except (KeyError, OSError, ValueError, TypeError) as exc:
+        raise LifecycleError(
+            f"Target dcc-mcp-unreal source identity changed: {exc}",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        ) from exc
+    if current != source_identity:
+        raise LifecycleError(
+            "Target dcc-mcp-unreal source identity changed",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        )
 
 
 def _file_manifest(root: Path) -> list[dict[str, Any]]:
@@ -702,7 +989,7 @@ def _resolve_context(args: argparse.Namespace) -> dict[str, Any]:
     python_path, python_source = _resolve_python(args, engine_root)
     if not python_path.is_file():
         raise ValueError("The selected target interpreter does not exist")
-    runtime = _target_runtime(python_path)
+    runtime = _bind_target_payload(_target_runtime(python_path))
     instance_id = str(uuid.UUID(args.instance_id)) if args.instance_id else None
     plugin_root = project_file.parent / "Plugins" / PLUGIN_NAME
     receipt_path = project_file.parent / ".dcc-mcp" / "receipts" / "unreal.json"
@@ -1029,9 +1316,18 @@ def _install(
 ) -> tuple[int, dict[str, Any]]:
     if state == "current":
         return _verify(args, context, state, receipt)
-    source, provenance = _plugin_source()
+    payload = context["runtime"].get("plugin_payload")
+    if not isinstance(payload, dict) or set(payload) != {"root", "provenance", "ownership_root", "snapshot"}:
+        raise LifecycleError(
+            "Target distribution returned an invalid Unreal plugin payload identity",
+            exit_code=INSTALL_EXIT_ACQUIRE,
+            stage="acquire",
+        )
+    source = Path(os.path.abspath(payload["root"]))
+    provenance = payload["provenance"]
     plugin_root: Path = context["plugin_root"]
     plugin_parent = plugin_root.parent
+    _assert_bound_runtime(context["runtime"])
     plugin_parent.mkdir(parents=True, exist_ok=True)
     lock_reason = _inspect_locks(plugin_root)
     if lock_reason:
@@ -1060,7 +1356,16 @@ def _install(
     preserve_backup = False
     verification: Optional[tuple[int, dict[str, Any]]] = None
     try:
-        shutil.copytree(source, staging)
+        _assert_bound_runtime(context["runtime"])
+        _copy_payload_snapshot(source, staging, payload["snapshot"])
+        _assert_bound_runtime(context["runtime"])
+        staged_manifest = _file_manifest(staging)
+        if staged_manifest != _payload_content_manifest(payload["snapshot"]):
+            raise LifecycleError(
+                "Staged plugin payload differs from the validated target distribution",
+                exit_code=INSTALL_EXIT_ACQUIRE,
+                stage="acquire",
+            )
         if not (staging / "DccMcpUnreal.uplugin").is_file():
             raise LifecycleError(
                 "Staged payload is missing DccMcpUnreal.uplugin",
@@ -1075,10 +1380,13 @@ def _install(
                 stage="acquire",
             )
         if plugin_root.exists():
+            _assert_bound_runtime(context["runtime"])
             os.replace(plugin_root, backup)
             moved_previous = True
+        _assert_bound_runtime(context["runtime"])
         os.replace(staging, plugin_root)
         _set_plugin_entry(project, installed_entry)
+        _assert_bound_runtime(context["runtime"])
         _atomic_json(project_file, project)
         pending_transaction = None
         if moved_previous and not context["instance_id"]:
@@ -1088,12 +1396,15 @@ def _install(
                 "previous_project": _encode_snapshot(old_project_bytes),
                 "previous_receipt": _encode_snapshot(old_receipt),
             }
+        _assert_bound_runtime(context["runtime"])
         new_receipt = _write_receipt(context, previous_entry, provenance, transaction=pending_transaction)
         new_state, new_receipt, _ = _inspect_state(context)
+        _assert_bound_runtime(context["runtime"])
         verification = _verify(args, context, new_state, new_receipt)
         verify_code, _ = verification
         if verify_code == INSTALL_EXIT_OK:
             runtime_identity = context.pop("_verified_runtime_identity", None)
+            _assert_bound_runtime(context["runtime"])
             _write_receipt(context, previous_entry, provenance, runtime_identity)
             committed = True
         elif not context["instance_id"]:
