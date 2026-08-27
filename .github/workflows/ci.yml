@@ -96,7 +96,7 @@ jobs:
 
       - name: Build and inspect wheel lifecycle payload
         run: |
-          python -m build --wheel
+          python -m build
           python - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
@@ -113,6 +113,28 @@ jobs:
           if missing:
               raise SystemExit(f"wheel is missing lifecycle payload: {sorted(missing)}")
           PY
+
+      - name: Verify source, wheel, and sdist distribution ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -name 'dcc_mcp_unreal-*.whl' -print -quit)"
+          sdist="$(find dist -maxdepth 1 -name 'dcc_mcp_unreal-*.tar.gz' -print -quit)"
+          test -n "$wheel"
+          test -n "$sdist"
+          for mode in source wheel sdist; do
+            python -m venv ".${mode}-smoke"
+            ".${mode}-smoke/bin/python" -m pip install "dcc-mcp-core==0.20.21"
+          done
+          .wheel-smoke/bin/python -m pip install --no-deps "$wheel"
+          .sdist-smoke/bin/python -m pip install --no-deps "$sdist"
+          .source-smoke/bin/python -m pip install --no-deps .
+          .wheel-smoke/bin/python -c \
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
+          .sdist-smoke/bin/python -c \
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
+          PYTHONPATH="$PWD/src" .source-smoke/bin/python -c \
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
 
   package-unreal-plugin:
     name: Package Unreal Plugin

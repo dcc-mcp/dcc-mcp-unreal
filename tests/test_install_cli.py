@@ -669,19 +669,25 @@ def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, 
                 "python_executable": str(python_path.resolve()),
                 "python_version": "3.12.0",
                 "adapter": {
+                    "name": "dcc-mcp-unreal",
                     "version": install_cli.__version__,
                     "module_version": install_cli.__version__,
                     "origin": str(shadow_origin.resolve()),
                     "distribution_root": str(site.resolve()),
                     "record": "dcc_mcp_unreal/__init__.py",
+                    "record_hash": None,
+                    "record_size": None,
                     "direct_url": None,
                 },
                 "core": {
+                    "name": "dcc-mcp-core",
                     "version": install_cli.MIN_CORE_VERSION,
                     "module_version": None,
                     "origin": str(core_origin.resolve()),
                     "distribution_root": str(site.resolve()),
                     "record": "dcc_mcp_core/__init__.py",
+                    "record_hash": None,
+                    "record_size": None,
                     "direct_url": None,
                 },
             }
@@ -693,6 +699,178 @@ def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, 
 
     with pytest.raises(ValueError, match="origin"):
         install_cli._target_runtime(python_path)
+
+
+def _distribution_identity(
+    origin: Path,
+    root: Path,
+    *,
+    record: Optional[str] = None,
+    direct_url: Optional[dict] = None,
+    name: str = "dcc-mcp-unreal",
+    version: str = install_cli.__version__,
+) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
+    return {
+        "name": name,
+        "version": version,
+        "module_version": install_cli.__version__,
+        "origin": str(origin.absolute()),
+        "distribution_root": str(root.absolute()),
+        "record": record,
+        "record_hash": None,
+        "record_size": None,
+        "direct_url": direct_url,
+    }
+
+
+@pytest.mark.parametrize("editable", (True, False, None))
+def test_distribution_identity_accepts_owned_local_source_checkout(tmp_path: Path, editable: Optional[bool]) -> None:
+    source_root = tmp_path / "source"
+    origin = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    dir_info = {} if editable is None else {"editable": editable}
+    identity = _distribution_identity(
+        origin,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": dir_info},
+    )
+
+    assert install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal") == str(origin.absolute())
+
+
+def test_distribution_identity_accepts_installed_wheel_record(tmp_path: Path) -> None:
+    site = tmp_path / "site-packages"
+    origin = site / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    identity = _distribution_identity(origin, site, record="dcc_mcp_unreal/__init__.py")
+
+    assert install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal") == str(origin.absolute())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("record_size", 1), ("record_hash", "sha256=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")),
+)
+def test_distribution_identity_rejects_record_metadata_mismatch(tmp_path: Path, field: str, value: object) -> None:
+    site = tmp_path / "site-packages"
+    origin = site / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    identity = _distribution_identity(origin, site, record="dcc_mcp_unreal/__init__.py")
+    identity[field] = value
+
+    with pytest.raises(ValueError, match="metadata"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
+
+
+def test_target_runtime_accepts_the_active_distribution_context() -> None:
+    runtime = install_cli._target_runtime(Path(sys.executable))
+
+    assert runtime["adapter_version"] == install_cli.__version__
+    assert Path(runtime["adapter_origin"]).name == "__init__.py"
+    assert Path(runtime["core_origin"]).name == "__init__.py"
+
+
+def test_distribution_identity_rejects_same_bytes_from_independent_source(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    owned = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    replacement = tmp_path / "replacement" / "src" / "dcc_mcp_unreal" / "__init__.py"
+    owned.parent.mkdir(parents=True)
+    replacement.parent.mkdir(parents=True)
+    owned.write_text("# identical\n", encoding="utf-8")
+    replacement.write_bytes(owned.read_bytes())
+    identity = _distribution_identity(
+        replacement,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": {}},
+    )
+
+    with pytest.raises(ValueError, match="owned"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
+
+
+def test_distribution_identity_rejects_symlinked_source_package(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    payload = tmp_path / "payload" / "dcc_mcp_unreal"
+    payload.mkdir(parents=True)
+    (payload / "__init__.py").write_text("# package\n", encoding="utf-8")
+    package_link = source_root / "src" / "dcc_mcp_unreal"
+    package_link.parent.mkdir(parents=True)
+    if sys.platform == "win32":
+        linked = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(package_link), str(payload)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert linked.returncode == 0, linked.stderr or linked.stdout
+    else:
+        os.symlink(payload, package_link, target_is_directory=True)
+    origin = package_link / "__init__.py"
+    identity = _distribution_identity(
+        origin,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": {}},
+    )
+
+    with pytest.raises(ValueError, match="link|reparse"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
+
+
+def test_distribution_identity_rejects_hardlinked_module(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    origin = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    independent = tmp_path / "independent.py"
+    origin.parent.mkdir(parents=True)
+    independent.write_text("# package\n", encoding="utf-8")
+    os.link(independent, origin)
+    identity = _distribution_identity(
+        origin,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": {}},
+    )
+
+    with pytest.raises(ValueError, match="link"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("name", "foreign-distribution"), ("version", "0.0.1")),
+)
+def test_distribution_identity_rejects_mismatched_product_metadata(tmp_path: Path, field: str, value: str) -> None:
+    source_root = tmp_path / "source"
+    origin = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    identity = _distribution_identity(
+        origin,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": {}},
+    )
+    identity[field] = value
+
+    with pytest.raises(ValueError, match="identity|version"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
+
+
+@pytest.mark.parametrize("editable", (0, 1, "true", {}, []))
+def test_distribution_identity_rejects_malformed_source_metadata(tmp_path: Path, editable: object) -> None:
+    source_root = tmp_path / "source"
+    origin = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    identity = _distribution_identity(
+        origin,
+        tmp_path / "site-packages",
+        direct_url={"url": source_root.as_uri(), "dir_info": {"editable": editable}},
+    )
+
+    with pytest.raises(ValueError, match="owned"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
 
 
 def _bound_readiness(context: dict, *, instance_id: str = "11111111-1111-1111-1111-111111111111") -> dict:

@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -214,6 +215,7 @@ def _target_runtime(python_path: Path) -> dict[str, str]:
     probe = r"""
 import importlib.metadata as m
 import json
+import os
 import pathlib
 import sys
 import dcc_mcp_core as core
@@ -222,15 +224,26 @@ import dcc_mcp_unreal as adapter
 def identity(distribution_name, module):
     distribution = m.distribution(distribution_name)
     files = tuple(distribution.files or ())
-    owned = {str(pathlib.Path(distribution.locate_file(item)).resolve()): str(item) for item in files}
-    origin = pathlib.Path(module.__file__).resolve()
+    owned = {}
+    for item in files:
+        located = pathlib.Path(os.path.abspath(distribution.locate_file(item)))
+        owned[str(located)] = {
+            "path": str(item),
+            "hash": f"{item.hash.mode}={item.hash.value}" if item.hash is not None else None,
+            "size": item.size,
+        }
+    origin = pathlib.Path(os.path.abspath(module.__file__))
+    record = owned.get(str(origin))
     direct_url_text = distribution.read_text("direct_url.json")
     return {
+        "name": distribution.metadata.get("Name"),
         "version": distribution.version,
         "module_version": getattr(module, "__version__", None),
         "origin": str(origin),
-        "distribution_root": str(pathlib.Path(distribution.locate_file("")).resolve()),
-        "record": owned.get(str(origin)),
+        "distribution_root": str(pathlib.Path(os.path.abspath(distribution.locate_file("")))),
+        "record": record["path"] if record else None,
+        "record_hash": record["hash"] if record else None,
+        "record_size": record["size"] if record else None,
         "direct_url": json.loads(direct_url_text) if direct_url_text else None,
     }
 
@@ -299,42 +312,106 @@ def _is_within(path: Path, root: Path) -> bool:
     return True
 
 
-def _editable_root(value: object) -> Optional[Path]:
+def _local_source_root(value: object) -> Optional[Path]:
     if not isinstance(value, dict) or not isinstance(value.get("dir_info"), dict):
         return None
+    if set(value) != {"url", "dir_info"} or not set(value["dir_info"]).issubset({"editable"}):
+        return None
     url = value.get("url")
-    if value["dir_info"].get("editable") is not True or not isinstance(url, str) or not 0 < len(url) <= 2048:
+    editable = value["dir_info"].get("editable")
+    if (
+        (editable is not None and not isinstance(editable, bool))
+        or not isinstance(url, str)
+        or not 0 < len(url) <= 2048
+    ):
         return None
     parsed = urlsplit(url)
-    if parsed.scheme != "file" or parsed.query or parsed.fragment:
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost") or parsed.query or parsed.fragment:
         return None
     raw_path = unquote(parsed.path)
     if re.fullmatch(r"/[A-Za-z]:/.*", raw_path):
         raw_path = raw_path[1:]
-    root = Path(raw_path).resolve()
-    return root if root.is_dir() else None
+    try:
+        root = Path(os.path.abspath(raw_path))
+        return root if root.is_dir() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _normalized_distribution_name(value: object) -> str:
+    if not isinstance(value, str) or not 0 < len(value) <= 256:
+        return ""
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    details = path.lstat()
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return stat.S_ISLNK(details.st_mode) or bool(getattr(details, "st_file_attributes", 0) & reparse_flag)
+
+
+def _assert_plain_owned_path(path: Path, root: Path, distribution: str) -> os.stat_result:
+    if not _is_within(path, root):
+        raise ValueError(f"{distribution} module origin is outside distribution ownership")
+    current = path
+    while True:
+        try:
+            if _is_link_or_reparse(current):
+                raise ValueError(f"{distribution} module origin crosses a link or reparse boundary")
+        except OSError as exc:
+            raise ValueError(f"{distribution} module origin is missing or unloadable") from exc
+        if current == root:
+            break
+        current = current.parent
+    details = path.lstat()
+    if not stat.S_ISREG(details.st_mode) or details.st_size <= 0:
+        raise ValueError(f"{distribution} module origin is missing or unloadable")
+    if details.st_nlink != 1:
+        raise ValueError(f"{distribution} module origin has an unsupported hardlink identity")
+    return details
+
+
+def _record_digest_matches(origin: Path, record_hash: object) -> bool:
+    if record_hash is None:
+        return True
+    if not isinstance(record_hash, str) or not record_hash.startswith("sha256="):
+        return False
+    expected = record_hash.removeprefix("sha256=").rstrip("=")
+    actual = base64.urlsafe_b64encode(bytes.fromhex(_sha256(origin))).decode("ascii").rstrip("=")
+    return actual == expected
 
 
 def _owned_module_origin(identity: dict[str, Any], distribution: str, package: str) -> str:
-    origin = Path(str(identity.get("origin") or "")).resolve()
-    root = Path(str(identity.get("distribution_root") or "")).resolve()
+    origin = Path(os.path.abspath(str(identity.get("origin") or "")))
+    root = Path(os.path.abspath(str(identity.get("distribution_root") or "")))
     record = identity.get("record")
-    valid = (
-        origin.is_file()
-        and origin.stat().st_size > 0
-        and origin.name == "__init__.py"
-        and origin.parent.name == package
-    )
-    if not valid or not root.is_dir():
+    if _normalized_distribution_name(identity.get("name")) != _normalized_distribution_name(distribution):
+        raise ValueError(f"{distribution} distribution identity does not match the requested product")
+    if identity.get("version") != identity.get("module_version") and identity.get("module_version") is not None:
+        raise ValueError(f"{distribution} distribution and module versions do not match")
+    if origin.name != "__init__.py" or origin.parent.name != package or not root.is_dir():
         raise ValueError(f"{distribution} module origin is missing or unloadable")
     if isinstance(record, str) and 0 < len(record) <= 1024:
-        if (root / record).resolve() != origin or not _is_within(origin, root):
+        record_path = Path(record)
+        if record_path.is_absolute() or any(part == ".." for part in record_path.parts):
             raise ValueError(f"{distribution} module origin is outside distribution ownership")
+        expected_origin = Path(os.path.abspath(root / record_path))
+        if expected_origin != origin:
+            raise ValueError(f"{distribution} module origin is outside distribution ownership")
+        details = _assert_plain_owned_path(origin, root, distribution)
+        record_size = identity.get("record_size")
+        if record_size is not None and (
+            not isinstance(record_size, int) or isinstance(record_size, bool) or record_size != details.st_size
+        ):
+            raise ValueError(f"{distribution} module origin does not match distribution metadata")
+        if not _record_digest_matches(origin, identity.get("record_hash")):
+            raise ValueError(f"{distribution} module origin does not match distribution metadata")
     else:
-        editable = _editable_root(identity.get("direct_url"))
-        candidates = () if editable is None else (editable / "src" / package, editable / package)
-        if not any(origin == (candidate / "__init__.py").resolve() for candidate in candidates):
+        source_root = _local_source_root(identity.get("direct_url"))
+        candidates = () if source_root is None else (source_root / "src" / package, source_root / package)
+        if not any(origin == Path(os.path.abspath(candidate / "__init__.py")) for candidate in candidates):
             raise ValueError(f"{distribution} module origin is not owned by its distribution")
+        _assert_plain_owned_path(origin, source_root, distribution)
     return str(origin)
 
 
