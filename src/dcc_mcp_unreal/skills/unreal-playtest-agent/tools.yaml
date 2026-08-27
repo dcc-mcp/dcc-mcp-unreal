@@ -86,8 +86,39 @@ tools:
       additionalProperties: false
     output_schema:
       type: object
-      required: [success, message, context]
-      additionalProperties: true
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, "null"]}
+        prompt: {type: [string, "null"]}
+        context: {type: object}
+      additionalProperties: false
+      $defs:
+        success_context:
+          type: object
+          required: [episode_id, session]
+          properties:
+            episode_id: {type: string}
+            session: {type: object}
+            selectors: {type: object}
+            observation: {type: object}
+            started_at: {type: number}
+            elapsed_seconds: {type: number, minimum: 0}
+            baseline_hash: {type: string, pattern: "^sha256:"}
+            action_count: {type: integer, minimum: 0}
+            transition_count: {type: integer, minimum: 0}
+            pending_action_ids: {type: array, items: {type: string}}
+            trace: {type: array, items: {type: object}}
+          additionalProperties: false
+      allOf:
+        - if:
+            properties: {success: {const: true}}
+            required: [success]
+          then:
+            properties:
+              error: {type: "null"}
+              context: {$ref: "#/$defs/success_context"}
     next-tools:
       on-success: [unreal_playtest_agent__playtest_observe]
       on-failure: [dcc_diagnostics__audit_log]
@@ -118,8 +149,44 @@ tools:
       additionalProperties: false
     output_schema:
       type: object
-      required: [success, message, context]
-      additionalProperties: true
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, "null"]}
+        prompt: {type: [string, "null"]}
+        context: {type: object}
+      additionalProperties: false
+      $defs:
+        success_context:
+          type: object
+          required: [episode_id, observation]
+          properties:
+            episode_id: {type: string}
+            observation:
+              type: object
+              required: [schema, world, time_seconds, runtime, player, action_availability, entity_count, entity_classes, entities, observation_hash]
+              properties:
+                schema: {const: dcc-mcp-playtest-observation-v1}
+                world: {type: string}
+                time_seconds: {type: number}
+                runtime: {type: object}
+                player: {type: object}
+                action_availability: {type: object}
+                entity_count: {type: integer, minimum: 0}
+                entity_classes: {type: object}
+                entities: {type: array, items: {type: object}}
+                observation_hash: {type: string, pattern: "^sha256:"}
+              additionalProperties: false
+          additionalProperties: false
+      allOf:
+        - if:
+            properties: {success: {const: true}}
+            required: [success]
+          then:
+            properties:
+              error: {type: "null"}
+              context: {$ref: "#/$defs/success_context"}
     next-tools:
       on-success: [unreal_playtest_agent__playtest_execute_action]
       on-failure: [dcc_diagnostics__audit_log]
@@ -128,6 +195,9 @@ tools:
     description: >-
       Execute one bounded semantic gameplay action in the active PIE world.
       Navigation follows Unreal navigation and never teleports the player.
+      Movement can require a measured displacement instead of treating input
+      delivery as success. Relative movement proof is direction- and duration-
+      bounded; displacement values use Unreal centimeters.
     source_file: scripts/playtest_execute_action.py
     execution: sync
     affinity: main
@@ -207,20 +277,78 @@ tools:
           minimum: 0.5
           maximum: 30
           default: 4
+        expect_movement:
+          type: boolean
+          description: >-
+            Require a measured player displacement for movement actions.
+            Defaults to true for move_relative and false for navigation,
+            where reaching the requested target is already an observed effect.
+        min_displacement:
+          type: number
+          minimum: 0.001
+          maximum: 1000000
+          default: 1
+          description: Minimum measured player displacement in Unreal centimeters required when movement is expected.
       additionalProperties: false
     output_schema:
       type: object
-      required: [success, message, context]
-      additionalProperties: true
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, "null"]}
+        prompt: {type: [string, "null"]}
+        context: {type: object}
+      additionalProperties: false
+      $defs:
+        success_context:
+          type: object
+          required: [episode_id, action_id, status, action, navigation_driver, target, before_hash, movement_expected, min_displacement, session_identity, distance_unit, duration, duration_unit]
+          properties:
+            episode_id: {type: string}
+            action_id: {type: string}
+            status: {const: pending}
+            action: {type: string}
+            navigation_driver: {type: [string, "null"]}
+            target: {type: [object, "null"]}
+            before_hash: {type: string, pattern: "^sha256:"}
+            movement_expected: {type: boolean}
+            min_displacement: {type: number, minimum: 0.001, maximum: 1000000}
+            session_identity: {type: string, pattern: "^sha256:"}
+            distance_unit: {const: centimeters}
+            duration: {type: number, minimum: 0, maximum: 5}
+            duration_unit: {const: seconds}
+            direction: {type: string, enum: [forward, backward, left, right]}
+          additionalProperties: false
+      allOf:
+        - if:
+            properties: {success: {const: true}}
+            required: [success]
+          then:
+            properties:
+              error: {type: "null"}
+              context: {$ref: "#/$defs/success_context"}
     next-tools:
       on-success: [unreal_playtest_agent__playtest_poll_action]
       on-failure: [dcc_diagnostics__audit_log]
+    call_examples:
+      - arguments:
+          episode_id: pie_episode_example
+          action: move_relative
+          direction: forward
+          duration: 0.25
+          expect_movement: true
+          min_displacement: 5
+        note: Require an observed movement effect instead of input acceptance alone.
 
   - name: playtest_poll_action
     description: >-
       Poll a semantic playtest action and return its structured transition.
       Navigation reports completed, blocked, or timed_out from engine state;
-      combat transitions include observed telemetry deltas and damage feedback.
+      expected movement reports stalled when displacement remains below its
+      threshold. Terminal transitions include exact bounded before/after
+      observations, measured displacement in Unreal centimeters, exact action
+      parameters, causal movement evidence, and combat telemetry deltas.
     source_file: scripts/playtest_poll_action.py
     execution: sync
     affinity: main
@@ -243,8 +371,92 @@ tools:
       additionalProperties: false
     output_schema:
       type: object
-      required: [success, message, context]
-      additionalProperties: true
+      required: [success, message, error, prompt, context]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, "null"]}
+        prompt: {type: [string, "null"]}
+        context: {type: object}
+      additionalProperties: false
+      $defs:
+        vector:
+          type: object
+          required: [x, y, z]
+          properties:
+            x: {type: number}
+            y: {type: number}
+            z: {type: number}
+          additionalProperties: false
+        transition:
+          type: object
+          required: [action_id, action, status, elapsed_seconds, movement_expected, min_displacement, session_identity, distance_unit, duration, duration_unit]
+          properties:
+            action_id: {type: string}
+            action: {type: string}
+            status: {type: string, enum: [pending, completed, blocked, stalled, timed_out, cancelled]}
+            elapsed_seconds: {type: number, minimum: 0}
+            session_identity: {type: string, pattern: "^sha256:"}
+            target: {type: [object, "null"]}
+            before_hash: {type: string, pattern: "^sha256:"}
+            after_hash: {type: [string, "null"], pattern: "^sha256:"}
+            player_location_delta:
+              oneOf:
+                - {$ref: "#/$defs/vector"}
+                - {type: "null"}
+            player_displacement: {type: [number, "null"], minimum: 0}
+            movement_expected: {type: boolean}
+            min_displacement: {type: number, minimum: 0.001, maximum: 1000000}
+            distance_unit: {const: centimeters}
+            duration: {type: number, minimum: 0, maximum: 5}
+            duration_unit: {const: seconds}
+            direction: {type: string, enum: [forward, backward, left, right]}
+            expected_direction: {$ref: "#/$defs/vector"}
+            max_causal_displacement: {type: number, minimum: 0}
+            movement_proof_window: {type: number, minimum: 0}
+            causal_displacement: {type: number, minimum: 0}
+            direction_alignment: {type: number, minimum: -1, maximum: 1}
+            entity_count_delta: {type: [integer, "null"]}
+            telemetry_deltas: {type: array, items: {type: object}}
+            before: {type: object}
+            after: {type: [object, "null"]}
+            observation: {type: object}
+            reason: {type: string, maxLength: 128}
+            blocked_reason: {type: string, maxLength: 128}
+            distance_to_target: {type: number, minimum: 0}
+            navigation_driver: {type: [string, "null"]}
+            steering_fallback_used: {type: boolean}
+            steering_backend: {type: [string, "null"]}
+            cleanup_errors: {type: array, items: {type: string}}
+            damage_events: {type: array, items: {type: object}}
+            combat_feedback: {type: object}
+          additionalProperties: false
+          allOf:
+            - if:
+                properties: {status: {const: pending}}
+                required: [status]
+              then:
+                required: [observation]
+            - if:
+                properties: {status: {enum: [completed, blocked, stalled, timed_out, cancelled]}}
+                required: [status]
+              then:
+                required: [target, before_hash, after_hash, player_location_delta, player_displacement, entity_count_delta, telemetry_deltas, before, after]
+        success_context:
+          type: object
+          required: [episode_id, transition]
+          properties:
+            episode_id: {type: string}
+            transition: {$ref: "#/$defs/transition"}
+          additionalProperties: false
+      allOf:
+        - if:
+            properties: {success: {const: true}}
+            required: [success]
+          then:
+            properties:
+              error: {type: "null"}
+              context: {$ref: "#/$defs/success_context"}
     next-tools:
       on-success: [unreal_playtest_agent__playtest_observe]
       on-failure: [dcc_diagnostics__audit_log]
