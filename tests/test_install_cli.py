@@ -987,6 +987,7 @@ def _runtime_probe_result(python_path: Path, adapter: dict, core: dict) -> dict:
             {
                 "python_executable": str(python_path.resolve()),
                 "python_version": "3.12.0",
+                "cache_tag": sys.implementation.cache_tag,
                 "adapter": adapter,
                 "core": core,
             }
@@ -1008,24 +1009,6 @@ def install_sop_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     assert completed.returncode == 0, completed.stderr
     return next(output.glob("dcc_mcp_unreal-*.whl"))
-
-
-def _wheel_probe_python() -> str:
-    current = Path(sys.executable).resolve()
-    if os.name != "nt" or not any(current.parent.glob("python*._pth")):
-        return str(current)
-    launcher = shutil.which("py")
-    assert launcher is not None, "embeddable Python requires the Windows launcher for an isolated wheel probe"
-    selected = subprocess.run(
-        [launcher, f"-{sys.version_info.major}.{sys.version_info.minor}", "-c", "import sys; print(sys.executable)"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert selected.returncode == 0, selected.stderr
-    candidate = Path(selected.stdout.strip()).resolve()
-    assert candidate.is_file() and not any(candidate.parent.glob("python*._pth"))
-    return str(candidate)
 
 
 @pytest.mark.parametrize(
@@ -1054,7 +1037,7 @@ def test_installed_wheel_rejects_noncanonical_record_aliases(
     wheel = tmp_path / install_sop_wheel.name
     shutil.copy2(install_sop_wheel, wheel)
     target = tmp_path / "target"
-    install_python = _wheel_probe_python()
+    install_python = sys.executable
     pip_available = (
         subprocess.run(
             [install_python, "-m", "pip", "--version"], check=False, capture_output=True, text=True
@@ -1090,18 +1073,16 @@ def test_installed_wheel_rejects_noncanonical_record_aliases(
     installed_rows = list(csv.reader(io.StringIO(installed_record.read_text(encoding="utf-8"))))
     assert any(row[0] == alias for row in installed_rows)
     assert not any(row[0] == owned_path for row in installed_rows)
-    environment = os.environ.copy()
     core_site = Path(dcc_mcp_core.__file__).resolve().parents[1]
-    environment["PYTHONPATH"] = os.pathsep.join((str(target), str(core_site)))
+    probe = (
+        f"import sys; sys.path[:0] = [{str(target)!r}, {str(core_site)!r}]; "
+        "from pathlib import Path; "
+        "from dcc_mcp_unreal.install_cli import _runtime_probe, _validate_target_runtime_probe; "
+        "_validate_target_runtime_probe(_runtime_probe(), Path(sys.executable))"
+    )
     probed = subprocess.run(
-        [
-            install_python,
-            "-c",
-            "from pathlib import Path; import sys; "
-            "from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))",
-        ],
+        [install_python, "-c", probe],
         cwd=tmp_path,
-        env=environment,
         check=False,
         capture_output=True,
         text=True,
