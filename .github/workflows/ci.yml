@@ -122,19 +122,22 @@ jobs:
           sdist="$(find dist -maxdepth 1 -name 'dcc_mcp_unreal-*.tar.gz' -print -quit)"
           test -n "$wheel"
           test -n "$sdist"
-          for mode in source wheel sdist; do
+          for mode in editable source wheel sdist; do
             python -m venv ".${mode}-smoke"
             ".${mode}-smoke/bin/python" -m pip install "dcc-mcp-core==0.20.21"
           done
+          .editable-smoke/bin/python -m pip install --no-deps -e .
           .wheel-smoke/bin/python -m pip install --no-deps "$wheel"
           .sdist-smoke/bin/python -m pip install --no-deps "$sdist"
           .source-smoke/bin/python -m pip install --no-deps .
+          .editable-smoke/bin/python -c \
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "source-checkout" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
           .wheel-smoke/bin/python -c \
-            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "wheel" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
           .sdist-smoke/bin/python -c \
-            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "wheel" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
           PYTHONPATH="$PWD/src" .source-smoke/bin/python -c \
-            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))'
+            'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "source-checkout" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
 
   package-unreal-plugin:
     name: Package Unreal Plugin
