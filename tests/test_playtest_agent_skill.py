@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import sys
 import types
 from pathlib import Path
 
 import yaml
+from jsonschema import Draft202012Validator
 
 _SKILL_DIR = Path(__file__).resolve().parents[1] / "src" / "dcc_mcp_unreal" / "skills" / "unreal-playtest-agent"
 _RUNTIME_PATH = _SKILL_DIR / "scripts" / "_playtest_runtime.py"
@@ -51,6 +53,9 @@ class _Actor:
     def get_name(self):
         return self._name
 
+    def get_path_name(self):
+        return "/Game/Test/TestWorld.TestWorld:PersistentLevel.{}".format(self._name)
+
     def get_class(self):
         return self._class
 
@@ -84,12 +89,16 @@ class _Controller(_Actor):
     def __init__(self, player):
         super().__init__("PlayerController_0", "PlayerController", _Vector())
         self.player = player
+        self.possessed_pawn = player
         self.control_rotation = _Rotator()
         self.stop_count = 0
         self.visible = True
 
     def get_control_rotation(self):
         return self.control_rotation
+
+    def get_pawn(self):
+        return self.possessed_pawn
 
     def get_player_view_point(self):
         return self.player.location, self.control_rotation
@@ -105,8 +114,14 @@ class _Controller(_Actor):
 
 
 class _World:
+    def __init__(self, name="TestWorld"):
+        self._name = name
+
     def get_name(self):
-        return "TestWorld"
+        return self._name
+
+    def get_path_name(self):
+        return "/Game/Test/{}.{}".format(self._name, self._name)
 
 
 class _Widget:
@@ -324,6 +339,18 @@ def test_tools_manifest_declares_episode_observe_act_poll_contract():
     assert episode_properties["include_hidden"]["default"] is False
     assert episode_properties["exclude_class_contains"]["maxItems"] == 16
     action_properties = by_name["playtest_execute_action"]["input_schema"]["properties"]
+    assert action_properties["expect_movement"]["type"] == "boolean"
+    assert action_properties["min_displacement"] == {
+        "type": "number",
+        "minimum": 0.001,
+        "maximum": 1000000,
+        "default": 1,
+        "description": "Minimum measured player displacement in Unreal centimeters required when movement is expected.",
+    }
+    assert any(
+        example["arguments"].get("expect_movement") is True and example["arguments"].get("min_displacement") == 5
+        for example in by_name["playtest_execute_action"]["call_examples"]
+    )
     assert action_properties["target_include_hidden"]["default"] is False
     assert action_properties["target_exclude_class_contains"]["maxItems"] == 16
     target_location = by_name["playtest_execute_action"]["input_schema"]["properties"]["target_location"]
@@ -332,6 +359,51 @@ def test_tools_manifest_declares_episode_observe_act_poll_contract():
     telemetry_aliases = episode_properties["telemetry_aliases"]
     assert telemetry_aliases["maxProperties"] == 24
     assert telemetry_aliases["additionalProperties"]["maxItems"] == 8
+    skill_text = (_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert "runtime.possessed" in skill_text
+    assert "player_displacement" in skill_text
+    assert "Unreal centimeters" in skill_text
+    assert 'reason="movement_below_threshold"' in skill_text
+
+    for tool_name in (
+        "playtest_episode_control",
+        "playtest_observe",
+        "playtest_execute_action",
+        "playtest_poll_action",
+    ):
+        output_schema = by_name[tool_name]["output_schema"]
+        Draft202012Validator.check_schema(output_schema)
+        assert output_schema["required"] == ["success", "message", "error", "prompt", "context"]
+        assert output_schema["additionalProperties"] is False
+
+    execute_context = by_name["playtest_execute_action"]["output_schema"]["$defs"]["success_context"]
+    assert execute_context["additionalProperties"] is False
+    assert {
+        "episode_id",
+        "action_id",
+        "status",
+        "action",
+        "before_hash",
+        "movement_expected",
+        "min_displacement",
+        "distance_unit",
+        "duration",
+        "duration_unit",
+    }.issubset(execute_context["required"])
+
+    transition_schema = by_name["playtest_poll_action"]["output_schema"]["$defs"]["transition"]
+    assert transition_schema["additionalProperties"] is False
+    assert {
+        "action_id",
+        "action",
+        "status",
+        "elapsed_seconds",
+        "movement_expected",
+        "min_displacement",
+        "distance_unit",
+        "duration",
+        "duration_unit",
+    }.issubset(transition_schema["required"])
 
 
 def test_dependency_manifest_uses_skill_ids_only():
@@ -354,13 +426,14 @@ def test_observe_returns_bounded_entities_and_scalar_attributes(monkeypatch):
     )
 
     assert observation["schema"] == "dcc-mcp-playtest-observation-v1"
+    possessed = observation["runtime"].pop("possessed")
+    session = observation["runtime"].pop("session")
     assert observation["runtime"] == {
         "game_mode_class": "TestGameMode",
         "default_pawn_class": "TestPlayerPawn_C",
         "player_start_count": 4,
         "controller_class": "PlayerController",
         "pawn_class": "PlayerPawn",
-        "possessed": None,
         "spectating": False,
         "active_widget_count": 1,
         "active_widgets": [
@@ -373,9 +446,31 @@ def test_observe_returns_bounded_entities_and_scalar_attributes(monkeypatch):
             }
         ],
     }
+    assert possessed["name"] == "Player_0"
+    assert possessed["class"] == "PlayerPawn"
+    assert possessed["is_observed_player"] is True
+    assert session["session_identity"].startswith("sha256:")
+    assert session["world"]["object_path_hash"].startswith("sha256:")
+    assert session["controller"]["identity"].startswith("sha256:")
+    assert session["player"]["identity"] == possessed["identity"]
+    assert possessed["identity"].startswith("sha256:")
+    assert "/Game/" not in str(possessed)
+    assert (
+        runtime.observe({"include_pawns": True, "max_entities": 8})["runtime"]["possessed"]["identity"]
+        == possessed["identity"]
+    )
     assert [item["name"] for item in observation["entities"]] == ["Door_0", "Enemy_0"]
     assert observation["entities"][1]["attributes"] == {"health": 40.0}
     assert observation["observation_hash"].startswith("sha256:")
+
+
+def test_observe_does_not_infer_possession_without_controller_evidence(monkeypatch):
+    runtime, _player, _enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
+    controller.possessed_pawn = None
+
+    observation = runtime.observe({"include_pawns": True, "max_entities": 8})
+
+    assert observation["runtime"]["possessed"] is None
 
 
 def test_observe_exposes_default_health_ammo_and_cooldown_telemetry(monkeypatch):
@@ -606,6 +701,31 @@ def test_location_navigation_completes_from_structured_distance(monkeypatch):
     assert transition["player_location_delta"]["x"] == 750.0
 
 
+def test_navigation_with_explicit_movement_expectation_stalls_without_displacement(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [130.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "navigate_to_location",
+        target_location={"x": 0, "y": 0, "z": 0},
+        acceptance_radius=100,
+        expect_movement=True,
+        min_displacement=5,
+        stall_seconds=0.5,
+    )
+    clock[0] = 130.6
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "stalled"
+    assert transition["reason"] == "movement_below_threshold"
+    assert transition["distance_to_target"] == 0.0
+    assert transition["player_displacement"] == 0.0
+
+
 def test_location_navigation_requires_finite_explicit_coordinates(monkeypatch):
     runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
     episode = runtime.start_episode(include_pawns=True, max_entities=8)
@@ -686,7 +806,9 @@ def test_navigation_falls_back_to_bounded_input_steering_and_releases_forward(mo
     assert pending["navigation_driver"] == "input_steering"
     assert pending["steering_fallback_used"] is True
     assert pending["steering_backend"] == "native_pawn_movement"
-    assert navigation == [(controller, enemy), ("input_steering", controller, enemy)]
+    assert navigation[0] == (controller, enemy)
+    assert navigation[1][0:2] == ("input_steering", controller)
+    assert runtime._vector(navigation[1][2]) == runtime._vector(enemy.get_actor_bounds()[0])
     assert keys == []
 
     player.location = _Vector(950, 0, 0)
@@ -800,6 +922,207 @@ def test_move_relative_maps_a_bounded_direction_to_gameplay_input(monkeypatch):
     assert accepted["direction"] == "right"
 
 
+def test_move_relative_stalls_when_measured_displacement_is_below_threshold(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [400.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        stall_seconds=0.5,
+        min_displacement=5,
+    )
+    player.location = _Vector(0.25, 0, 0)
+    clock[0] = 400.6
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "stalled"
+    assert transition["reason"] == "movement_below_threshold"
+    assert transition["movement_expected"] is True
+    assert transition["min_displacement"] == 5.0
+    assert transition["player_displacement"] == 0.25
+    assert transition["before"] == episode["observation"]
+    assert transition["after"]["player"]["location"]["x"] == 0.25
+    assert transition["before_hash"] == transition["before"]["observation_hash"]
+    assert transition["after_hash"] == transition["after"]["observation_hash"]
+
+
+def test_move_relative_completes_only_after_measured_displacement(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [500.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="right",
+        duration=0,
+        expect_movement=True,
+        min_displacement=5,
+    )
+    player.location = _Vector(0, 6, 0)
+    clock[0] = 500.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "completed"
+    assert transition["player_location_delta"] == {"x": 0.0, "y": 6.0, "z": 0.0}
+    assert transition["player_displacement"] == 6.0
+    assert transition["movement_expected"] is True
+    assert transition["before"]["player"]["location"]["y"] == 0.0
+    assert transition["after"]["player"]["location"]["y"] == 6.0
+
+
+def test_move_relative_can_preserve_legacy_input_acceptance_when_effect_is_not_required(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [600.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=False,
+    )
+    clock[0] = 600.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "completed"
+    assert transition["movement_expected"] is False
+    assert transition["player_displacement"] == 0.0
+
+
+def test_movement_transition_blocks_when_possession_identity_drifts(monkeypatch):
+    runtime, player, enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [700.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+    )
+
+    controller.possessed_pawn = enemy
+    player.location = _Vector(10, 0, 0)
+    clock[0] = 700.2
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "possession_changed"
+    assert transition["before"]["runtime"]["possessed"]["name"] == "Player_0"
+    assert transition["after"]["runtime"]["possessed"]["name"] == "Enemy_0"
+
+
+def test_movement_transition_blocks_when_possession_is_lost(monkeypatch):
+    runtime, player, _enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [800.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+    )
+
+    controller.possessed_pawn = None
+    player.location = _Vector(10, 0, 0)
+    clock[0] = 800.2
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "possession_lost"
+    assert transition["after"]["runtime"]["possessed"] is None
+
+
+def test_finishing_episode_captures_cancelled_pending_transition(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [900.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+    )
+    clock[0] = 900.2
+
+    summary = runtime.finish_episode(episode["episode_id"])
+
+    assert summary["pending_action_ids"] == []
+    assert summary["transition_count"] == 1
+    assert summary["trace"][0]["action_id"] == accepted["action_id"]
+    assert summary["trace"][0]["status"] == "cancelled"
+    assert summary["trace"][0]["reason"] == "episode_finished"
+    assert summary["trace"][0]["before"]["observation_hash"]
+    assert summary["trace"][0]["after"]["observation_hash"]
+
+
+def test_pie_loss_does_not_reclassify_pending_movement_as_completed(monkeypatch):
+    from dcc_mcp_unreal.pie_session import PieSessionUnavailableError
+
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+    )
+
+    def unavailable():
+        raise PieSessionUnavailableError("PIE world was lost")
+
+    monkeypatch.setattr(runtime, "_pie_context", unavailable)
+    try:
+        runtime.poll_action(episode["episode_id"], accepted["action_id"])
+    except PieSessionUnavailableError as exc:
+        assert str(exc) == "PIE world was lost"
+    else:
+        raise AssertionError("expected PIE loss to remain a typed non-success")
+
+    action = runtime.get_episode(episode["episode_id"])["actions"][accepted["action_id"]]
+    assert action["status"] == "pending"
+    assert action["transition"] is None
+
+
+def test_poll_tool_route_preserves_retryable_pie_loss(monkeypatch):
+    from dcc_mcp_unreal.pie_session import PieSessionUnavailableError
+
+    def unavailable(_episode_id, _action_id):
+        raise PieSessionUnavailableError("PIE world was lost")
+
+    monkeypatch.setitem(sys.modules, "_playtest_runtime", types.SimpleNamespace(poll_action=unavailable))
+    script_path = _SKILL_DIR / "scripts" / "playtest_poll_action.py"
+    spec = importlib.util.spec_from_file_location("_test_playtest_poll_action", script_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    result = module.playtest_poll_action(episode_id="episode", action_id="action")
+
+    assert result["success"] is False
+    assert result["error"] == "pie_session_unavailable"
+    assert result["context"]["retryable"] is True
+    assert result["context"]["reason"] == "PIE world was lost"
+
+
 def test_move_relative_rejects_an_unknown_direction(monkeypatch):
     runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
     episode = runtime.start_episode(include_pawns=True, max_entities=8)
@@ -814,3 +1137,285 @@ def test_move_relative_rejects_an_unknown_direction(monkeypatch):
         assert "direction" in str(exc)
     else:
         raise AssertionError("expected move_relative to reject an unknown direction")
+
+
+def test_missing_object_path_never_mints_a_possession_identity(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    player.get_path_name = lambda: None
+
+    identity = runtime._actor_identity(player, player)
+
+    assert identity["identity"] is None
+    assert identity["object_path_hash"] is None
+
+
+def test_same_path_replacement_has_a_distinct_exact_actor_identity(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    replacement = _Actor("Player_0", "PlayerPawn", _Vector(25, 0, 0))
+
+    first = runtime._actor_identity(player, player)
+    second = runtime._actor_identity(replacement, replacement)
+
+    assert first["object_path_hash"] == second["object_path_hash"]
+    assert first["identity"] != second["identity"]
+
+
+def test_episode_binding_rejects_same_path_world_controller_and_pawn_replacements(monkeypatch):
+    runtime, player, _enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
+    unreal, world, _controller, _player = runtime._pie_context()
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    binding = runtime.get_episode(episode["episode_id"])["runtime_binding"]
+
+    replacement_world = _World()
+    replacement_controller = _Controller(player)
+    replacement_player = _Actor("Player_0", "PlayerPawn", _Vector())
+
+    assert runtime._context_change_reason(binding, (unreal, replacement_world, controller, player)) == "world_changed"
+    assert (
+        runtime._context_change_reason(binding, (unreal, world, replacement_controller, player)) == "controller_changed"
+    )
+    assert (
+        runtime._context_change_reason(binding, (unreal, world, controller, replacement_player)) == "possession_changed"
+    )
+
+
+def test_execute_action_rejects_wrong_world_observation_before_input(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, keys, _navigation = _load_runtime(monkeypatch)
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    wrong_world = copy.deepcopy(episode["observation"])
+    wrong_world["world"] = "OtherPIEWorld"
+    wrong_world["observation_hash"] = "sha256:wrong-world-before"
+    monkeypatch.setattr(runtime, "observe", lambda _selectors: copy.deepcopy(wrong_world))
+
+    try:
+        runtime.execute_action(
+            episode["episode_id"],
+            "move_relative",
+            direction="forward",
+            duration=0,
+            expect_movement=True,
+        )
+    except RuntimeError as exc:
+        assert "world" in str(exc).casefold() or "session" in str(exc).casefold()
+    else:
+        raise AssertionError("a mismatched PIE world observation must fail closed")
+
+    assert keys == []
+
+
+def test_execute_action_rechecks_exact_context_after_pre_input_observation(monkeypatch):
+    runtime, player, _enemy, _door, controller, keys, _navigation = _load_runtime(monkeypatch)
+    unreal, world, _controller, _player = runtime._pie_context()
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    original_observe = runtime.observe
+    replacement_world = _World()
+
+    def observe_then_replace(selectors):
+        observation = original_observe(selectors)
+        monkeypatch.setattr(
+            runtime,
+            "_pie_context",
+            lambda: (unreal, replacement_world, controller, player),
+        )
+        return observation
+
+    monkeypatch.setattr(runtime, "observe", observe_then_replace)
+
+    try:
+        runtime.execute_action(
+            episode["episode_id"],
+            "move_relative",
+            direction="forward",
+            duration=0,
+            expect_movement=True,
+        )
+    except RuntimeError as exc:
+        assert "world" in str(exc).casefold() or "session" in str(exc).casefold()
+    else:
+        raise AssertionError("context replacement between observation and input must fail closed")
+
+    assert keys == []
+    assert world is not replacement_world
+
+
+def test_poll_blocks_displacement_observed_from_a_different_world(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [1_000.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+        min_displacement=5,
+    )
+    action = runtime.get_episode(episode["episode_id"])["actions"][accepted["action_id"]]
+    wrong_world_after = copy.deepcopy(action["before"])
+    wrong_world_after["world"] = "OtherPIEWorld"
+    wrong_world_after["player"]["location"]["x"] = 50.0
+    wrong_world_after["observation_hash"] = "sha256:wrong-world-after"
+    monkeypatch.setattr(runtime, "observe", lambda _selectors: copy.deepcopy(wrong_world_after))
+    clock[0] = 1_000.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] in {"world_changed", "session_changed", "observation_identity_mismatch"}
+
+
+def test_navigation_never_adopts_a_same_name_replacement_target(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [1_500.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "navigate_to_entity",
+        target_name="Enemy_0",
+        acceptance_radius=100,
+    )
+    replacement = _Actor("Enemy_0", "EnemyPawn", _Vector())
+    monkeypatch.setattr(runtime, "_resolve_target", lambda _world, _player, _selector: replacement)
+    player.location = _Vector()
+    clock[0] = 1_500.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "target_changed"
+
+
+def test_wrong_direction_displacement_does_not_prove_relative_input_effect(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [2_000.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+        min_displacement=5,
+    )
+    player.location = _Vector(0, 6, 0)
+    clock[0] = 2_000.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "movement_direction_mismatch"
+
+
+def test_forward_teleport_like_jump_does_not_prove_relative_input_effect(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [2_500.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+        min_displacement=5,
+    )
+    player.location = _Vector(100_000, 0, 0)
+    clock[0] = 2_500.2
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "movement_exceeds_causal_bound"
+
+
+def test_terminal_trace_retains_relative_action_parameters_and_units(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [3_000.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="left",
+        duration=0.25,
+        expect_movement=True,
+        min_displacement=5,
+    )
+    player.location = _Vector(0, -6, 0)
+    clock[0] = 3_000.3
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "completed"
+    assert transition["direction"] == "left"
+    assert transition["duration"] == 0.25
+    assert transition["duration_unit"] == "seconds"
+    assert transition["distance_unit"] == "centimeters"
+    assert transition["causal_displacement"] >= 5.0
+    assert transition["max_causal_displacement"] < 100_000.0
+
+
+def test_execute_and_poll_wrapper_outputs_validate_against_manifest(monkeypatch):
+    runtime, player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [4_000.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    monkeypatch.setitem(sys.modules, "_playtest_runtime", runtime)
+
+    control_path = _SKILL_DIR / "scripts" / "playtest_episode_control.py"
+    control_spec = importlib.util.spec_from_file_location("_test_playtest_control_schema", control_path)
+    control_module = importlib.util.module_from_spec(control_spec)
+    assert control_spec.loader is not None
+    control_spec.loader.exec_module(control_module)
+    current_result = control_module.playtest_episode_control(
+        action="current",
+        episode_id=episode["episode_id"],
+    )
+
+    observe_path = _SKILL_DIR / "scripts" / "playtest_observe.py"
+    observe_spec = importlib.util.spec_from_file_location("_test_playtest_observe_schema", observe_path)
+    observe_module = importlib.util.module_from_spec(observe_spec)
+    assert observe_spec.loader is not None
+    observe_spec.loader.exec_module(observe_module)
+    observe_result = observe_module.playtest_observe(episode_id=episode["episode_id"])
+
+    execute_path = _SKILL_DIR / "scripts" / "playtest_execute_action.py"
+    execute_spec = importlib.util.spec_from_file_location("_test_playtest_execute_schema", execute_path)
+    execute_module = importlib.util.module_from_spec(execute_spec)
+    assert execute_spec.loader is not None
+    execute_spec.loader.exec_module(execute_module)
+    execute_result = execute_module.playtest_execute_action(
+        episode_id=episode["episode_id"],
+        action="move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+        min_displacement=5,
+    )
+
+    player.location = _Vector(6, 0, 0)
+    clock[0] = 4_000.2
+    poll_path = _SKILL_DIR / "scripts" / "playtest_poll_action.py"
+    poll_spec = importlib.util.spec_from_file_location("_test_playtest_poll_schema", poll_path)
+    poll_module = importlib.util.module_from_spec(poll_spec)
+    assert poll_spec.loader is not None
+    poll_spec.loader.exec_module(poll_module)
+    poll_result = poll_module.playtest_poll_action(
+        episode_id=episode["episode_id"],
+        action_id=execute_result["context"]["action_id"],
+    )
+    finish_result = control_module.playtest_episode_control(
+        action="finish",
+        episode_id=episode["episode_id"],
+    )
+
+    manifest = yaml.safe_load((_SKILL_DIR / "tools.yaml").read_text(encoding="utf-8"))
+    by_name = {tool["name"]: tool for tool in manifest["tools"]}
+    Draft202012Validator(by_name["playtest_episode_control"]["output_schema"]).validate(current_result)
+    Draft202012Validator(by_name["playtest_episode_control"]["output_schema"]).validate(finish_result)
+    Draft202012Validator(by_name["playtest_observe"]["output_schema"]).validate(observe_result)
+    Draft202012Validator(by_name["playtest_execute_action"]["output_schema"]).validate(execute_result)
+    Draft202012Validator(by_name["playtest_poll_action"]["output_schema"]).validate(poll_result)

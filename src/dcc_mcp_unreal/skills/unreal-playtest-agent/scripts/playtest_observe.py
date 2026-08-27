@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from _playtest_runtime import get_episode, observe
+from _playtest_runtime import get_episode, observe_episode
 from dcc_mcp_core.skill import skill_entry
 
 from dcc_mcp_unreal.api import missing_param_error, unreal_from_exception, unreal_success
@@ -18,7 +18,7 @@ def playtest_observe(episode_id: str = "", **kwargs) -> dict:
         return unreal_success(
             "Collected structured PIE playtest observation",
             episode_id=episode_id,
-            observation=observe(episode["selectors"]),
+            observation=observe_episode(episode),
         )
     except PieSessionUnavailableError as exc:
         return pie_session_error(exc)
