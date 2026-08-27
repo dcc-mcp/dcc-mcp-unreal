@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -994,6 +996,121 @@ def _runtime_probe_result(python_path: Path, adapter: dict, core: dict) -> dict:
     }
 
 
+@pytest.fixture(scope="module")
+def install_sop_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    output = tmp_path_factory.mktemp("install-sop-wheel")
+    completed = subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(output)],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return next(output.glob("dcc_mcp_unreal-*.whl"))
+
+
+def _wheel_probe_python() -> str:
+    current = Path(sys.executable).resolve()
+    if os.name != "nt" or not any(current.parent.glob("python*._pth")):
+        return str(current)
+    launcher = shutil.which("py")
+    assert launcher is not None, "embeddable Python requires the Windows launcher for an isolated wheel probe"
+    selected = subprocess.run(
+        [launcher, f"-{sys.version_info.major}.{sys.version_info.minor}", "-c", "import sys; print(sys.executable)"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert selected.returncode == 0, selected.stderr
+    candidate = Path(selected.stdout.strip()).resolve()
+    assert candidate.is_file() and not any(candidate.parent.glob("python*._pth"))
+    return str(candidate)
+
+
+@pytest.mark.parametrize(
+    ("owned_path", "alias"),
+    (
+        ("dcc_mcp_unreal/__init__.py", "dcc_mcp_unreal/./__init__.py"),
+        ("dcc_mcp_unreal/__init__.py", "dcc_mcp_unreal\\__init__.py"),
+        ("dcc_mcp_unreal/__init__.py", "DCC_MCP_UNREAL/__init__.py"),
+        (
+            "dcc_mcp_unreal/_plugin/DccMcpUnreal.uplugin",
+            "dcc_mcp_unreal/_plugin/./DccMcpUnreal.uplugin",
+        ),
+        (
+            "dcc_mcp_unreal/_plugin/DccMcpUnreal.uplugin",
+            "dcc_mcp_unreal\\_plugin\\DccMcpUnreal.uplugin",
+        ),
+        (
+            "dcc_mcp_unreal/_plugin/DccMcpUnreal.uplugin",
+            "dcc_mcp_unreal/_PLUGIN/DccMcpUnreal.uplugin",
+        ),
+    ),
+)
+def test_installed_wheel_rejects_noncanonical_record_aliases(
+    tmp_path: Path, install_sop_wheel: Path, owned_path: str, alias: str
+) -> None:
+    wheel = tmp_path / install_sop_wheel.name
+    shutil.copy2(install_sop_wheel, wheel)
+    target = tmp_path / "target"
+    install_python = _wheel_probe_python()
+    pip_available = (
+        subprocess.run(
+            [install_python, "-m", "pip", "--version"], check=False, capture_output=True, text=True
+        ).returncode
+        == 0
+    )
+    if pip_available:
+        installer = [install_python, "-m", "pip"]
+    else:
+        uv = shutil.which("uv")
+        assert uv is not None, "the test interpreter needs pip or uv for isolated wheel installation"
+        installer = [uv, "pip"]
+    install_environment = os.environ.copy()
+    install_environment["UV_LINK_MODE"] = "copy"
+    installed = subprocess.run(
+        [*installer, "install", "--no-deps", "--target", str(target), str(wheel)],
+        cwd=tmp_path,
+        env=install_environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+    installed_record = next(target.glob("dcc_mcp_unreal-*.dist-info/RECORD"))
+    installed_rows = list(csv.reader(io.StringIO(installed_record.read_text(encoding="utf-8"))))
+    matching = [row for row in installed_rows if row[0] == owned_path]
+    assert len(matching) == 1
+    matching[0][0] = alias
+    rendered = io.StringIO(newline="")
+    csv.writer(rendered, lineterminator="\n").writerows(installed_rows)
+    with installed_record.open("w", encoding="utf-8", newline="") as stream:
+        stream.write(rendered.getvalue())
+    installed_rows = list(csv.reader(io.StringIO(installed_record.read_text(encoding="utf-8"))))
+    assert any(row[0] == alias for row in installed_rows)
+    assert not any(row[0] == owned_path for row in installed_rows)
+    environment = os.environ.copy()
+    core_site = Path(dcc_mcp_core.__file__).resolve().parents[1]
+    environment["PYTHONPATH"] = os.pathsep.join((str(target), str(core_site)))
+    probed = subprocess.run(
+        [
+            install_python,
+            "-c",
+            "from pathlib import Path; import sys; "
+            "from dcc_mcp_unreal.install_cli import _target_runtime; _target_runtime(Path(sys.executable))",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert probed.returncode != 0
+    assert "RECORD" in probed.stderr
+
+
 @pytest.mark.parametrize("editable", (True, False, None))
 def test_distribution_identity_accepts_owned_local_source_checkout(tmp_path: Path, editable: Optional[bool]) -> None:
     source_root = tmp_path / "source"
@@ -1018,6 +1135,28 @@ def test_distribution_identity_accepts_installed_wheel_record(tmp_path: Path) ->
     identity = _distribution_identity(origin, site, record="dcc_mcp_unreal/__init__.py")
 
     assert install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal") == str(origin.absolute())
+
+
+@pytest.mark.parametrize(
+    "record_name",
+    (
+        "/dcc_mcp_unreal/__init__.py",
+        "C:/dcc_mcp_unreal/__init__.py",
+        "//server/share/dcc_mcp_unreal/__init__.py",
+        "dcc_mcp_unreal//__init__.py",
+        "dcc_mcp_unreal/../dcc_mcp_unreal/__init__.py",
+        "./dcc_mcp_unreal/__init__.py",
+    ),
+)
+def test_distribution_identity_rejects_noncanonical_record_names(tmp_path: Path, record_name: str) -> None:
+    site = tmp_path / "site-packages"
+    origin = site / "dcc_mcp_unreal" / "__init__.py"
+    origin.parent.mkdir(parents=True)
+    origin.write_text("# package\n", encoding="utf-8")
+    identity = _distribution_identity(origin, site, record=record_name)
+
+    with pytest.raises(ValueError, match="RECORD"):
+        install_cli._owned_module_origin(identity, "dcc-mcp-unreal", "dcc_mcp_unreal")
 
 
 def test_distribution_identity_rejects_missing_wheel_record(tmp_path: Path) -> None:
@@ -1127,6 +1266,7 @@ def test_target_payload_rejects_invalid_wheel_records(tmp_path: Path, case: str)
             "root": str(payload),
             "provenance": "wheel",
             "ownership_root": str(site),
+            "cache_tag": sys.implementation.cache_tag,
             "records": records,
         },
     }
@@ -1135,16 +1275,24 @@ def test_target_payload_rejects_invalid_wheel_records(tmp_path: Path, case: str)
         install_cli._bind_target_payload(runtime)
 
 
-def test_target_payload_excludes_generated_bytecode_with_empty_records(tmp_path: Path) -> None:
+@pytest.mark.parametrize("optimization", ("", ".opt-1", ".opt-2"))
+def test_target_payload_excludes_generated_bytecode_with_empty_records(tmp_path: Path, optimization: str) -> None:
     site = tmp_path / "site-packages"
     payload = site / "dcc_mcp_unreal" / "_plugin"
     descriptor = payload / "DccMcpUnreal.uplugin"
-    generated = payload / "Content" / "Python" / "__pycache__" / "init_unreal.pyc"
+    source = payload / "Content" / "Python" / "init_unreal.py"
+    generated = (
+        payload / "Content" / "Python" / "__pycache__" / f"init_unreal.{sys.implementation.cache_tag}{optimization}.pyc"
+    )
     generated.parent.mkdir(parents=True)
     descriptor.parent.mkdir(parents=True, exist_ok=True)
     descriptor.write_text(json.dumps({"FileVersion": 3, "VersionName": install_cli.__version__}), encoding="utf-8")
+    source.write_text("# generated at install time\n", encoding="utf-8")
     generated.write_bytes(b"generated bytecode")
-    digest = base64.urlsafe_b64encode(hashlib.sha256(descriptor.read_bytes()).digest()).decode("ascii").rstrip("=")
+    descriptor_digest = (
+        base64.urlsafe_b64encode(hashlib.sha256(descriptor.read_bytes()).digest()).decode("ascii").rstrip("=")
+    )
+    source_digest = base64.urlsafe_b64encode(hashlib.sha256(source.read_bytes()).digest()).decode("ascii").rstrip("=")
     runtime = {
         "adapter_origin": str(site / "dcc_mcp_unreal" / "__init__.py"),
         "adapter_distribution_root": str(site),
@@ -1156,8 +1304,14 @@ def test_target_payload_excludes_generated_bytecode_with_empty_records(tmp_path:
                 {
                     "located": str(descriptor.absolute()),
                     "path": descriptor.relative_to(site).as_posix(),
-                    "hash": f"sha256={digest}",
+                    "hash": f"sha256={descriptor_digest}",
                     "size": descriptor.stat().st_size,
+                },
+                {
+                    "located": str(source.absolute()),
+                    "path": source.relative_to(site).as_posix(),
+                    "hash": f"sha256={source_digest}",
+                    "size": source.stat().st_size,
                 },
                 {
                     "located": str(generated.absolute()),
@@ -1166,6 +1320,7 @@ def test_target_payload_excludes_generated_bytecode_with_empty_records(tmp_path:
                     "size": None,
                 },
             ],
+            "cache_tag": sys.implementation.cache_tag,
         },
     }
 
@@ -1174,6 +1329,67 @@ def test_target_payload_excludes_generated_bytecode_with_empty_records(tmp_path:
     paths = {item["path"] for item in bound["plugin_payload"]["snapshot"]["manifest"]}
     assert "Content/Python/__pycache__" not in paths
     assert not any(path.endswith(".pyc") for path in paths)
+
+
+@pytest.mark.parametrize("case", ("unowned", "unrecorded", "nonexistent", "duplicate", "alternate-optimization"))
+def test_target_payload_rejects_unowned_bytecode_record(tmp_path: Path, case: str) -> None:
+    site = tmp_path / "site-packages"
+    payload = site / "dcc_mcp_unreal" / "_plugin"
+    descriptor = payload / "DccMcpUnreal.uplugin"
+    source = payload / "Content" / "Python" / "init_unreal.py"
+    generated_name = {
+        "unowned": "unrelated.pyc",
+        "unrecorded": "unrelated.pyc",
+        "nonexistent": f"init_unreal.{sys.implementation.cache_tag}.pyc",
+        "duplicate": f"init_unreal.{sys.implementation.cache_tag}.pyc",
+        "alternate-optimization": f"init_unreal.{sys.implementation.cache_tag}.opt-debug.pyc",
+    }[case]
+    generated = payload / "Content" / "Python" / "__pycache__" / generated_name
+    generated.parent.mkdir(parents=True)
+    descriptor.parent.mkdir(parents=True, exist_ok=True)
+    descriptor.write_text(json.dumps({"FileVersion": 3, "VersionName": install_cli.__version__}), encoding="utf-8")
+    source.write_text("# authenticated source\n", encoding="utf-8")
+    if case != "nonexistent":
+        generated.write_bytes(b"unowned bytecode")
+    descriptor_digest = (
+        base64.urlsafe_b64encode(hashlib.sha256(descriptor.read_bytes()).digest()).decode("ascii").rstrip("=")
+    )
+    source_digest = base64.urlsafe_b64encode(hashlib.sha256(source.read_bytes()).digest()).decode("ascii").rstrip("=")
+    generated_record = {
+        "located": str(generated.absolute()),
+        "path": generated.relative_to(site).as_posix(),
+        "hash": None,
+        "size": None,
+    }
+    runtime = {
+        "adapter_origin": str(site / "dcc_mcp_unreal" / "__init__.py"),
+        "adapter_distribution_root": str(site),
+        "plugin_payload": {
+            "root": str(payload),
+            "provenance": "wheel",
+            "ownership_root": str(site),
+            "cache_tag": sys.implementation.cache_tag,
+            "records": [
+                {
+                    "located": str(descriptor.absolute()),
+                    "path": descriptor.relative_to(site).as_posix(),
+                    "hash": f"sha256={descriptor_digest}",
+                    "size": descriptor.stat().st_size,
+                },
+                {
+                    "located": str(source.absolute()),
+                    "path": source.relative_to(site).as_posix(),
+                    "hash": f"sha256={source_digest}",
+                    "size": source.stat().st_size,
+                },
+                *([] if case == "unrecorded" else [generated_record]),
+                *([dict(generated_record)] if case == "duplicate" else []),
+            ],
+        },
+    }
+
+    with pytest.raises(ValueError, match="RECORD|bytecode"):
+        install_cli._bind_target_payload(runtime)
 
 
 def test_target_runtime_accepts_the_active_distribution_context() -> None:
@@ -1364,6 +1580,254 @@ def _bound_readiness(context: dict, *, instance_id: str = "11111111-1111-1111-11
         "entry": {"instance_id": instance_id, "parent_pid": 4242},
         "probe": {"success": True, "result": {"success": True, "context": {"install_identity": identity}}},
     }
+
+
+def _isolated_source_runtime(tmp_path: Path) -> tuple[dict, Path, Path]:
+    active = install_cli._target_runtime(Path(sys.executable))
+    source_root = tmp_path / "isolated-source"
+    origin = source_root / "src" / "dcc_mcp_unreal" / "__init__.py"
+    payload = source_root / "unreal" / "plugin"
+    origin.parent.mkdir(parents=True)
+    shutil.copy2(active["adapter_origin"], origin)
+    shutil.copytree(active["plugin_payload"]["root"], payload)
+    runtime = dict(active)
+    runtime["adapter_origin"] = str(origin.absolute())
+    runtime["adapter_distribution_root"] = str((tmp_path / "site-packages").absolute())
+    runtime.pop("adapter_source_identity", None)
+    runtime.pop("adapter_module_identity", None)
+    runtime["plugin_payload"] = {
+        "root": str(payload.absolute()),
+        "provenance": "source-checkout",
+        "ownership_root": str(source_root.absolute()),
+    }
+    return install_cli._bind_target_payload(runtime), origin, payload
+
+
+@pytest.mark.parametrize(
+    ("drift_axis", "ready"),
+    (
+        ("source", True),
+        ("payload", False),
+        ("installed-plugin", True),
+        ("project", False),
+        ("receipt", True),
+        ("backup", False),
+    ),
+)
+def test_pending_resolution_preserves_evidence_when_bound_identity_drifts_during_wait(
+    monkeypatch, tmp_path: Path, drift_axis: str, ready: bool
+) -> None:
+    runtime, origin, payload = _isolated_source_runtime(tmp_path)
+    monkeypatch.setattr(install_cli, "_target_runtime", lambda _python: runtime)
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    assert install_cli._execute(install_args)[0] == 40
+    context = install_cli._resolve_context(install_args)
+    receipt_path = context["receipt_path"]
+    prior = json.loads(receipt_path.read_text(encoding="utf-8"))
+    prior["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(prior), encoding="utf-8")
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+    assert install_cli._execute(upgrade_args)[0] == 40
+    pending = json.loads(receipt_path.read_text(encoding="utf-8"))
+    backup = Path(pending["transaction"]["backup_plugin"])
+    pending_receipt = receipt_path.read_bytes()
+    backup_manifest = install_cli._file_manifest(backup)
+    verify_args = install_cli._parser().parse_args(
+        [
+            "verify",
+            *common,
+            "--instance-id",
+            "11111111-1111-1111-1111-111111111111",
+        ]
+    )
+    verify_context = install_cli._resolve_context(verify_args)
+    mutated_receipt: list[bytes] = []
+
+    def drift_during_wait(**_kwargs: object) -> dict:
+        targets = {
+            "source": origin,
+            "payload": payload / "DccMcpUnreal.uplugin",
+            "installed-plugin": verify_context["plugin_root"] / "DccMcpUnreal.uplugin",
+            "project": project,
+            "receipt": receipt_path,
+            "backup": backup / "DccMcpUnreal.uplugin",
+        }
+        target = targets[drift_axis]
+        target.write_bytes(target.read_bytes() + b" \n")
+        if drift_axis == "receipt":
+            mutated_receipt.append(receipt_path.read_bytes())
+        if ready:
+            return _bound_readiness(verify_context)
+        return {"success": False, "ready": False, "message": "injected readiness failure"}
+
+    monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", drift_during_wait)
+
+    exit_code, result = install_cli._execute(verify_args)
+
+    assert exit_code == 30
+    assert result["verify"]["failure_stage"] == "verify"
+    assert "changed" in result["verify"]["failure_reason"]
+    assert receipt_path.read_bytes() == (mutated_receipt[0] if mutated_receipt else pending_receipt)
+    assert backup.is_dir()
+    if drift_axis != "backup":
+        assert install_cli._file_manifest(backup) == backup_manifest
+
+
+def test_upgrade_source_drift_before_backup_preserves_prior_install(monkeypatch, tmp_path: Path) -> None:
+    runtime, _origin, payload = _isolated_source_runtime(tmp_path)
+    monkeypatch.setattr(install_cli, "_target_runtime", lambda _python: runtime)
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    assert install_cli._execute(install_args)[0] == 40
+    context = install_cli._resolve_context(install_args)
+    plugin_root = context["plugin_root"]
+    receipt_path = context["receipt_path"]
+    prior = json.loads(receipt_path.read_text(encoding="utf-8"))
+    prior["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(prior), encoding="utf-8")
+    prior_plugin = install_cli._file_manifest(plugin_root)
+    prior_project = project.read_bytes()
+    prior_receipt = receipt_path.read_bytes()
+    real_copy = install_cli.shutil.copy2
+    drifted = False
+
+    def copy_then_drift(source: Path, destination: Path) -> str:
+        nonlocal drifted
+        result = real_copy(source, destination)
+        if not drifted:
+            descriptor = payload / "DccMcpUnreal.uplugin"
+            descriptor.write_bytes(descriptor.read_bytes() + b" \n")
+            drifted = True
+        return result
+
+    monkeypatch.setattr(install_cli.shutil, "copy2", copy_then_drift)
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+
+    exit_code, result = install_cli._execute(upgrade_args)
+
+    assert exit_code == 20
+    assert result["verify"]["failure_stage"] == "acquire"
+    assert install_cli._file_manifest(plugin_root) == prior_plugin
+    assert project.read_bytes() == prior_project
+    assert receipt_path.read_bytes() == prior_receipt
+    assert not list(plugin_root.parent.glob(".DccMcpUnreal.*-*"))
+
+
+@pytest.mark.parametrize("install_state", ("fresh", "upgrade"))
+@pytest.mark.parametrize(
+    ("failure_window", "expected_exit", "expected_stage"),
+    (
+        ("recapture", 20, "acquire"),
+        ("staging", 20, "acquire"),
+        ("publish-after-backup", 30, "install"),
+    ),
+)
+def test_install_failure_window_preserves_only_preexisting_state(
+    monkeypatch,
+    tmp_path: Path,
+    install_state: str,
+    failure_window: str,
+    expected_exit: int,
+    expected_stage: str,
+) -> None:
+    runtime, _origin, payload = _isolated_source_runtime(tmp_path)
+    monkeypatch.setattr(install_cli, "_target_runtime", lambda _python: runtime)
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    context = install_cli._resolve_context(install_args)
+    plugin_root = context["plugin_root"]
+    receipt_path = context["receipt_path"]
+    if install_state == "upgrade":
+        assert install_cli._execute(install_args)[0] == 40
+        prior = json.loads(receipt_path.read_text(encoding="utf-8"))
+        prior["adapter_version"] = "0.2.9"
+        receipt_path.write_text(json.dumps(prior), encoding="utf-8")
+        operation_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+    else:
+        operation_args = install_args
+    prior_plugin = install_cli._file_manifest(plugin_root)
+    prior_project = project.read_bytes()
+    prior_receipt = receipt_path.read_bytes() if receipt_path.is_file() else None
+    drifted = False
+
+    if failure_window == "recapture":
+        inspect_state = install_cli._inspect_state
+
+        def drift_after_state(context_value: dict) -> tuple[str, Optional[dict], Optional[str]]:
+            nonlocal drifted
+            result = inspect_state(context_value)
+            if not drifted:
+                descriptor = payload / "DccMcpUnreal.uplugin"
+                descriptor.write_bytes(descriptor.read_bytes() + b" \n")
+                drifted = True
+            return result
+
+        monkeypatch.setattr(install_cli, "_inspect_state", drift_after_state)
+    elif failure_window == "staging":
+        real_copy = install_cli.shutil.copy2
+
+        def copy_then_drift(source: Path, destination: Path) -> str:
+            nonlocal drifted
+            result = real_copy(source, destination)
+            if not drifted:
+                descriptor = payload / "DccMcpUnreal.uplugin"
+                descriptor.write_bytes(descriptor.read_bytes() + b" \n")
+                drifted = True
+            return result
+
+        monkeypatch.setattr(install_cli.shutil, "copy2", copy_then_drift)
+    else:
+        real_replace = install_cli.os.replace
+
+        def fail_new_publish(source: Path, destination: Path) -> None:
+            if Path(source).name.startswith(".DccMcpUnreal.staging-") and Path(destination) == plugin_root:
+                raise OSError("injected publish failure")
+            real_replace(source, destination)
+
+        monkeypatch.setattr(install_cli.os, "replace", fail_new_publish)
+
+    exit_code, result = install_cli._execute(operation_args)
+
+    assert exit_code == expected_exit
+    assert result["verify"]["failure_stage"] == expected_stage
+    assert install_cli._file_manifest(plugin_root) == prior_plugin
+    assert project.read_bytes() == prior_project
+    assert (receipt_path.read_bytes() if receipt_path.is_file() else None) == prior_receipt
+    assert not list(plugin_root.parent.glob(".DccMcpUnreal.*-*"))
 
 
 @pytest.mark.parametrize(
