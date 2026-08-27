@@ -213,7 +213,9 @@ def _resolve_python(args: argparse.Namespace, engine_root: Path) -> tuple[Path, 
 
 def _target_runtime(python_path: Path) -> dict[str, str]:
     probe = r"""
+import csv
 import importlib.metadata as m
+import io
 import json
 import os
 import pathlib
@@ -223,21 +225,24 @@ import dcc_mcp_unreal as adapter
 
 def identity(distribution_name, module):
     distribution = m.distribution(distribution_name)
-    files = tuple(distribution.files or ())
     origin = pathlib.Path(os.path.abspath(module.__file__))
     normalized_origin = os.path.normcase(os.path.normpath(str(origin)))
     records = []
     payload_records = []
     packaged_payload = origin.parent / "_plugin"
     normalized_payload = os.path.normcase(os.path.normpath(str(packaged_payload)))
-    for item in files:
-        located = pathlib.Path(os.path.abspath(distribution.locate_file(item)))
+    record_text = distribution.read_text("RECORD") or ""
+    for row in csv.reader(io.StringIO(record_text)):
+        if len(row) != 3:
+            continue
+        raw_path, raw_hash, raw_size = row
+        located = pathlib.Path(os.path.abspath(distribution.locate_file(raw_path)))
         normalized_located = os.path.normcase(os.path.normpath(str(located)))
         record = {
             "located": str(located),
-            "path": str(item),
-            "hash": f"{item.hash.mode}={item.hash.value}" if item.hash is not None else None,
-            "size": item.size,
+            "path": raw_path,
+            "hash": raw_hash or None,
+            "size": int(raw_size) if raw_size.isdecimal() else (raw_size or None),
         }
         if normalized_located == normalized_origin:
             records.append({key: record[key] for key in ("path", "hash", "size")})
@@ -326,6 +331,7 @@ print(json.dumps({
             "plugin_payload": {
                 "root": str(plugin_payload_root),
                 "provenance": payload_provenance,
+                "cache_tag": sys.implementation.cache_tag,
                 "ownership_root": str(
                     adapter_source_root
                     if adapter_source_root is not None
@@ -416,6 +422,17 @@ def _record_hash_matches_digest(digest: str, record_hash: object) -> bool:
     return actual == expected
 
 
+def _canonical_record_name(value: object) -> str:
+    if not isinstance(value, str) or not 0 < len(value) <= 4096:
+        raise ValueError("RECORD path is missing or too long")
+    if "\\" in value or value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        raise ValueError("RECORD path is not a canonical POSIX relative name")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts) or "/".join(parts) != value:
+        raise ValueError("RECORD path is not a canonical POSIX relative name")
+    return value
+
+
 def _owned_module_origin(identity: dict[str, Any], distribution: str, package: str) -> str:
     origin = Path(os.path.abspath(str(identity.get("origin") or "")))
     root = Path(os.path.abspath(str(identity.get("distribution_root") or "")))
@@ -441,12 +458,13 @@ def _owned_module_origin(identity: dict[str, Any], distribution: str, package: s
         record = records[0]
         if set(record) != {"path", "hash", "size"}:
             raise ValueError(f"{distribution} module origin has an invalid RECORD entry")
-        record_path = Path(str(record.get("path") or ""))
-        if record_path.is_absolute() or any(part == ".." for part in record_path.parts):
-            raise ValueError(f"{distribution} module origin is outside distribution ownership")
-        expected_origin = Path(os.path.abspath(root / record_path))
-        if expected_origin != origin:
-            raise ValueError(f"{distribution} module origin is outside distribution ownership")
+        try:
+            record_name = _canonical_record_name(record.get("path"))
+            expected_name = origin.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise ValueError(f"{distribution} module origin has a noncanonical RECORD path") from exc
+        if record_name != expected_name:
+            raise ValueError(f"{distribution} module origin RECORD path is not the exact owned module name")
         details = _assert_plain_owned_path(origin, root, distribution)
         record_size = record.get("size")
         if (
@@ -555,37 +573,80 @@ def _payload_content_manifest(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _assert_installed_payload_records(
-    root: Path, distribution_root: Path, snapshot: dict[str, Any], records: object
+    root: Path, distribution_root: Path, snapshot: dict[str, Any], records: object, cache_tag: object
 ) -> None:
     if not isinstance(records, list):
         raise ValueError("installed target plugin payload requires RECORD ownership")
     expected_files = {
-        os.path.normcase(os.path.normpath(str(root / str(item["path"])))): item
+        (root / str(item["path"])).relative_to(distribution_root).as_posix(): item
         for item in snapshot["manifest"]
         if isinstance(item, dict) and item.get("type") == "file"
     }
+    if not isinstance(cache_tag, str) or re.fullmatch(r"[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*", cache_tag) is None:
+        raise ValueError("installed target plugin payload has an invalid bytecode cache tag")
+    bytecode_records: set[str] = set()
+    allowed_bytecode: set[str] = set()
+    for record_name in expected_files:
+        if not record_name.endswith(".py"):
+            continue
+        parent, _, filename = record_name.rpartition("/")
+        stem = filename[:-3]
+        cache_prefix = f"{parent}/__pycache__/{stem}.{cache_tag}"
+        allowed_bytecode.update(
+            {
+                f"{cache_prefix}.pyc",
+                f"{cache_prefix}.opt-1.pyc",
+                f"{cache_prefix}.opt-2.pyc",
+            }
+        )
     matches: dict[str, list[dict[str, Any]]] = {path: [] for path in expected_files}
     for record in records:
         if not isinstance(record, dict) or set(record) != {"located", "path", "hash", "size"}:
             raise ValueError("installed target plugin payload has an invalid RECORD entry")
-        record_path = Path(str(record.get("path") or ""))
-        if record_path.is_absolute() or any(part == ".." for part in record_path.parts):
-            raise ValueError("installed target plugin payload RECORD escapes distribution ownership")
+        try:
+            record_name = _canonical_record_name(record.get("path"))
+        except ValueError as exc:
+            raise ValueError("installed target plugin payload has a noncanonical RECORD path") from exc
+        record_path = Path(*record_name.split("/"))
         located = Path(os.path.abspath(str(record.get("located") or "")))
         if located != Path(os.path.abspath(distribution_root / record_path)):
             raise ValueError("installed target plugin payload RECORD path is inconsistent")
-        normalized = os.path.normcase(os.path.normpath(str(located)))
-        try:
-            relative = located.relative_to(root)
-        except ValueError:
-            relative = None
-        if relative is not None and "__pycache__" in relative.parts and relative.suffix == ".pyc":
+        if record_name in allowed_bytecode:
+            if record_name in bytecode_records or record.get("hash") is not None or record.get("size") is not None:
+                raise ValueError("installed target plugin payload has an invalid bytecode RECORD entry")
+            try:
+                details = _assert_plain_payload_path(located, root)
+            except (OSError, ValueError) as exc:
+                raise ValueError("installed target plugin payload bytecode RECORD is missing or unsafe") from exc
+            if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+                raise ValueError("installed target plugin payload bytecode RECORD is missing or unsafe")
+            bytecode_records.add(record_name)
             continue
-        if normalized not in matches:
+        if record_name not in matches:
             raise ValueError("installed target plugin payload RECORD contains an unexpected entry")
-        matches[normalized].append(record)
-    for normalized, expected in expected_files.items():
-        entries = matches[normalized]
+        matches[record_name].append(record)
+    for current, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        if current_path.name != "__pycache__":
+            continue
+        if directory_names:
+            raise ValueError("installed target plugin payload bytecode cache contains an unexpected directory")
+        for file_name in file_names:
+            path = current_path / file_name
+            try:
+                details = _assert_plain_payload_path(path, root)
+                record_name = path.relative_to(distribution_root).as_posix()
+            except (OSError, ValueError) as exc:
+                raise ValueError("installed target plugin payload bytecode cache is unsafe") from exc
+            if (
+                not stat.S_ISREG(details.st_mode)
+                or details.st_nlink != 1
+                or path.suffix != ".pyc"
+                or record_name not in bytecode_records
+            ):
+                raise ValueError("installed target plugin payload bytecode cache contains an unowned file")
+    for record_name, expected in expected_files.items():
+        entries = matches[record_name]
         if len(entries) != 1:
             raise ValueError("installed target plugin payload requires exactly one matching RECORD entry per file")
         entry = entries[0]
@@ -601,7 +662,6 @@ def _assert_installed_payload_records(
 
 
 def _copy_payload_snapshot(source: Path, destination: Path, snapshot: dict[str, Any]) -> None:
-    destination.mkdir()
     manifest = snapshot.get("manifest")
     if not isinstance(manifest, list):
         raise ValueError("target plugin payload snapshot is invalid")
@@ -639,6 +699,19 @@ def _source_identity_snapshot(source_root: Path, origin: Path) -> dict[str, Any]
     }
 
 
+def _module_identity_snapshot(ownership_root: Path, origin: Path) -> dict[str, Any]:
+    ownership_root = Path(os.path.abspath(ownership_root))
+    origin = Path(os.path.abspath(origin))
+    details = _assert_plain_owned_path(origin, ownership_root, "dcc-mcp-unreal")
+    return {
+        "root": str(ownership_root),
+        "origin": str(origin),
+        "identity": _path_identity(origin),
+        "size": details.st_size,
+        "sha256": _sha256(origin),
+    }
+
+
 def _bind_target_payload(runtime: dict[str, Any]) -> dict[str, Any]:
     payload = runtime.get("plugin_payload")
     if not isinstance(payload, dict):
@@ -659,7 +732,9 @@ def _bind_target_payload(runtime: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Target distribution returned an invalid Unreal plugin payload identity")
     captured = _payload_snapshot(root, ownership_root)
     if provenance == "wheel" and "records" in payload:
-        _assert_installed_payload_records(root, ownership_root, captured, payload.get("records"))
+        _assert_installed_payload_records(
+            root, ownership_root, captured, payload.get("records"), payload.get("cache_tag")
+        )
     expected = payload.get("snapshot")
     if expected is not None and expected != captured:
         raise ValueError("Target distribution Unreal plugin payload identity changed")
@@ -670,6 +745,20 @@ def _bind_target_payload(runtime: dict[str, Any]) -> dict[str, Any]:
         "ownership_root": str(ownership_root),
         "snapshot": captured,
     }
+    origin = Path(str(runtime.get("adapter_origin") or ""))
+    expected_module = runtime.get("adapter_module_identity")
+    if origin.is_file():
+        module_root = (
+            ownership_root
+            if provenance == "source-checkout"
+            else Path(str(runtime.get("adapter_distribution_root") or ""))
+        )
+        current_module = _module_identity_snapshot(module_root, origin)
+        if expected_module is not None and expected_module != current_module:
+            raise ValueError("Target dcc-mcp-unreal module identity changed")
+        bound_runtime["adapter_module_identity"] = current_module
+    elif expected_module is not None:
+        raise ValueError("Target dcc-mcp-unreal module identity is missing")
     source_identity = runtime.get("adapter_source_identity")
     if provenance == "source-checkout":
         current_source = _source_identity_snapshot(
@@ -709,6 +798,24 @@ def _assert_bound_runtime(runtime: dict[str, Any]) -> None:
             stage="acquire",
         )
     _assert_bound_payload(payload)
+    module_identity = runtime.get("adapter_module_identity")
+    if module_identity is not None:
+        try:
+            current_module = _module_identity_snapshot(
+                Path(str(module_identity["root"])), Path(str(module_identity["origin"]))
+            )
+        except (KeyError, OSError, ValueError, TypeError) as exc:
+            raise LifecycleError(
+                f"Target dcc-mcp-unreal module identity changed: {exc}",
+                exit_code=INSTALL_EXIT_ACQUIRE,
+                stage="acquire",
+            ) from exc
+        if current_module != module_identity:
+            raise LifecycleError(
+                "Target dcc-mcp-unreal module identity changed",
+                exit_code=INSTALL_EXIT_ACQUIRE,
+                stage="acquire",
+            )
     source_identity = runtime.get("adapter_source_identity")
     if source_identity is None:
         return
@@ -1196,6 +1303,65 @@ def _pending_backup(context: dict[str, Any], receipt: dict[str, Any]) -> Optiona
     return backup
 
 
+def _pending_file_guard(path: Path, label: str) -> dict[str, Any]:
+    try:
+        if _is_link_or_reparse(path):
+            raise ValueError(f"{label} crosses a link or reparse boundary")
+        details = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{label} is missing or unloadable") from exc
+    if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+        raise ValueError(f"{label} has an unsafe file identity")
+    return {
+        "path": str(path),
+        "identity": _path_identity(path),
+        "size": details.st_size,
+        "sha256": _sha256(path),
+    }
+
+
+def _pending_tree_guard(path: Path, label: str) -> dict[str, Any]:
+    try:
+        if _is_link_or_reparse(path):
+            raise ValueError(f"{label} crosses a link or reparse boundary")
+        details = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{label} is missing or unloadable") from exc
+    if not stat.S_ISDIR(details.st_mode):
+        raise ValueError(f"{label} has an unsafe directory identity")
+    return {
+        "path": str(path),
+        "identity": _path_identity(path),
+        "manifest": _file_manifest(path),
+    }
+
+
+def _capture_pending_guard(context: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
+    try:
+        _assert_bound_runtime(context["runtime"])
+    except LifecycleError as exc:
+        raise ValueError(str(exc)) from exc
+    if receipt.get("target_runtime") != context.get("runtime"):
+        raise ValueError("pending target runtime identity changed")
+    payload = context["runtime"].get("plugin_payload")
+    if not isinstance(payload, dict) or receipt.get("payload_provenance") != payload.get("provenance"):
+        raise ValueError("pending payload provenance identity changed")
+    backup = _pending_backup(context, receipt)
+    if backup is None:
+        raise ValueError("pending rollback backup is missing")
+    return {
+        "plugin": _pending_tree_guard(context["plugin_root"], "pending installed plugin"),
+        "backup": _pending_tree_guard(backup, "pending rollback backup"),
+        "project": _pending_file_guard(context["project_file"], "pending project"),
+        "receipt": _pending_file_guard(context["receipt_path"], "pending receipt"),
+    }
+
+
+def _assert_pending_guard(context: dict[str, Any], receipt: dict[str, Any], expected: dict[str, Any]) -> None:
+    if _capture_pending_guard(context, receipt) != expected:
+        raise ValueError("pending install identities changed during readiness verification")
+
+
 def _rollback_pending(context: dict[str, Any], receipt: dict[str, Any]) -> None:
     backup = _pending_backup(context, receipt)
     if backup is None:
@@ -1300,6 +1466,38 @@ def _remove_tree(path: Path) -> None:
         raise OSError(str(outcome.get("recommended_next_action") or outcome))
 
 
+def _transaction_tree_owner(path: Path, *, manifest: bool) -> dict[str, Any]:
+    if _is_link_or_reparse(path):
+        raise LifecycleError(
+            "Transaction-owned directory crosses a link or reparse boundary",
+            exit_code=INSTALL_EXIT_INSTALL,
+            stage="install",
+        )
+    details = path.lstat()
+    if not stat.S_ISDIR(details.st_mode):
+        raise LifecycleError(
+            "Transaction-owned directory identity is invalid",
+            exit_code=INSTALL_EXIT_INSTALL,
+            stage="install",
+        )
+    owner = {
+        "device": int(details.st_dev),
+        "inode": int(details.st_ino),
+        "mode": int(details.st_mode),
+    }
+    return {"owner": owner, "manifest": _file_manifest(path) if manifest else None}
+
+
+def _assert_transaction_tree_owner(path: Path, expected: dict[str, Any]) -> None:
+    current = _transaction_tree_owner(path, manifest=expected.get("manifest") is not None)
+    if current != expected:
+        raise LifecycleError(
+            "Transaction-owned directory identity changed; preserving recovery evidence",
+            exit_code=INSTALL_EXIT_INSTALL,
+            stage="install",
+        )
+
+
 def _inspect_locks(path: Path) -> Optional[str]:
     if not path.exists():
         return None
@@ -1355,8 +1553,14 @@ def _install(
     committed = False
     preserve_backup = False
     verification: Optional[tuple[int, dict[str, Any]]] = None
+    staging_owner: Optional[dict[str, Any]] = None
+    published_owner: Optional[dict[str, Any]] = None
+    backup_owner: Optional[dict[str, Any]] = None
+    previous_owner = _transaction_tree_owner(plugin_root, manifest=True) if plugin_root.exists() else None
     try:
         _assert_bound_runtime(context["runtime"])
+        staging.mkdir()
+        staging_owner = _transaction_tree_owner(staging, manifest=False)
         _copy_payload_snapshot(source, staging, payload["snapshot"])
         _assert_bound_runtime(context["runtime"])
         staged_manifest = _file_manifest(staging)
@@ -1381,10 +1585,19 @@ def _install(
             )
         if plugin_root.exists():
             _assert_bound_runtime(context["runtime"])
+            if previous_owner is None:
+                raise LifecycleError(
+                    "Prior plugin identity appeared during upgrade",
+                    exit_code=INSTALL_EXIT_INSTALL,
+                    stage="install",
+                )
+            _assert_transaction_tree_owner(plugin_root, previous_owner)
             os.replace(plugin_root, backup)
             moved_previous = True
+            backup_owner = _transaction_tree_owner(backup, manifest=True)
         _assert_bound_runtime(context["runtime"])
         os.replace(staging, plugin_root)
+        published_owner = _transaction_tree_owner(plugin_root, manifest=True)
         _set_plugin_entry(project, installed_entry)
         _assert_bound_runtime(context["runtime"])
         _atomic_json(project_file, project)
@@ -1427,9 +1640,23 @@ def _install(
         ) from exc
     finally:
         if not committed:
-            if plugin_root.exists():
+            if published_owner is not None and plugin_root.exists():
+                _assert_transaction_tree_owner(plugin_root, published_owner)
                 _remove_tree(plugin_root)
             if moved_previous and backup.exists():
+                if backup_owner is None:
+                    raise LifecycleError(
+                        "Prior plugin backup ownership is missing; preserving recovery evidence",
+                        exit_code=INSTALL_EXIT_INSTALL,
+                        stage="install",
+                    )
+                _assert_transaction_tree_owner(backup, backup_owner)
+                if plugin_root.exists():
+                    raise LifecycleError(
+                        "Plugin destination is occupied; preserving rollback evidence",
+                        exit_code=INSTALL_EXIT_INSTALL,
+                        stage="install",
+                    )
                 os.replace(backup, plugin_root)
             project_file.write_bytes(old_project_bytes)
             if old_receipt is None:
@@ -1438,8 +1665,22 @@ def _install(
                 receipt_path.parent.mkdir(parents=True, exist_ok=True)
                 receipt_path.write_bytes(old_receipt)
         if staging.exists():
+            if staging_owner is None:
+                raise LifecycleError(
+                    "Staging ownership is missing; preserving recovery evidence",
+                    exit_code=INSTALL_EXIT_INSTALL,
+                    stage="install",
+                )
+            _assert_transaction_tree_owner(staging, staging_owner)
             _remove_tree(staging)
         if committed and backup.exists() and not preserve_backup:
+            if backup_owner is None:
+                raise LifecycleError(
+                    "Prior plugin backup ownership is missing; preserving recovery evidence",
+                    exit_code=INSTALL_EXIT_INSTALL,
+                    stage="install",
+                )
+            _assert_transaction_tree_owner(backup, backup_owner)
             _remove_tree(backup)
 
     assert verification is not None
@@ -1502,10 +1743,16 @@ def _verify(
             steps.append({"id": "bootstrap", "status": "failed", "message": bootstrap_error})
         else:
             steps.append({"id": "bootstrap", "status": "ok"})
+    pending_guard: Optional[dict[str, Any]] = None
+    pending_requires_resolution = (
+        receipt is not None and receipt.get("transaction") is not None and bool(context["instance_id"])
+    )
     if failure_stage is None:
         try:
             from dcc_mcp_core import wait_for_sidecar_ready
 
+            if pending_requires_resolution:
+                pending_guard = _capture_pending_guard(context, receipt)
             readiness = wait_for_sidecar_ready(
                 dcc_type=DCC_TYPE,
                 instance_id=context["instance_id"],
@@ -1525,8 +1772,11 @@ def _verify(
             steps.append({"id": "readiness", "status": "ok"})
 
     directly_usable = failure_stage is None
-    if receipt is not None and receipt.get("transaction") is not None and context["instance_id"]:
+    if pending_requires_resolution:
         try:
+            if pending_guard is None:
+                pending_guard = _capture_pending_guard(context, receipt)
+            _assert_pending_guard(context, receipt, pending_guard)
             if directly_usable and verified_identity is not None:
                 _finalize_pending(context, receipt, verified_identity)
             else:
@@ -1721,9 +1971,9 @@ def _execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     state, receipt, state_reason = _inspect_state(context)
     if args.verb == "status":
         return _status(args, context, state, state_reason, receipt)
-    if args.verb == "verify":
-        return _verify(args, context, state, receipt)
     try:
+        if args.verb == "verify":
+            return _verify(args, context, state, receipt)
         if args.verb == "uninstall":
             return _uninstall(args, context, state, receipt)
         if state == "partial":

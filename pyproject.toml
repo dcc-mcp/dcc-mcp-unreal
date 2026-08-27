@@ -35,6 +35,7 @@ dev = [
     "pytest-mock>=3.0",
     "ruff>=0.8.0",
     "hatchling",
+    "editables",
     "build",
     "tomli; python_version < '3.11'",
     "pyyaml>=5.0",
