@@ -4,6 +4,10 @@
 
 #include "DccMcpAutomationLibrary.generated.h"
 
+class APlayerController;
+class APawn;
+class UWorld;
+
 UCLASS()
 class DCCMCPUNREAL_API UDccMcpAutomationLibrary : public UBlueprintFunctionLibrary
 {
@@ -18,6 +22,16 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool InjectPieKey(const FString& KeyName, bool bPressed);
+
+    // Internal bounded playtest ownership; no current-controller or Slate fallback.
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static FString AcquirePieKey(UWorld* World, APlayerController* Controller, const FString& KeyName);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool PressOwnedPieKey(const FString& Owner);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool ReleaseOwnedPieKey(const FString& Owner);
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool ClickPiePointerButton(const FString& KeyName, float NormalizedX, float NormalizedY);
@@ -42,6 +56,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool StopPieNavigation();
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool StopOwnedPieNavigation(UWorld* World, APlayerController* Controller, APawn* Pawn);
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static FString GetFabSessionStatusJson();

@@ -8,7 +8,7 @@ import math
 import time
 import uuid
 from collections import Counter
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import dcc_mcp_unreal as _adapter_package
 from dcc_mcp_unreal.pie_session import require_pie_context
@@ -664,11 +664,12 @@ def finish_episode(episode_id: str) -> dict[str, Any]:
     for action in episode["actions"].values():
         if action["status"] == "pending":
             _release_action_input(action)
+            if action["action"] in _NAVIGATION_ACTIONS:
+                action["_navigation_cleanup_errors"] = _stop_navigation(binding=episode["runtime_binding"])
     try:
         unreal, _world, _controller, _player = _pie_context()
         after = observe_episode(episode)
-        _stop_navigation(unreal, binding=episode["runtime_binding"])
-    except Exception:
+    except BaseException:
         pass
     for action in episode["actions"].values():
         if action["status"] == "pending":
@@ -703,6 +704,12 @@ def finish_episode(episode_id: str) -> dict[str, Any]:
                     "after": None,
                 }
                 action["transition"] = transition
+                cleanup_errors = _release_action_input(action) + action.get("_navigation_cleanup_errors", [])
+                if cleanup_errors:
+                    transition["cleanup_errors"] = cleanup_errors
+                release = action.get("_release_input")
+                if release is not None:
+                    transition["input_cleanup"] = dict(release.state)
                 episode["trace"].append(transition)
     result = episode_summary(episode, include_trace=True)
     _EPISODES.pop(episode_id, None)
@@ -744,110 +751,121 @@ def _resolve_target(world: Any, player: Any, selector: dict[str, Any]):
     return matches[0][2]
 
 
-def _tap_key(
-    unreal: Any,
-    key: str,
-    duration: float,
-    *,
-    binding: Optional[dict[str, Any]] = None,
-) -> Optional[Callable[[], list[str]]]:
-    bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
-    inject = getattr(bridge, "inject_pie_key", None) if bridge is not None else None
-    if binding is not None:
+class _OwnedKey:
+    """One native receiver/key lease; cleanup never replaces the primary result."""
+
+    def __init__(self, unreal: Any, key: str, binding: dict[str, Any]):
+        bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
+        acquire = getattr(bridge, "acquire_pie_key", None)
+        self.press = getattr(bridge, "press_owned_pie_key", None)
+        self.release = getattr(bridge, "release_owned_pie_key", None)
+        if not all(callable(fn) for fn in (acquire, self.press, self.release)):
+            raise RuntimeError("Native owned PIE input is unavailable; update the plugin")
         _require_bound_context(binding, _pie_context())
-    if not callable(inject) or not inject(key, True):
-        raise RuntimeError("The native PIE input bridge could not press {}".format(key))
-    hold_seconds = max(0.0, min(float(duration), 5.0))
-    if hold_seconds <= 0:
-        if not inject(key, False):
-            raise RuntimeError("The native PIE input bridge could not release {}".format(key))
-        return None
+        self.owner = acquire(binding["_world_ref"], binding["_controller_ref"], key)
+        if not self.owner:
+            raise RuntimeError("The native PIE input receiver could not be acquired")
+        self.register = getattr(unreal, "register_slate_post_tick_callback", None)
+        self.unregister = getattr(unreal, "unregister_slate_post_tick_callback", None)
+        self.handle = None
+        self.errors: list[str] = []
+        self.state = {
+            "release_attempted": False,
+            "release_completed": False,
+            "retirement_attempted": False,
+            "retirement_completed": False,
+        }
+        binding.setdefault("_input_owners", []).append(self)
 
-    register = getattr(unreal, "register_slate_post_tick_callback", None)
-    unregister = getattr(unreal, "unregister_slate_post_tick_callback", None)
-    state: dict[str, Any] = {
-        "release_attempted": False,
-        "unregistered": False,
-        "handle": None,
-        "errors": [],
-    }
-
-    def unregister_callback() -> None:
-        if state["unregistered"] or state["handle"] is None or not callable(unregister):
-            return
-        state["unregistered"] = True
+    def __call__(self) -> list[str]:
         try:
-            unregister(state["handle"])
-        except Exception as exc:
-            state["errors"].append(str(exc))
+            if not self.state["release_attempted"]:
+                # Mark before delivery: a cancelled bridge call may already have delivered.
+                self.state["release_attempted"] = True
+                try:
+                    self.state["release_completed"] = bool(self.release(self.owner))
+                    if not self.state["release_completed"]:
+                        self.errors.append("The owned PIE input receiver could not release its key")
+                except BaseException as exc:
+                    self.errors.append(str(exc))
+        finally:
+            if self.handle is not None and not self.state["retirement_completed"]:
+                self.state["retirement_attempted"] = True
+                try:
+                    self.unregister(self.handle)
+                    self.state["retirement_completed"] = True
+                except BaseException as exc:
+                    message = str(exc)
+                    if message not in self.errors:
+                        self.errors.append(message)
+        return list(self.errors)
 
-    def release_key() -> list[str]:
-        if not state["release_attempted"]:
-            state["release_attempted"] = True
-            try:
-                if not inject(key, False):
-                    state["errors"].append("The native PIE input bridge could not release {}".format(key))
-            except Exception as exc:
-                state["errors"].append(str(exc))
-        unregister_callback()
-        return list(state["errors"])
+    def start(self, duration: Optional[float], binding: dict[str, Any]) -> None:
+        try:
+            _require_bound_context(binding, _pie_context())
+            if not self.press(self.owner):
+                raise RuntimeError("The native PIE input bridge could not press its owned key")
+            if duration == 0:
+                errors = self()
+                if errors:
+                    raise RuntimeError("; ".join(errors))
+                return
+            if not callable(self.register) or not callable(self.unregister):
+                raise RuntimeError("Slate tick callbacks are unavailable for bounded PIE input")
+            release_at = time.monotonic() + duration if duration is not None else None
 
-    if not callable(register) or not callable(unregister):
-        release_key()
-        raise RuntimeError("Slate tick callbacks are unavailable for bounded PIE input")
-    release_at = time.monotonic() + hold_seconds
+            def on_tick(_delta_seconds: float = 0.0) -> None:
+                if self.state["release_attempted"]:
+                    self()  # A failed unregister is retriable; key-up is not.
+                    return
+                try:
+                    _require_bound_context(binding, _pie_context())
+                    if release_at is None or time.monotonic() < release_at:
+                        return
+                except BaseException:
+                    pass
+                self()
 
-    def release_on_tick(_delta_seconds: float = 0.0) -> None:
-        if time.monotonic() < release_at:
-            return
-        release_key()
+            self.handle = self.register(on_tick)
+            if self.handle is None:
+                raise RuntimeError("Slate callback registration returned no retirement handle")
+            if self.state["release_attempted"]:
+                self()
+        except BaseException:
+            self()
+            raise
 
-    try:
-        state["handle"] = register(release_on_tick)
-    except Exception:
-        release_key()
-        raise
-    if state["release_attempted"]:
-        unregister_callback()
-    return release_key
+
+def _tap_key(unreal: Any, key: str, duration: Optional[float], *, binding: dict[str, Any]) -> _OwnedKey:
+    owned = _OwnedKey(unreal, key, binding)
+    owned.start(duration, binding)
+    return owned
 
 
 def _release_action_input(action: dict[str, Any]) -> list[str]:
     release = action.get("_release_input")
     if callable(release):
-        errors = release()
-        if errors:
-            action["_input_cleanup_errors"] = list(errors)
-    return list(action.get("_input_cleanup_errors", []))
-
-
-def _set_key(unreal: Any, key: str, pressed: bool, *, binding: Optional[dict[str, Any]] = None) -> None:
-    bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
-    inject = getattr(bridge, "inject_pie_key", None) if bridge is not None else None
-    if binding is not None:
-        _require_bound_context(binding, _pie_context())
-    if not callable(inject) or not inject(key, pressed):
-        verb = "press" if pressed else "release"
-        raise RuntimeError("The native PIE input bridge could not {} {}".format(verb, key))
+        return release()
+    return []
 
 
 def _stop_navigation(
-    unreal: Any,
+    unreal: Any = None,
     *,
-    release_forward: bool = True,
     binding: Optional[dict[str, Any]] = None,
 ) -> list[str]:
-    errors = []
-    if release_forward:
-        try:
-            _set_key(unreal, "W", False, binding=binding)
-        except Exception as exc:
-            errors.append(str(exc))
-    bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
-    stop = getattr(bridge, "stop_pie_navigation", None) if bridge is not None else None
-    if not callable(stop) or not stop():
-        errors.append("The native PIE navigation bridge could not stop movement")
-    return errors
+    try:
+        bridge = getattr(unreal if unreal is not None else _unreal(), "DccMcpAutomationLibrary", None)
+        stop = getattr(bridge, "stop_owned_pie_navigation", None)
+        if (
+            binding is None
+            or not callable(stop)
+            or not stop(binding["_world_ref"], binding["_controller_ref"], binding["_player_ref"])
+        ):
+            return ["The owned PIE navigation receiver could not stop movement"]
+    except BaseException as exc:
+        return [str(exc)]
+    return []
 
 
 def _face_location(
@@ -904,6 +922,7 @@ def _start_input_steering(
     player: Any,
     target: Any,
     *,
+    action: dict[str, Any],
     binding: Optional[dict[str, Any]] = None,
 ) -> str:
     return _start_input_steering_to_location(
@@ -911,6 +930,7 @@ def _start_input_steering(
         controller,
         player,
         _target_aim_location(target),
+        action=action,
         binding=binding,
     )
 
@@ -921,6 +941,7 @@ def _start_input_steering_to_location(
     player: Any,
     target_location: Any,
     *,
+    action: dict[str, Any],
     binding: Optional[dict[str, Any]] = None,
 ) -> str:
     bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
@@ -928,7 +949,9 @@ def _start_input_steering_to_location(
     if callable(start) and start(target_location):
         return "native_pawn_movement"
     _face_location(unreal, controller, player, target_location, include_pitch=False)
-    _set_key(unreal, "W", True, binding=binding)
+    action["_release_input"] = _tap_key(
+        unreal, "W", max(0.0, action["timeout_seconds"] - (time.time() - action["started_at"])), binding=binding
+    )
     return "legacy_key"
 
 
@@ -976,6 +999,18 @@ def _relative_movement_evidence(action: dict[str, Any], after: dict[str, Any], e
 
 
 def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any]:
+    binding = get_episode(episode_id)["runtime_binding"]
+    owners = binding.setdefault("_input_owners", [])
+    previous = len(owners)
+    try:
+        return _execute_action(episode_id, action_name, **kwargs)
+    except BaseException:
+        for owner in owners[previous:]:
+            owner()
+        raise
+
+
+def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any]:
     episode = get_episode(episode_id)
     binding = episode["runtime_binding"]
     context = _pie_context()
@@ -1146,10 +1181,7 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         "direction": direction,
         "expected_direction": expected_direction,
         "max_causal_displacement": (
-            max(
-                min_displacement,
-                _RELATIVE_MOVEMENT_BASE_SLACK_CM + _RELATIVE_MOVEMENT_MAX_SPEED_CM_PER_SECOND * duration,
-            )
+            _RELATIVE_MOVEMENT_BASE_SLACK_CM + _RELATIVE_MOVEMENT_MAX_SPEED_CM_PER_SECOND * duration
             if action_name == "move_relative"
             else None
         ),
@@ -1233,20 +1265,26 @@ def _finalize(
         extra.setdefault("navigation_driver", action["navigation_driver"])
         extra.setdefault("steering_fallback_used", action["steering_fallback_started_at"] is not None)
         extra.setdefault("steering_backend", action["steering_backend"])
-        if cleanup_navigation:
+        if cleanup_navigation or "_navigation_cleanup_errors" not in action:
             cleanup_errors.extend(
                 _stop_navigation(
-                    _unreal(),
-                    release_forward=action["steering_backend"] in (None, "legacy_key"),
                     binding=episode["runtime_binding"],
                 )
             )
+        else:
+            cleanup_errors.extend(action["_navigation_cleanup_errors"])
     if cleanup_errors:
         extra["cleanup_errors"] = cleanup_errors
+    release = action.get("_release_input")
+    if release is not None:
+        extra["input_cleanup"] = dict(release.state)
+    if cleanup_errors and status == "completed":
+        status = "blocked"
+        extra["reason"] = "input_cleanup_failed"
     if "blocked_reason" in extra:
         extra.setdefault("reason", extra["blocked_reason"])
     action["status"] = status
-    observed_deltas = telemetry_deltas(action["before"], after) if observation_trusted else {}
+    observed_deltas = telemetry_deltas(action["before"], after) if observation_trusted else []
     if observation_trusted and action["action"] in COMBAT_ACTIONS:
         extra.update(combat_feedback(action, after, observed_deltas))
     player_location_delta = _location_delta(action["before"], after) if observation_trusted else None
@@ -1294,17 +1332,25 @@ def _possession_change_reason(action: dict[str, Any], after: dict[str, Any]):
 
 def poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
     episode = get_episode(episode_id)
+    try:
+        return _poll_action(episode_id, action_id)
+    except BaseException:
+        # Observation, context loss and cancellation all retire delivered input.
+        action = episode["actions"].get(str(action_id))
+        if action is not None:
+            _release_action_input(action)
+        raise
+
+
+def _poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
+    episode = get_episode(episode_id)
     action = episode["actions"].get(str(action_id))
     if action is None:
         raise KeyError("Unknown playtest action_id: {}".format(action_id))
     if action["transition"] is not None:
         return action["transition"]
 
-    try:
-        context = _pie_context()
-    except Exception:
-        _release_action_input(action)
-        raise
+    context = _pie_context()
     unreal, world, controller, player = context
     context_reason = _context_change_reason(episode["runtime_binding"], context)
     after = observe(episode["selectors"])
@@ -1379,6 +1425,7 @@ def poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
                     controller,
                     player,
                     target,
+                    action=action,
                     binding=episode["runtime_binding"],
                 )
                 if target is not None
@@ -1387,6 +1434,7 @@ def poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
                     controller,
                     player,
                     target_location,
+                    action=action,
                     binding=episode["runtime_binding"],
                 )
             )
