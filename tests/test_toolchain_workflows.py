@@ -273,6 +273,32 @@ def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
     assert "CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}" in build_text
 
 
+def test_self_hosted_build_uses_job_scoped_embedded_python() -> None:
+    build = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+    steps = build["jobs"]["build-uplugin"]["steps"]
+    setup_step = next(step for step in steps if step.get("name") == "Set up Python")
+    setup = setup_step["run"]
+
+    assert '$jobScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:UE_VERSION"' in setup
+    assert '$installDir = "$env:RUNNER_TEMP\\python\\$pythonVersion-$jobScope"' in setup
+    assert '$zipPath = "$env:RUNNER_TEMP\\python-$pythonVersion-$jobScope-embed-amd64.zip"' in setup
+    assert '$installDir = "$env:RUNNER_TEMP\\python\\$pythonVersion"' not in setup
+
+
+def test_self_hosted_build_uses_job_scoped_pytest_temp_directory() -> None:
+    build = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+    steps = build["jobs"]["build-uplugin"]["steps"]
+    validation = next(step for step in steps if step.get("name") == "Validate Python package and skills")["run"]
+
+    assert (
+        '$testTemp = "$env:RUNNER_TEMP\\test-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:UE_VERSION"'
+    ) in validation
+    assert "$env:TEMP = $testTemp" in validation
+    assert "$env:TMP = $testTemp" in validation
+    assert '$pytestTemp = Join-Path $testTemp "pytest"' in validation
+    assert '& "$env:PYTHON_HOME\\python.exe" -m pytest --basetemp "$pytestTemp"' in validation
+
+
 def test_manual_tag_recovery_rebuilds_assets_without_republishing_pypi() -> None:
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]

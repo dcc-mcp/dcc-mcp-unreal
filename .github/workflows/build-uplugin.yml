@@ -78,11 +78,12 @@ jobs:
         shell: pwsh
         run: |
           $pythonVersion = "3.12.10"
-          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion"
+          $jobScope = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:UE_VERSION"
+          $installDir = "$env:RUNNER_TEMP\python\$pythonVersion-$jobScope"
           if (-not (Test-Path "$installDir\python.exe")) {
             # Use python.org embeddable zip — no installer, no registry access needed
             $zipUrl = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion-embed-amd64.zip"
-            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-embed-amd64.zip"
+            $zipPath = "$env:RUNNER_TEMP\python-$pythonVersion-$jobScope-embed-amd64.zip"
             Write-Host "Downloading Python $pythonVersion embeddable from python.org"
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
             Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -118,9 +119,14 @@ jobs:
       - name: Validate Python package and skills
         shell: pwsh
         run: |
+          $testTemp = "$env:RUNNER_TEMP\test-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:UE_VERSION"
+          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
+          $env:TEMP = $testTemp
+          $env:TMP = $testTemp
+          $pytestTemp = Join-Path $testTemp "pytest"
           & "$env:PYTHON_HOME\python.exe" tools/lint_skills.py --error-only
           & "$env:PYTHON_HOME\python.exe" -m ruff check src tests unreal/plugin/Content/Python
-          & "$env:PYTHON_HOME\python.exe" -m pytest
+          & "$env:PYTHON_HOME\python.exe" -m pytest --basetemp "$pytestTemp"
 
       - name: Download dcc-mcp-core wheel
         id: core

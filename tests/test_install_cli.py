@@ -78,6 +78,85 @@ def _run_cli(
     )
 
 
+def _execute_expect(args: object, expected_exit: int) -> dict:
+    exit_code, result = install_cli._execute(args)
+    assert exit_code == expected_exit, result
+    return result
+
+
+@pytest.fixture(autouse=True)
+def _isolate_external_lock_inspection(monkeypatch) -> None:
+    monkeypatch.setattr(install_cli, "_inspect_locks", lambda _path: None)
+
+
+def test_execute_expectation_reports_the_lifecycle_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        install_cli,
+        "_execute",
+        lambda _args: (50, {"verify": {"failure_reason": "locked synthetic path"}}),
+    )
+
+    with pytest.raises(AssertionError, match="locked synthetic path"):
+        _execute_expect(object(), 40)
+
+
+def test_lifecycle_unit_boundary_does_not_use_external_lock_inspection(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    _execute_expect(install_args, 40)
+    receipt_path = project.parent / ".dcc-mcp" / "receipts" / "unreal.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    def fail_external_inspection(_path: Path) -> dict:
+        raise AssertionError("external Windows lock inspection escaped the unit boundary")
+
+    monkeypatch.setattr(dcc_mcp_core, "inspect_install_root", fail_external_inspection)
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+
+    _execute_expect(upgrade_args, 40)
+
+
+def test_upgrade_preserves_restart_semantics_for_an_injected_plugin_lock(monkeypatch, tmp_path: Path) -> None:
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    _execute_expect(install_args, 40)
+    receipt_path = project.parent / ".dcc-mcp" / "receipts" / "unreal.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["adapter_version"] = "0.2.9"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    monkeypatch.setattr(install_cli, "_inspect_locks", lambda _path: "DccMcpUnreal.dll")
+    upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
+
+    result = _execute_expect(upgrade_args, 50)
+
+    assert result["status"] == "requires_restart"
+    assert "DccMcpUnreal.dll" in result["verify"]["failure_reason"]
+
+
 def _synthetic_host(tmp_path: Path) -> tuple[Path, Path]:
     engine = tmp_path / "UE_5.7"
     build_version = engine / "Engine" / "Build" / "Build.version"
@@ -352,7 +431,7 @@ def test_uninstall_classifies_windows_style_plugin_lock(monkeypatch, tmp_path: P
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    _execute_expect(install_args, 40)
     plugin_root = project.parent / "Plugins" / "DccMcpUnreal"
     real_replace = install_cli.os.replace
 
@@ -386,7 +465,7 @@ def test_failed_upgrade_receipt_commit_restores_previous_install(monkeypatch, tm
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    _execute_expect(install_args, 40)
     plugin_root = project.parent / "Plugins" / "DccMcpUnreal"
     receipt_path = project.parent / ".dcc-mcp" / "receipts" / "unreal.json"
     previous_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -473,7 +552,7 @@ def test_verify_reports_directly_usable_only_after_typed_probe(monkeypatch, tmp_
 
     exit_code, result = install_cli._execute(install_args)
 
-    assert exit_code == 0
+    assert exit_code == 0, result
     _assert_sop_v1(result)
     assert result["verify"] == {
         "directly_usable": True,
@@ -507,7 +586,7 @@ def test_readiness_failure_returns_exact_editor_launch_step(tmp_path: Path) -> N
 
     exit_code, result = install_cli._execute(install_args)
 
-    assert exit_code == 40
+    assert exit_code == 40, result
     assert result["verify"]["failure_stage"] == "readiness"
     assert result["next_steps"] == [
         {
@@ -1677,7 +1756,7 @@ def test_pending_resolution_preserves_evidence_when_bound_identity_drifts_during
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    _execute_expect(install_args, 40)
     context = install_cli._resolve_context(install_args)
     receipt_path = context["receipt_path"]
     prior = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -1746,7 +1825,7 @@ def test_upgrade_source_drift_before_backup_preserves_prior_install(monkeypatch,
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    _execute_expect(install_args, 40)
     context = install_cli._resolve_context(install_args)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
@@ -1817,7 +1896,7 @@ def test_install_failure_window_preserves_only_preexisting_state(
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     if install_state == "upgrade":
-        assert install_cli._execute(install_args)[0] == 40
+        _execute_expect(install_args, 40)
         prior = json.loads(receipt_path.read_text(encoding="utf-8"))
         prior["adapter_version"] = "0.2.9"
         receipt_path.write_text(json.dumps(prior), encoding="utf-8")
@@ -1978,7 +2057,7 @@ def test_verify_rejects_foreign_project_instance(monkeypatch, tmp_path: Path) ->
 
     exit_code, result = install_cli._execute(args)
 
-    assert exit_code == 40
+    assert exit_code == 40, result
     assert result["verify"]["directly_usable"] is False
     assert "project_file" in result["verify"]["failure_reason"]
     assert not (project.parent / "Plugins" / "DccMcpUnreal").exists()
@@ -2039,7 +2118,7 @@ def test_upgrade_keeps_prior_install_until_bound_verify_succeeds(monkeypatch, tm
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
     context = install_cli._resolve_context(install_args)
     monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
-    assert install_cli._execute(install_args)[0] == 0
+    _execute_expect(install_args, 0)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     prior_files = install_cli._file_manifest(plugin_root)
@@ -2057,7 +2136,7 @@ def test_upgrade_keeps_prior_install_until_bound_verify_succeeds(monkeypatch, tm
 
     exit_code, result = install_cli._execute(upgrade_args)
 
-    assert exit_code == 40
+    assert exit_code == 40, result
     assert "plugin_root" in result["verify"]["failure_reason"]
     assert install_cli._file_manifest(plugin_root) == prior_files
     assert project.read_bytes() == prior_project
@@ -2079,7 +2158,7 @@ def test_upgrade_without_live_selector_keeps_rollback_until_later_bound_verify(m
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    _execute_expect(install_args, 40)
     context = install_cli._resolve_context(install_args)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
@@ -2091,10 +2170,9 @@ def test_upgrade_without_live_selector_keeps_rollback_until_later_bound_verify(m
     prior_receipt_bytes = receipt_path.read_bytes()
 
     upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
-    exit_code, _ = install_cli._execute(upgrade_args)
+    _execute_expect(upgrade_args, 40)
     pending_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert exit_code == 40
     assert pending_receipt["transaction"]["state"] == "awaiting-bound-verify"
     assert Path(pending_receipt["transaction"]["backup_plugin"]).is_dir()
     status_args = install_cli._parser().parse_args(["status", *common])
@@ -2126,7 +2204,7 @@ def test_upgrade_without_live_selector_keeps_rollback_until_later_bound_verify(m
 
     exit_code, result = install_cli._execute(verify_args)
 
-    assert exit_code == 40
+    assert exit_code == 40, result
     assert "project_file" in result["verify"]["failure_reason"]
     assert install_cli._file_manifest(plugin_root) == prior_files
     assert project.read_bytes() == prior_project
@@ -2152,7 +2230,7 @@ def test_uninstall_delete_failure_restores_every_owned_byte(monkeypatch, tmp_pat
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
     context = install_cli._resolve_context(install_args)
     monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
-    assert install_cli._execute(install_args)[0] == 0
+    _execute_expect(install_args, 0)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     prior_files = install_cli._file_manifest(plugin_root)
