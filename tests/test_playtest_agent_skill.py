@@ -265,6 +265,18 @@ def _load_runtime(monkeypatch, *, reports_pie=True):
             return True
 
         @staticmethod
+        def navigate_owned_pie_to_location(bound_world, bound_controller, pawn, target_location):
+            assert bound_world is world and bound_controller is controller and pawn is controller.get_pawn()
+            navigation_calls.append((bound_controller, target_location))
+            return True
+
+        @staticmethod
+        def navigate_owned_pie_to_actor(bound_world, bound_controller, pawn, target):
+            assert bound_world is world and bound_controller is controller and pawn is controller.get_pawn()
+            navigation_calls.append((bound_controller, target))
+            return True
+
+        @staticmethod
         def start_pie_input_steering(actor_name):
             target = next(item for item in actors if item.get_name() == actor_name)
             navigation_calls.append(("input_steering", controller, target))
@@ -273,6 +285,12 @@ def _load_runtime(monkeypatch, *, reports_pie=True):
         @staticmethod
         def start_pie_input_steering_to_location(target_location):
             navigation_calls.append(("input_steering", controller, target_location))
+            return True
+
+        @staticmethod
+        def start_owned_pie_input_steering_to_location(bound_world, bound_controller, pawn, target_location):
+            assert bound_world is world and bound_controller is controller and pawn is controller.get_pawn()
+            navigation_calls.append(("input_steering", bound_controller, target_location))
             return True
 
         @staticmethod
@@ -340,8 +358,8 @@ def test_tools_manifest_declares_episode_observe_act_poll_contract():
         "playtest_poll_action",
     ]
     by_name = {tool["name"]: tool for tool in tools}
-    assert by_name["playtest_observe"]["read_only"] is True
-    assert by_name["playtest_observe"]["annotations"]["read_only_hint"] is True
+    assert by_name["playtest_observe"]["read_only"] is False
+    assert by_name["playtest_observe"]["annotations"]["read_only_hint"] is False
     assert by_name["playtest_poll_action"]["read_only"] is False
     assert by_name["playtest_poll_action"]["annotations"]["read_only_hint"] is False
     assert "ensure_player_control" in by_name["playtest_execute_action"]["input_schema"]["properties"]["action"]["enum"]
@@ -783,12 +801,24 @@ def test_ensure_player_control_restarts_only_a_spectator(monkeypatch):
     monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
     episode = runtime.start_episode(include_pawns=True, max_entities=8)
 
+    def restart(actual_controller):
+        controller.game_mode.restart_calls.append(actual_controller)
+        actual_controller.possessed_pawn = _Actor("RecoveredPawn", "TestPlayerPawn_C", _Vector())
+        actual_controller.possessed_pawn._class = controller.game_mode.attributes["default_pawn_class"]
+
+    controller.game_mode.restart_player = restart
+    monkeypatch.setattr(
+        sys.modules["unreal"].GameplayStatics, "get_player_pawn", lambda _world, _index: controller.get_pawn()
+    )
+
     accepted = runtime.execute_action(episode["episode_id"], "ensure_player_control")
     assert controller.game_mode.restart_calls == [controller]
     clock[0] = 150.2
     transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
 
     assert transition["status"] == "completed"
+    assert transition["reason"] == "authorized_player_recovery"
+    assert controller.get_pawn() is not player
 
 
 def test_ensure_player_control_rejects_an_existing_player_pawn(monkeypatch):
@@ -1281,7 +1311,9 @@ def test_poll_tool_route_preserves_retryable_pie_loss(monkeypatch):
     def unavailable(_episode_id, _action_id):
         raise PieSessionUnavailableError("PIE world was lost")
 
-    monkeypatch.setitem(sys.modules, "_playtest_runtime", types.SimpleNamespace(poll_action=unavailable))
+    runtime, *_ = _load_runtime(monkeypatch)
+    monkeypatch.setattr(runtime, "poll_action", unavailable)
+    monkeypatch.setitem(sys.modules, "_playtest_runtime", runtime)
     script_path = _SKILL_DIR / "scripts" / "playtest_poll_action.py"
     spec = importlib.util.spec_from_file_location("_test_playtest_poll_action", script_path)
     module = importlib.util.module_from_spec(spec)
