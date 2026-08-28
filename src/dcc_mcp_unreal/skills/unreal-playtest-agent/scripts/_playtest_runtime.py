@@ -8,7 +8,7 @@ import math
 import time
 import uuid
 from collections import Counter
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import dcc_mcp_unreal as _adapter_package
 from dcc_mcp_unreal.pie_session import require_pie_context
@@ -661,6 +661,9 @@ def episode_summary(episode: dict[str, Any], include_trace: bool = False) -> dic
 def finish_episode(episode_id: str) -> dict[str, Any]:
     episode = get_episode(episode_id)
     after = None
+    for action in episode["actions"].values():
+        if action["status"] == "pending":
+            _release_action_input(action)
     try:
         unreal, _world, _controller, _player = _pie_context()
         after = observe_episode(episode)
@@ -741,7 +744,13 @@ def _resolve_target(world: Any, player: Any, selector: dict[str, Any]):
     return matches[0][2]
 
 
-def _tap_key(unreal: Any, key: str, duration: float, *, binding: Optional[dict[str, Any]] = None) -> None:
+def _tap_key(
+    unreal: Any,
+    key: str,
+    duration: float,
+    *,
+    binding: Optional[dict[str, Any]] = None,
+) -> Optional[Callable[[], list[str]]]:
     bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
     inject = getattr(bridge, "inject_pie_key", None) if bridge is not None else None
     if binding is not None:
@@ -750,33 +759,66 @@ def _tap_key(unreal: Any, key: str, duration: float, *, binding: Optional[dict[s
         raise RuntimeError("The native PIE input bridge could not press {}".format(key))
     hold_seconds = max(0.0, min(float(duration), 5.0))
     if hold_seconds <= 0:
-        if binding is not None:
-            _require_bound_context(binding, _pie_context())
         if not inject(key, False):
             raise RuntimeError("The native PIE input bridge could not release {}".format(key))
-        return
+        return None
 
     register = getattr(unreal, "register_slate_post_tick_callback", None)
     unregister = getattr(unreal, "unregister_slate_post_tick_callback", None)
+    state: dict[str, Any] = {
+        "release_attempted": False,
+        "unregistered": False,
+        "handle": None,
+        "errors": [],
+    }
+
+    def unregister_callback() -> None:
+        if state["unregistered"] or state["handle"] is None or not callable(unregister):
+            return
+        state["unregistered"] = True
+        try:
+            unregister(state["handle"])
+        except Exception as exc:
+            state["errors"].append(str(exc))
+
+    def release_key() -> list[str]:
+        if not state["release_attempted"]:
+            state["release_attempted"] = True
+            try:
+                if not inject(key, False):
+                    state["errors"].append("The native PIE input bridge could not release {}".format(key))
+            except Exception as exc:
+                state["errors"].append(str(exc))
+        unregister_callback()
+        return list(state["errors"])
+
     if not callable(register) or not callable(unregister):
-        inject(key, False)
+        release_key()
         raise RuntimeError("Slate tick callbacks are unavailable for bounded PIE input")
     release_at = time.monotonic() + hold_seconds
-    holder: dict[str, Any] = {}
 
     def release_on_tick(_delta_seconds: float = 0.0) -> None:
         if time.monotonic() < release_at:
             return
-        try:
-            if binding is not None:
-                _require_bound_context(binding, _pie_context())
-            inject(key, False)
-        except Exception:
-            pass
-        finally:
-            unregister(holder["handle"])
+        release_key()
 
-    holder["handle"] = register(release_on_tick)
+    try:
+        state["handle"] = register(release_on_tick)
+    except Exception:
+        release_key()
+        raise
+    if state["release_attempted"]:
+        unregister_callback()
+    return release_key
+
+
+def _release_action_input(action: dict[str, Any]) -> list[str]:
+    release = action.get("_release_input")
+    if callable(release):
+        errors = release()
+        if errors:
+            action["_input_cleanup_errors"] = list(errors)
+    return list(action.get("_input_cleanup_errors", []))
 
 
 def _set_key(unreal: Any, key: str, pressed: bool, *, binding: Optional[dict[str, Any]] = None) -> None:
@@ -1001,6 +1043,7 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         if delivery_target is not target:
             raise RuntimeError("The exact PIE target changed before input delivery")
 
+    release_input = None
     if action_name == "ensure_player_control":
         runtime_state = before["runtime"]
         if not runtime_state["spectating"]:
@@ -1035,7 +1078,7 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         if kwargs.get("require_line_of_sight", True) and visibility is False:
             raise RuntimeError("The target is occluded from the PIE player")
         _face_target(unreal, controller, player, target)
-        _tap_key(unreal, _ACTION_KEYS["attack_primary"], duration, binding=binding)
+        release_input = _tap_key(unreal, _ACTION_KEYS["attack_primary"], duration, binding=binding)
     elif action_name == "attack_secondary_entity":
         visibility = _line_of_fire(unreal, controller, player, target)
         if visibility is None:
@@ -1043,11 +1086,11 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         if kwargs.get("require_line_of_sight", True) and visibility is False:
             raise RuntimeError("The target is occluded from the PIE player")
         _face_target(unreal, controller, player, target)
-        _tap_key(unreal, _ACTION_KEYS["attack_secondary"], duration, binding=binding)
+        release_input = _tap_key(unreal, _ACTION_KEYS["attack_secondary"], duration, binding=binding)
     elif action_name in {"melee_entity", "explosive_entity", "skill_entity"}:
         _face_target(unreal, controller, player, target)
         semantic_action = action_name.removesuffix("_entity")
-        _tap_key(unreal, _ACTION_KEYS[semantic_action], duration, binding=binding)
+        release_input = _tap_key(unreal, _ACTION_KEYS[semantic_action], duration, binding=binding)
     elif action_name == "stop_navigation":
         cleanup_errors = _stop_navigation(unreal, binding=binding)
         if cleanup_errors:
@@ -1057,9 +1100,9 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         key = _MOVE_KEYS.get(direction)
         if key is None:
             raise ValueError("move_relative direction must be one of: {}".format(", ".join(_MOVE_KEYS)))
-        _tap_key(unreal, key, duration, binding=binding)
+        release_input = _tap_key(unreal, key, duration, binding=binding)
     elif action_name in _ACTION_KEYS:
-        _tap_key(unreal, _ACTION_KEYS[action_name], duration, binding=binding)
+        release_input = _tap_key(unreal, _ACTION_KEYS[action_name], duration, binding=binding)
     elif action_name == "wait":
         pass
     else:
@@ -1127,6 +1170,7 @@ def execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, Any
         "min_displacement": min_displacement,
         "before": before,
         "session_identity": binding["session_identity"],
+        "_release_input": release_input,
         "transition": None,
     }
     episode["actions"][action_id] = record
@@ -1184,18 +1228,21 @@ def _finalize(
     observation_trusted: bool = True,
     **extra,
 ):
+    cleanup_errors = _release_action_input(action)
     if action["action"] in _NAVIGATION_ACTIONS:
         extra.setdefault("navigation_driver", action["navigation_driver"])
         extra.setdefault("steering_fallback_used", action["steering_fallback_started_at"] is not None)
         extra.setdefault("steering_backend", action["steering_backend"])
         if cleanup_navigation:
-            cleanup_errors = _stop_navigation(
-                _unreal(),
-                release_forward=action["steering_backend"] in (None, "legacy_key"),
-                binding=episode["runtime_binding"],
+            cleanup_errors.extend(
+                _stop_navigation(
+                    _unreal(),
+                    release_forward=action["steering_backend"] in (None, "legacy_key"),
+                    binding=episode["runtime_binding"],
+                )
             )
-            if cleanup_errors:
-                extra["cleanup_errors"] = cleanup_errors
+    if cleanup_errors:
+        extra["cleanup_errors"] = cleanup_errors
     if "blocked_reason" in extra:
         extra.setdefault("reason", extra["blocked_reason"])
     action["status"] = status
@@ -1253,7 +1300,11 @@ def poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
     if action["transition"] is not None:
         return action["transition"]
 
-    context = _pie_context()
+    try:
+        context = _pie_context()
+    except Exception:
+        _release_action_input(action)
+        raise
     unreal, world, controller, player = context
     context_reason = _context_change_reason(episode["runtime_binding"], context)
     after = observe(episode["selectors"])

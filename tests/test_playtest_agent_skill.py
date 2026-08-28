@@ -1025,6 +1025,102 @@ def test_movement_transition_blocks_when_possession_identity_drifts(monkeypatch)
     assert transition["after"]["runtime"]["possessed"]["name"] == "Enemy_0"
 
 
+def test_possession_drift_during_bounded_key_hold_still_releases_key(monkeypatch):
+    runtime, _player, _enemy, _door, controller, keys, _navigation = _load_runtime(monkeypatch)
+    callbacks = []
+    unreal = runtime._unreal()
+    monkeypatch.setattr(unreal, "register_slate_post_tick_callback", lambda callback: callbacks.append(callback) or 1)
+    monkeypatch.setattr(unreal, "unregister_slate_post_tick_callback", lambda _handle: None)
+    monotonic = [100.0]
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: monotonic[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0.25,
+        expect_movement=True,
+    )
+    assert keys == [("W", True)]
+
+    controller.possessed_pawn = _Actor("Replacement_0", "PlayerPawn", _Vector())
+    monotonic[0] = 100.3
+    callbacks[0]()
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "possession_changed"
+    assert keys == [("W", True), ("W", False)]
+
+    callbacks[0]()
+    assert keys == [("W", True), ("W", False)]
+
+
+def test_key_release_failure_does_not_hide_possession_drift_transition(monkeypatch):
+    runtime, _player, _enemy, _door, controller, keys, _navigation = _load_runtime(monkeypatch)
+    callbacks = []
+    unreal = runtime._unreal()
+    monkeypatch.setattr(unreal, "register_slate_post_tick_callback", lambda callback: callbacks.append(callback) or 1)
+    monkeypatch.setattr(unreal, "unregister_slate_post_tick_callback", lambda _handle: None)
+    original_inject = unreal.DccMcpAutomationLibrary.inject_pie_key
+
+    def fail_release(key, pressed):
+        if not pressed:
+            raise RuntimeError("key release failed")
+        return original_inject(key, pressed)
+
+    monkeypatch.setattr(unreal.DccMcpAutomationLibrary, "inject_pie_key", fail_release)
+    monotonic = [300.0]
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: monotonic[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0.25,
+        expect_movement=True,
+    )
+
+    controller.possessed_pawn = _Actor("Replacement_0", "PlayerPawn", _Vector())
+    monotonic[0] = 300.3
+    callbacks[0]()
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "possession_changed"
+    assert transition["cleanup_errors"] == ["key release failed"]
+    assert keys == [("W", True)]
+
+
+def test_zero_duration_key_release_survives_drift_after_key_down(monkeypatch):
+    runtime, _player, _enemy, _door, controller, keys, _navigation = _load_runtime(monkeypatch)
+    unreal = runtime._unreal()
+    original_inject = unreal.DccMcpAutomationLibrary.inject_pie_key
+
+    def drift_after_key_down(key, pressed):
+        accepted = original_inject(key, pressed)
+        if pressed:
+            controller.possessed_pawn = _Actor("Replacement_0", "PlayerPawn", _Vector())
+        return accepted
+
+    monkeypatch.setattr(unreal.DccMcpAutomationLibrary, "inject_pie_key", drift_after_key_down)
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0,
+        expect_movement=True,
+    )
+
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "blocked"
+    assert transition["reason"] == "possession_changed"
+    assert keys == [("W", True), ("W", False)]
+
+
 def test_movement_transition_blocks_when_possession_is_lost(monkeypatch):
     runtime, player, _enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
     clock = [800.0]
@@ -1073,6 +1169,31 @@ def test_finishing_episode_captures_cancelled_pending_transition(monkeypatch):
     assert summary["trace"][0]["after"]["observation_hash"]
 
 
+def test_finishing_episode_releases_bounded_key_exactly_once(monkeypatch):
+    runtime, _player, _enemy, _door, _controller, keys, _navigation = _load_runtime(monkeypatch)
+    callbacks = []
+    unreal = runtime._unreal()
+    monkeypatch.setattr(unreal, "register_slate_post_tick_callback", lambda callback: callbacks.append(callback) or 1)
+    monkeypatch.setattr(unreal, "unregister_slate_post_tick_callback", lambda _handle: None)
+    monotonic = [200.0]
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: monotonic[0])
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "jump",
+        duration=0.25,
+    )
+
+    summary = runtime.finish_episode(episode["episode_id"])
+
+    assert summary["trace"][0]["action_id"] == accepted["action_id"]
+    assert summary["trace"][0]["status"] == "cancelled"
+    assert [event for event in keys if event[0] == "SpaceBar"] == [("SpaceBar", True), ("SpaceBar", False)]
+    monotonic[0] = 200.3
+    callbacks[0]()
+    assert [event for event in keys if event[0] == "SpaceBar"] == [("SpaceBar", True), ("SpaceBar", False)]
+
+
 def test_pie_loss_does_not_reclassify_pending_movement_as_completed(monkeypatch):
     from dcc_mcp_unreal.pie_session import PieSessionUnavailableError
 
@@ -1100,6 +1221,39 @@ def test_pie_loss_does_not_reclassify_pending_movement_as_completed(monkeypatch)
     action = runtime.get_episode(episode["episode_id"])["actions"][accepted["action_id"]]
     assert action["status"] == "pending"
     assert action["transition"] is None
+
+
+def test_pie_loss_releases_bounded_key_once_without_hiding_primary_error(monkeypatch):
+    from dcc_mcp_unreal.pie_session import PieSessionUnavailableError
+
+    runtime, _player, _enemy, _door, _controller, keys, _navigation = _load_runtime(monkeypatch)
+    callbacks = []
+    unreal = runtime._unreal()
+    monkeypatch.setattr(unreal, "register_slate_post_tick_callback", lambda callback: callbacks.append(callback) or 1)
+    monkeypatch.setattr(unreal, "unregister_slate_post_tick_callback", lambda _handle: None)
+    episode = runtime.start_episode(include_pawns=True, max_entities=8)
+    accepted = runtime.execute_action(
+        episode["episode_id"],
+        "move_relative",
+        direction="forward",
+        duration=0.25,
+        expect_movement=True,
+    )
+
+    def unavailable():
+        raise PieSessionUnavailableError("PIE world was lost")
+
+    monkeypatch.setattr(runtime, "_pie_context", unavailable)
+    try:
+        runtime.poll_action(episode["episode_id"], accepted["action_id"])
+    except PieSessionUnavailableError as exc:
+        assert str(exc) == "PIE world was lost"
+    else:
+        raise AssertionError("expected PIE loss to remain the primary typed non-success")
+
+    assert keys == [("W", True), ("W", False)]
+    callbacks[0]()
+    assert keys == [("W", True), ("W", False)]
 
 
 def test_poll_tool_route_preserves_retryable_pie_loss(monkeypatch):
