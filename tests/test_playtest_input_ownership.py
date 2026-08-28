@@ -107,6 +107,9 @@ class Harness:
                     world is self.world and controller is self.controller and controller.pawn is pawn
                 ),
                 navigate_pie_to_location=lambda location: True,
+                navigate_owned_pie_to_location=lambda world, controller, pawn, location: (
+                    world is self.world and controller is self.controller and pawn is controller.pawn
+                ),
             ),
             register_slate_post_tick_callback=self.register,
             unregister_slate_post_tick_callback=self.unregister,

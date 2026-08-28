@@ -5,6 +5,7 @@
 #include "DccMcpAutomationLibrary.generated.h"
 
 class APlayerController;
+class AActor;
 class APawn;
 class UWorld;
 
@@ -59,6 +60,15 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
     static bool StopOwnedPieNavigation(UWorld* World, APlayerController* Controller, APawn* Pawn);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool NavigateOwnedPieToLocation(UWorld* World, APlayerController* Controller, APawn* Pawn, const FVector& TargetLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool NavigateOwnedPieToActor(UWorld* World, APlayerController* Controller, APawn* Pawn, AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|PIE")
+    static bool StartOwnedPieInputSteeringToLocation(UWorld* World, APlayerController* Controller, APawn* Pawn, const FVector& TargetLocation);
 
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static FString GetFabSessionStatusJson();

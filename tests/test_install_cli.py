@@ -6,10 +6,13 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 try:
@@ -78,9 +81,179 @@ def _run_cli(
     )
 
 
+def _sop_diagnostic_text(value: object, args: object, limit: int) -> str:
+    # OSError renders filenames with repr-escaped backslashes on Windows.
+    text = str(value or "").replace("\\\\", "\\").replace("\\", "/")
+    roots = [(str(REPO_ROOT).replace("\\", "/"), "<source>")]
+    for attribute, label in (("project", "<project>"), ("dcc_path", "<engine>"), ("python", "<python>")):
+        root = str(getattr(args, attribute, "") or "").replace("\\", "/")
+        if attribute in {"project", "python"}:
+            root = root.rsplit("/", 1)[0] if "/" in root else ""
+        if root:
+            roots.append((root, label))
+    for root, label in sorted(roots, key=lambda item: len(item[0]), reverse=True):
+        text = re.sub(re.escape(root) + r"(?=/|$|['\"])", label, text, flags=re.IGNORECASE)
+    text = re.sub(r"https?://\S+", "<url>", text, flags=re.IGNORECASE)
+    text = re.sub(r"(['\"])(?:[A-Za-z]:/|/)[^'\"\r\n]*\1", "'<path>'", text)
+    text = re.sub(r"(?<![\w>])(?:[A-Za-z]:/|/)[^\r\n,;]+", "<path>", text)
+    text = re.sub(
+        r"\b((?:[\w-]*[_-])?(?:password|passwd|secret|token|api[_-]?key|authorization))\s*[:=]\s*('[^']*'|\"[^\"]*\"|(?:(?:Bearer|Basic)\s+)?[^\s,;]+)",
+        r"\1=<redacted>",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if len(text) > limit:
+        text = text[: limit // 2] + "...<truncated>..." + text[-limit // 2 :]
+    return text
+
+
+def _publish_path_state(path: Path, label: str) -> dict:
+    state = {"path": label}
+    try:
+        info = path.lstat()
+        state.update(
+            exists=True,
+            device=info.st_dev,
+            inode=info.st_ino,
+            mode=info.st_mode,
+            attributes=getattr(info, "st_file_attributes", None),
+            reparse_tag=getattr(info, "st_reparse_tag", None),
+            links=info.st_nlink,
+        )
+    except FileNotFoundError:
+        state["exists"] = False
+    except BaseException:
+        state["probe"] = "unknown"
+    return state
+
+
+def _publish_acl(path: Path, project: Path) -> dict:
+    if sys.platform != "win32":
+        return {"status": "unknown", "reason": "scoped_acl_probe_unavailable"}
+    try:
+        for candidate in (path, path.parent, project):
+            if candidate.lstat().st_file_attributes & 0x400:
+                return {"status": "unknown", "reason": "reparse_path"}
+        result = subprocess.run(["icacls", str(path)], capture_output=True, text=True, timeout=2, check=False)
+        if result.returncode:
+            return {"status": "unknown", "reason": "acl_query_failed"}
+        # Retain permission flags only, never account names or filesystem paths.
+        allowed = {
+            "I",
+            "OI",
+            "CI",
+            "IO",
+            "NP",
+            "F",
+            "M",
+            "RX",
+            "R",
+            "W",
+            "D",
+            "N",
+            "DE",
+            "RC",
+            "WDAC",
+            "WO",
+            "S",
+            "AS",
+            "MA",
+            "GR",
+            "GW",
+            "GE",
+            "GA",
+            "RD",
+            "WD",
+            "AD",
+            "REA",
+            "WEA",
+            "X",
+            "DC",
+            "RA",
+            "WA",
+        }
+        flags = re.findall(r"\([A-Z,]+\)", result.stdout[:4096])
+        return {
+            "status": "observed",
+            "permission_flags": [flag for flag in flags if set(flag[1:-1].split(",")) <= allowed][:32],
+            "truncated": len(result.stdout) > 4096,
+        }
+    except BaseException:
+        return {"status": "unknown", "reason": "acl_query_unavailable"}
+
+
+@contextmanager
+def _observe_publish_failures(args: object):
+    failures = []
+    project_value = getattr(args, "project", None)
+    if not project_value or not Path(project_value).is_absolute():
+        yield failures
+        return
+    project = Path(project_value).parent
+    parent = project / "Plugins"
+    original = install_cli.os.replace
+
+    def observed(source, destination, *positional, **keywords):
+        try:
+            src, dst = Path(source), Path(destination)
+            scoped = (
+                src.parent == parent
+                and re.fullmatch(r"\.DccMcpUnreal\.staging-[0-9a-f]{32}", src.name)
+                and dst == parent / "DccMcpUnreal"
+            )
+        except BaseException:
+            scoped = False
+        if not scoped:
+            return original(source, destination, *positional, **keywords)
+        paths = ((src, "staging"), (dst, "plugin"), (parent, "parent"))
+        try:
+            before = [_publish_path_state(path, label) for path, label in paths]
+        except BaseException:
+            before = {"status": "unknown", "reason": "metadata_probe_failed"}
+        try:
+            return original(source, destination, *positional, **keywords)
+        except BaseException as primary:
+            try:
+                record = {
+                    "operation": "staging_to_plugin",
+                    "errno": getattr(primary, "errno", None),
+                    "winerror": getattr(primary, "winerror", None),
+                    "before": before,
+                    "after": [_publish_path_state(path, label) for path, label in paths],
+                    "acl": [_publish_acl(path, project) for path, _label in paths],
+                    "holder": {"status": "unknown", "reason": "no_safe_scoped_holder_query"},
+                }
+                if len(json.dumps(record, ensure_ascii=True)) > 4096:
+                    record = {"status": "unknown", "reason": "diagnostic_size_limit"}
+                if not failures:
+                    failures.append(record)
+            except BaseException:
+                if not failures:
+                    failures.append({"status": "unknown", "reason": "diagnostic_probe_failed"})
+            raise
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(install_cli.os, "replace", observed)
+        yield failures
+
+
 def _execute_expect(args: object, expected_exit: int) -> dict:
-    exit_code, result = install_cli._execute(args)
-    assert exit_code == expected_exit, result
+    with _observe_publish_failures(args) as publish_failures:
+        exit_code, result = install_cli._execute(args)
+    if exit_code != expected_exit:
+        verify = result.get("verify") or {}
+        diagnostic = {"expected_exit": expected_exit, "actual_exit": exit_code}
+        for field, value, limit in (
+            ("operation", getattr(args, "verb", ""), 64),
+            ("status", result.get("status"), 64),
+            ("failure_stage", verify.get("failure_stage"), 64),
+            ("failure_reason", verify.get("failure_reason"), 768),
+        ):
+            diagnostic[field] = _sop_diagnostic_text(value, args, limit)
+        if publish_failures:
+            diagnostic["publish_failure"] = publish_failures[0]
+        # Explicit string exception avoids pytest's truncated safe repr of a dict.
+        raise AssertionError("INSTALL_SOP_DIAGNOSTIC " + json.dumps(diagnostic, sort_keys=True))
     return result
 
 
@@ -98,6 +271,321 @@ def test_execute_expectation_reports_the_lifecycle_result(monkeypatch) -> None:
 
     with pytest.raises(AssertionError, match="locked synthetic path"):
         _execute_expect(object(), 40)
+
+
+def test_publish_observer_preserves_once_only_failure(monkeypatch, tmp_path: Path) -> None:
+    parent = tmp_path / "Sample" / "Plugins"
+    source = parent / (".DccMcpUnreal.staging-" + "a" * 32)
+    source.mkdir(parents=True)
+    destination = parent / "DccMcpUnreal"
+    error = PermissionError(13, "PRIVATE_ERROR_SECRET", str(source))
+    calls = []
+
+    def replace(src, dst):
+        calls.append((src, dst))
+        raise error
+
+    monkeypatch.setattr(install_cli.os, "replace", replace)
+    args = SimpleNamespace(project=str(parent.parent / "Sample.uproject"))
+    with pytest.raises(PermissionError) as caught:
+        with _observe_publish_failures(args) as failures:
+            install_cli.os.replace(source, destination)
+    assert caught.value is error and calls == [(source, destination)]
+    assert len(failures) == 1 and failures[0]["errno"] == 13
+    assert failures[0]["before"][1]["exists"] is False
+    assert failures[0]["after"][0]["inode"] == source.stat().st_ino
+    assert "PRIVATE_ERROR_SECRET" not in json.dumps(failures)
+    assert str(tmp_path) not in json.dumps(failures)
+
+
+@pytest.mark.parametrize("probe", ["metadata", "acl"])
+def test_publish_observer_probe_failure_preserves_primary(monkeypatch, tmp_path: Path, probe: str) -> None:
+    parent = tmp_path / "Plugins"
+    source = parent / (".DccMcpUnreal.staging-" + "b" * 32)
+    source.mkdir(parents=True)
+    destination = parent / "DccMcpUnreal"
+    primary = PermissionError(13, "PRIVATE_SECRET")
+    calls = []
+
+    def replace(src, dst):
+        calls.append((src, dst))
+        raise primary
+
+    def broken_probe(*_args):
+        raise KeyboardInterrupt("PRIVATE_PROBE_SECRET")
+
+    monkeypatch.setattr(install_cli.os, "replace", replace)
+    monkeypatch.setitem(globals(), "_publish_path_state" if probe == "metadata" else "_publish_acl", broken_probe)
+    with pytest.raises(PermissionError) as caught:
+        with _observe_publish_failures(SimpleNamespace(project=str(tmp_path / "Sample.uproject"))) as failures:
+            install_cli.os.replace(source, destination)
+    assert caught.value is primary and calls == [(source, destination)]
+    assert install_cli.os.replace is replace
+    assert failures == [{"status": "unknown", "reason": "diagnostic_probe_failed"}]
+
+
+def test_publish_observer_success_and_foreign_calls_are_not_retried(monkeypatch, tmp_path: Path) -> None:
+    parent = tmp_path / "Plugins"
+    source = parent / (".DccMcpUnreal.staging-" + "c" * 32)
+    destination = parent / "DccMcpUnreal"
+    marker = object()
+    calls = []
+
+    def replace(*args, **kwargs):
+        calls.append((args, kwargs))
+        return marker
+
+    def forbidden_acl(*_args):
+        pytest.fail("Success must not query ACLs")
+
+    monkeypatch.setattr(install_cli.os, "replace", replace)
+    monkeypatch.setitem(globals(), "_publish_acl", forbidden_acl)
+    with _observe_publish_failures(SimpleNamespace(project=str(tmp_path / "Sample.uproject"))) as failures:
+        assert install_cli.os.replace(source, destination) is marker
+        assert install_cli.os.replace("foreign-source", "foreign-destination", src_dir_fd=17) is marker
+    assert failures == []
+    assert calls == [((source, destination), {}), (("foreign-source", "foreign-destination"), {"src_dir_fd": 17})]
+    assert install_cli.os.replace is replace
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACL output contract")
+def test_publish_acl_is_private_and_bounded(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+
+    def query(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="PRIVATE_OWNER:(PASSWORD)(I)(OI)(CI)(F)\n" * 1000)
+
+    monkeypatch.setattr(subprocess, "run", query)
+    result = _publish_acl(tmp_path, tmp_path)
+    encoded = json.dumps(result)
+    assert "PRIVATE_OWNER" not in encoded and "PASSWORD" not in encoded
+    assert len(result["permission_flags"]) <= 32 and len(encoded) < 1024
+    assert result["truncated"] is True
+    assert len(calls) == 1 and calls[0][0] == ["icacls", str(tmp_path)]
+    assert calls[0][1]["timeout"] == 2
+
+
+def test_publish_observer_mismatch_retains_primary_result(monkeypatch, tmp_path: Path) -> None:
+    parent = tmp_path / "Plugins"
+    source = parent / (".DccMcpUnreal.staging-" + "d" * 32)
+    source.mkdir(parents=True)
+    destination = parent / "DccMcpUnreal"
+    primary = PermissionError(13, "PRIVATE_SECRET", str(source))
+    result = {
+        "status": "requires_restart",
+        "verify": {"failure_stage": "install", "failure_reason": "primary sentinel"},
+    }
+    before_result = json.dumps(result)
+    calls = []
+
+    def replace(src, dst):
+        calls.append((src, dst))
+        raise primary
+
+    def execute(_args):
+        with pytest.raises(PermissionError) as caught:
+            install_cli.os.replace(source, destination)
+        assert caught.value is primary
+        return 50, result
+
+    monkeypatch.setattr(install_cli.os, "replace", replace)
+    monkeypatch.setattr(install_cli, "_execute", execute)
+    with pytest.raises(AssertionError) as caught:
+        _execute_expect(SimpleNamespace(verb="install", project=str(tmp_path / "Sample.uproject")), 40)
+    encoded = str(caught.value).removeprefix("INSTALL_SOP_DIAGNOSTIC ")
+    diagnostic = json.loads(encoded)
+    assert diagnostic["expected_exit"] == 40 and diagnostic["actual_exit"] == 50
+    assert diagnostic["failure_reason"] == "primary sentinel"
+    assert diagnostic["publish_failure"]["errno"] == 13
+    assert calls == [(source, destination)] and json.dumps(result) == before_result
+    assert "PRIVATE_SECRET" not in encoded and str(tmp_path) not in encoded and len(encoded) < 8192
+
+
+def test_publish_observer_oversized_probe_keeps_exception(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "Plugins" / (".DccMcpUnreal.staging-" + "e" * 32)
+    destination = source.parent / "DccMcpUnreal"
+    primary = PermissionError(13, "PRIMARY_PRIVATE_SECRET")
+    calls = []
+
+    def replace(src, dst):
+        calls.append((src, dst))
+        raise primary
+
+    monkeypatch.setattr(install_cli.os, "replace", replace)
+    monkeypatch.setitem(globals(), "_publish_path_state", lambda *_args: {"unexpected": "PRIVATE_PROBE_SECRET" * 10000})
+    with pytest.raises(PermissionError) as caught:
+        with _observe_publish_failures(SimpleNamespace(project=str(tmp_path / "Sample.uproject"))) as failures:
+            install_cli.os.replace(source, destination)
+    assert caught.value is primary and calls == [(source, destination)]
+    assert failures == [{"status": "unknown", "reason": "diagnostic_size_limit"}]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACL output contract")
+@pytest.mark.parametrize("mode", ["reparse", "query_error", "interrupted"])
+def test_publish_acl_absence_is_unknown(monkeypatch, tmp_path: Path, mode: str) -> None:
+    calls = []
+
+    def query(*_args, **_kwargs):
+        calls.append(True)
+        if mode == "interrupted":
+            raise KeyboardInterrupt("PRIVATE_PROBE_SECRET")
+        return SimpleNamespace(returncode=5, stdout="PRIVATE_ACCOUNT")
+
+    monkeypatch.setattr(subprocess, "run", query)
+    if mode == "reparse":
+        monkeypatch.setattr(Path, "lstat", lambda _path: SimpleNamespace(st_file_attributes=0x400))
+    result = _publish_acl(tmp_path, tmp_path)
+    assert result["status"] == "unknown" and "PRIVATE" not in json.dumps(result)
+    assert len(calls) == (0 if mode == "reparse" else 1)
+
+
+@pytest.mark.parametrize("oversized,windows_path", [(False, False), (False, True), (True, True)])
+def test_execute_expectation_survives_pytest_reporting(tmp_path: Path, oversized: bool, windows_path: bool) -> None:
+    fixture_root = tmp_path / "reporter"
+    fixture_root.mkdir()
+    config = fixture_root / "pytest.ini"
+    config.write_text(f'[pytest]\npythonpath = "{(REPO_ROOT / "tests").as_posix()}"\n', encoding="utf-8")
+    (tmp_path / "conftest.py").write_text("raise RuntimeError('UNRELATED_ANCESTOR_COLLECTED')\n", encoding="utf-8")
+    (fixture_root / "test_unrelated.py").write_text(
+        "raise RuntimeError('UNRELATED_FILE_COLLECTED')\n", encoding="utf-8"
+    )
+    private_root = "C:/Users/PRIVATE_OWNER/Workspace/Sample"
+    reason = (
+        "A loaded Unreal plugin artifact requires restart: [WinError 5] Access is denied: "
+        f"'{private_root}/Plugins/.DccMcpUnreal.staging-123/Content/Python/DIAG_PATH_SENTINEL.py'"
+    )
+    if windows_path:
+        filename = (private_root + "/Plugins/.DccMcpUnreal.staging-123/Content/Python/DIAG_PATH_SENTINEL.py").replace(
+            "/", "\\"
+        )
+        reason = "A loaded Unreal plugin artifact requires restart: " + str(
+            PermissionError(13, "Access is denied", filename)
+        )
+    if oversized:
+        reason = (
+            "os.replace password='INNER_SECRET' authorization=Bearer AUTH_SECRET; SERVICE_API_KEY=INLINE_API_SECRET; "
+            "unknown 'C:/Users/OTHER_OWNER/private/file.dll'; '/home/POSIX_OWNER/private'; "
+            "'//PRIVATE_SERVER/share/file'; https://URL_USER:URL_PASSWORD@example.test/?token=URL_TOKEN; "
+            + "bounded padding " * 1000
+            + reason
+        )
+    result = {
+        "schema_version": 1,
+        "status": "requires_restart",
+        "dcc_type": "unreal",
+        "adapter_version": "0.3.4",
+        "core_version": "0.20.21",
+        "steps": [{"id": "copy", "message": "unrelated payload " * 100}] * 50,
+        "credentials": {"password": "DO_NOT_PRINT_CREDENTIAL"},
+        "environment": {"PRIVATE_ENV": "DO_NOT_PRINT_ENV"},
+        "verify": {"directly_usable": False, "failure_stage": "install", "failure_reason": reason},
+    }
+    data = fixture_root / "report.json"
+    data.write_text(
+        json.dumps(
+            {
+                "args": {"verb": "install", "project": private_root + "/Sample.uproject"},
+                "result": result,
+                "helper_origin": str(Path(__file__).resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    child = fixture_root / "test_report.py"
+    child.write_text(
+        "import json\nfrom pathlib import Path\nfrom types import SimpleNamespace\n"
+        "from test_install_cli import _execute_expect, install_cli, __file__ as helper_origin\n\n"
+        "def test_mismatch(monkeypatch):\n"
+        "    data = json.loads(Path(__file__).with_name('report.json').read_text(encoding='utf-8'))\n"
+        "    assert Path(helper_origin).resolve() == Path(data['helper_origin']).resolve()\n"
+        "    monkeypatch.setattr(install_cli, '_execute', lambda args: (50, data['result']))\n"
+        "    _execute_expect(SimpleNamespace(**data['args']), 0)\n",
+        encoding="utf-8",
+    )
+    env = _cli_env()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPATH"] = str(REPO_ROOT / "tests") + os.pathsep + env["PYTHONPATH"]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(child),
+            "-c",
+            str(config),
+            "--rootdir",
+            str(fixture_root),
+            "--confcutdir",
+            str(fixture_root),
+            "-o",
+            "addopts=",
+            "-q",
+            "--tb=short",
+            "--color=no",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=fixture_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    (tmp_path / "stdout.txt").write_text(completed.stdout, encoding="utf-8")
+    (tmp_path / "stderr.txt").write_text(completed.stderr, encoding="utf-8")
+    (tmp_path / "exit.json").write_text(json.dumps({"exit_code": completed.returncode}), encoding="utf-8")
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert re.search(r"\b1 failed in ", completed.stdout)
+    assert " passed" not in completed.stdout and "UNRELATED_" not in completed.stdout + completed.stderr
+    assert "DIAG_PATH_SENTINEL.py" in completed.stdout
+    marker = "INSTALL_SOP_DIAGNOSTIC "
+    line = next(
+        line.split(marker, 1)[1] for line in completed.stdout.splitlines() if line.startswith("E ") and marker in line
+    )
+    diagnostic = json.loads(line)
+    assert diagnostic["expected_exit"] == 0 and diagnostic["actual_exit"] == 50
+    assert diagnostic["operation"] == "install"
+    assert diagnostic["status"] == "requires_restart" and diagnostic["failure_stage"] == "install"
+    assert "<project>/Plugins/" in diagnostic["failure_reason"]
+    assert ("Errno 13" if windows_path else "WinError 5") in diagnostic["failure_reason"]
+    assert len(line) <= 8192
+    if oversized:
+        assert "<truncated>" in diagnostic["failure_reason"] and "os.replace" in diagnostic["failure_reason"]
+    for hidden in (
+        "PRIVATE_OWNER",
+        "DO_NOT_PRINT_CREDENTIAL",
+        "DO_NOT_PRINT_ENV",
+        "INNER_SECRET",
+        "AUTH_SECRET",
+        "INLINE_API_SECRET",
+        "OTHER_OWNER",
+        "POSIX_OWNER",
+        "PRIVATE_SERVER",
+        "URL_PASSWORD",
+        "URL_TOKEN",
+    ):
+        assert hidden not in completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize("expected_exit", [0, 40, 50])
+def test_execute_expectation_returns_unchanged_expected_result(monkeypatch, capsys, expected_exit: int) -> None:
+    result = {
+        "status": {0: "ok", 40: "failed", 50: "requires_restart"}[expected_exit],
+        "verify": {"failure_reason": "kept verbatim"},
+    }
+    calls = []
+    args = object()
+
+    def execute(actual_args):
+        calls.append(actual_args)
+        return expected_exit, result
+
+    monkeypatch.setattr(install_cli, "_execute", execute)
+    assert _execute_expect(args, expected_exit) is result
+    assert calls == [args] and result["verify"]["failure_reason"] == "kept verbatim"
+    assert capsys.readouterr() == ("", "")
 
 
 def test_lifecycle_unit_boundary_does_not_use_external_lock_inspection(monkeypatch, tmp_path: Path) -> None:
