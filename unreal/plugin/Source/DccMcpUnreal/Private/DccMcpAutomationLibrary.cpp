@@ -22,8 +22,8 @@
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 #include "GameFramework/PlayerInput.h"
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #endif
 #include "InputCoreTypes.h"
@@ -39,6 +39,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
@@ -64,6 +65,43 @@ using FDccMcpCoreTicker = FTicker;
 using FDccMcpTickerHandle = FDelegateHandle;
 #endif
 FDccMcpTickerHandle PieInputSteeringTickerHandle;
+TWeakObjectPtr<APlayerController> PieSteeringController;
+TWeakObjectPtr<APawn> PieSteeringPawn;
+
+struct FDccMcpOwnedKey
+{
+    TWeakObjectPtr<UWorld> World;
+    TWeakObjectPtr<APlayerController> Controller;
+    TWeakObjectPtr<UPlayerInput> Receiver;
+    TWeakObjectPtr<APawn> Pawn;
+    FKey Key;
+    bool bPressAttempted = false;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    FInputDeviceId Device;
+#endif
+};
+TMap<FString, FDccMcpOwnedKey> OwnedPieKeys;
+
+bool DeliverOwnedKey(const FDccMcpOwnedKey& State, bool bPressed)
+{
+    UWorld* World = State.World.Get();
+    APlayerController* Controller = State.Controller.Get();
+    UPlayerInput* Receiver = State.Receiver.Get();
+    if (!World || !Controller || !Receiver || Controller->GetWorld() != World
+        || Receiver->GetOuter() != Controller)
+    {
+        return false;
+    }
+    // InputKey's bool indicates action consumption, not key-state acceptance.
+    // Deliver directly to the captured receiver, even if PlayerInput was replaced.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    Receiver->InputKey(FInputKeyParams(State.Key, bPressed ? IE_Pressed : IE_Released,
+        bPressed ? 1.0 : 0.0, false, State.Device));
+#else
+    Receiver->InputKey(State.Key, bPressed ? IE_Pressed : IE_Released, bPressed ? 1.0f : 0.0f, false);
+#endif
+    return true;
+}
 
 struct FDccMcpInputSteeringState
 {
@@ -320,6 +358,8 @@ bool StartPieInputSteeringInternal(
 
     TArray<FVector> Waypoints = FindNavigationWaypoints(Pawn, TargetLocation);
     StopPieInputSteeringTicker();
+    PieSteeringController = PlayerController;
+    PieSteeringPawn = Pawn;
     PlayerController->StopMovement();
     const TWeakObjectPtr<APlayerController> WeakController(PlayerController);
     const TWeakObjectPtr<APawn> WeakPawn(Pawn);
@@ -333,7 +373,8 @@ bool StartPieInputSteeringInternal(
             {
                 APlayerController* Controller = WeakController.Get();
                 APawn* ControlledPawn = WeakPawn.Get();
-                if (!Controller || !ControlledPawn)
+                if (!Controller || !ControlledPawn || Controller->GetPawn() != ControlledPawn
+                    || Controller->GetWorld() != ControlledPawn->GetWorld())
                 {
                     return false;
                 }
@@ -519,6 +560,78 @@ FString UDccMcpAutomationLibrary::ListAutomationTestsJson(const FString& Filter)
     return SerializeJson(Root);
 }
 
+FString UDccMcpAutomationLibrary::AcquirePieKey(UWorld* World, APlayerController* Controller, const FString& KeyName)
+{
+    const FKey Key{FName(*KeyName)};
+    const TArray<FString> AllowedKeys = {TEXT("W"), TEXT("A"), TEXT("S"), TEXT("D"), TEXT("F"),
+        TEXT("LeftMouseButton"), TEXT("RightMouseButton"), TEXT("V"), TEXT("Q"), TEXT("E"),
+        TEXT("R"), TEXT("SpaceBar")};
+    if (!IsInGameThread() || !IsValid(World) || !IsPlayableWorld(World) || !IsValid(Controller)
+        || Controller->GetWorld() != World || !Controller->IsLocalController()
+        || !IsValid(Controller->PlayerInput) || !Key.IsValid() || !AllowedKeys.Contains(KeyName))
+    {
+        return FString();
+    }
+    for (auto It = OwnedPieKeys.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().World.IsValid() || !It.Value().Controller.IsValid() || !It.Value().Receiver.IsValid())
+        {
+            It.RemoveCurrent();
+        }
+        else if (It.Value().Receiver.Get() == Controller->PlayerInput && It.Value().Key == Key)
+        {
+            return FString(); // Do not let overlapping actions release each other's input.
+        }
+    }
+    if (OwnedPieKeys.Num() >= 128)
+    {
+        return FString();
+    }
+    FDccMcpOwnedKey State;
+    State.World = World;
+    State.Controller = Controller;
+    State.Receiver = Controller->PlayerInput;
+    State.Pawn = Controller->GetPawn();
+    State.Key = Key;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+    State.Device = IPlatformInputDeviceMapper::Get().GetPrimaryInputDeviceForUser(Controller->GetPlatformUserId());
+#endif
+    const FString Owner = FGuid::NewGuid().ToString();
+    OwnedPieKeys.Add(Owner, State);
+    return Owner;
+}
+
+bool UDccMcpAutomationLibrary::PressOwnedPieKey(const FString& Owner)
+{
+    if (!IsInGameThread())
+    {
+        return false;
+    }
+    FDccMcpOwnedKey* State = OwnedPieKeys.Find(Owner);
+    if (!State || State->bPressAttempted || !State->Controller.IsValid()
+        || !State->Pawn.IsValid() || State->Controller->GetPawn() != State->Pawn.Get()
+        || State->Controller->PlayerInput != State->Receiver.Get())
+    {
+        return false;
+    }
+    State->bPressAttempted = true;
+    return DeliverOwnedKey(*State, true);
+}
+
+bool UDccMcpAutomationLibrary::ReleaseOwnedPieKey(const FString& Owner)
+{
+    if (!IsInGameThread())
+    {
+        return false;
+    }
+    FDccMcpOwnedKey State;
+    if (!OwnedPieKeys.RemoveAndCopyValue(Owner, State))
+    {
+        return false;
+    }
+    return !State.bPressAttempted || DeliverOwnedKey(State, false);
+}
+
 bool UDccMcpAutomationLibrary::InjectPieKey(const FString& KeyName, bool bPressed)
 {
     APlayerController* PlayerController = GetPiePlayerController();
@@ -697,6 +810,25 @@ bool UDccMcpAutomationLibrary::StartPieInputSteeringToLocation(const FVector& Ta
         return false;
     }
     return StartPieInputSteeringInternal(PlayerController, Pawn, TargetLocation, nullptr);
+}
+
+bool UDccMcpAutomationLibrary::StopOwnedPieNavigation(UWorld* World, APlayerController* Controller, APawn* Pawn)
+{
+    if (!IsInGameThread())
+    {
+        return false;
+    }
+    if (PieSteeringController.Get() == Controller && PieSteeringPawn.Get() == Pawn)
+    {
+        StopPieInputSteeringTicker();
+    }
+    if (!IsValid(World) || !IsValid(Controller) || !IsValid(Pawn)
+        || Controller->GetWorld() != World || Pawn->GetWorld() != World || Controller->GetPawn() != Pawn)
+    {
+        return false; // Never stop a replacement pawn, even on the original controller.
+    }
+    Controller->StopMovement();
+    return true;
 }
 
 bool UDccMcpAutomationLibrary::StopPieNavigation()

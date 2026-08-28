@@ -230,6 +230,25 @@ def _load_runtime(monkeypatch, *, reports_pie=True):
 
     class DccMcpAutomationLibrary:
         @staticmethod
+        def acquire_pie_key(world, bound_controller, key):
+            return (world, bound_controller, key)
+
+        @staticmethod
+        def press_owned_pie_key(owner):
+            return DccMcpAutomationLibrary.inject_pie_key(owner[2], True)
+
+        @staticmethod
+        def release_owned_pie_key(owner):
+            return DccMcpAutomationLibrary.inject_pie_key(owner[2], False)
+
+        @staticmethod
+        def stop_owned_pie_navigation(world, bound_controller, pawn):
+            if bound_controller.get_pawn() is not pawn:
+                return False
+            bound_controller.stop_movement()
+            return True
+
+        @staticmethod
         def inject_pie_key(key, pressed):
             key_events.append((key, pressed))
             return True
