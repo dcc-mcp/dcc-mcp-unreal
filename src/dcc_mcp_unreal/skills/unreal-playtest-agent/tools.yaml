@@ -428,6 +428,15 @@ tools:
             steering_fallback_used: {type: boolean}
             steering_backend: {type: [string, "null"]}
             cleanup_errors: {type: array, items: {type: string}}
+            input_cleanup:
+              type: object
+              required: [release_attempted, release_completed, retirement_attempted, retirement_completed]
+              properties:
+                release_attempted: {type: boolean}
+                release_completed: {type: boolean}
+                retirement_attempted: {type: boolean}
+                retirement_completed: {type: boolean}
+              additionalProperties: false
             damage_events: {type: array, items: {type: object}}
             combat_feedback: {type: object}
           additionalProperties: false
