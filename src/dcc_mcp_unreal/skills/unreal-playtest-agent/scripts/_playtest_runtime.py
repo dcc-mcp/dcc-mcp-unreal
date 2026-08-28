@@ -629,14 +629,23 @@ def get_episode(episode_id: str) -> dict[str, Any]:
 
 
 def observe_episode(episode: dict[str, Any]) -> dict[str, Any]:
-    binding = episode["runtime_binding"]
-    _require_bound_context(binding, _pie_context())
-    observation = observe(episode["selectors"])
-    _require_bound_context(binding, _pie_context())
-    reason = _observation_change_reason(binding, observation)
-    if reason is not None:
-        raise RuntimeError("The PIE observation did not match the bound episode: {}".format(reason))
-    return observation
+    try:
+        binding = episode["runtime_binding"]
+        _require_bound_context(binding, _pie_context())
+        observation = observe(episode["selectors"])
+        _require_bound_context(binding, _pie_context())
+        reason = _observation_change_reason(binding, observation)
+        if reason is not None:
+            raise RuntimeError("The PIE observation did not match the bound episode: {}".format(reason))
+        return observation
+    except BaseException as exc:
+        cleanup = [
+            _cleanup_interrupted_action(episode, action)
+            for action in episode["actions"].values()
+            if action["status"] == "pending"
+        ]
+        _attach_cleanup(exc, cleanup)
+        raise
 
 
 def episode_summary(episode: dict[str, Any], include_trace: bool = False) -> dict[str, Any]:
@@ -849,6 +858,51 @@ def _release_action_input(action: dict[str, Any]) -> list[str]:
     return []
 
 
+def _cleanup_interrupted_action(episode: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    errors = _release_action_input(action)
+    if action["action"] in _NAVIGATION_ACTIONS:
+        action["_navigation_cleanup_errors"] = _stop_navigation(binding=episode["runtime_binding"])
+        errors.extend(action["_navigation_cleanup_errors"])
+    cleanup = {"action_id": action["action_id"], "cleanup_errors": errors}
+    if action["action"] in _NAVIGATION_ACTIONS:
+        cleanup["navigation_cleanup"] = {
+            "stop_attempted": True,
+            "stop_completed": not action["_navigation_cleanup_errors"],
+        }
+    if action.get("_release_input") is not None:
+        cleanup["input_cleanup"] = dict(action["_release_input"].state)
+    action["interruption_cleanup"] = cleanup
+    return cleanup
+
+
+def _attach_cleanup(exc: BaseException, cleanup: list[dict[str, Any]]) -> None:
+    try:
+        exc.playtest_cleanup = cleanup
+    except BaseException:
+        pass  # A diagnostic attachment must never replace the primary failure.
+
+
+def playtest_failure(exc: BaseException, message: str) -> dict[str, Any]:
+    """Keep Core's primary failure envelope and attach episode cleanup evidence."""
+    from dcc_mcp_unreal.api import unreal_error, unreal_from_exception
+    from dcc_mcp_unreal.pie_session import PieSessionUnavailableError, pie_session_error
+
+    if isinstance(exc, PieSessionUnavailableError):
+        result = pie_session_error(exc)
+    elif isinstance(exc, Exception):
+        result = unreal_from_exception(exc, message)
+    else:
+        result = unreal_error(
+            "Skill execution was interrupted",
+            "interrupted",
+            prompt="The skill was forcibly stopped; retry if needed.",
+            _meta={"dcc.error": {"type": type(exc).__name__, "message": str(exc)}},
+        )
+    if hasattr(exc, "playtest_cleanup"):
+        result["context"]["cleanup"] = exc.playtest_cleanup
+    return result
+
+
 def _stop_navigation(
     unreal: Any = None,
     *,
@@ -945,8 +999,10 @@ def _start_input_steering_to_location(
     binding: Optional[dict[str, Any]] = None,
 ) -> str:
     bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
-    start = getattr(bridge, "start_pie_input_steering_to_location", None) if bridge is not None else None
-    if callable(start) and start(target_location):
+    start = getattr(bridge, "start_owned_pie_input_steering_to_location", None)
+    if callable(start):
+        if not start(binding["_world_ref"], binding["_controller_ref"], binding["_player_ref"], target_location):
+            raise RuntimeError("The owned PIE steering receiver rejected delivery")
         return "native_pawn_movement"
     _face_location(unreal, controller, player, target_location, include_pitch=False)
     action["_release_input"] = _tap_key(
@@ -975,7 +1031,7 @@ def _relative_movement_evidence(action: dict[str, Any], after: dict[str, Any], e
     expected = action["expected_direction"]
     horizontal = math.sqrt(float(delta["x"]) ** 2 + float(delta["y"]) ** 2)
     projection = float(delta["x"]) * float(expected["x"]) + float(delta["y"]) * float(expected["y"])
-    alignment = projection / horizontal if horizontal > 0.0 else 0.0
+    alignment = max(-1.0, min(1.0, projection / horizontal)) if horizontal > 0.0 else 0.0
     evidence = {
         "causal_displacement": max(0.0, projection),
         "direction_alignment": float(alignment),
@@ -1079,7 +1135,10 @@ def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, An
             raise RuntimeError("The exact PIE target changed before input delivery")
 
     release_input = None
+    recovery_binding = None
     if action_name == "ensure_player_control":
+        if any(item["status"] == "pending" for item in episode["actions"].values()):
+            raise RuntimeError("Finish pending episode actions before recovering player control")
         runtime_state = before["runtime"]
         if not runtime_state["spectating"]:
             raise RuntimeError("The PIE controller already owns a playable pawn")
@@ -1087,20 +1146,30 @@ def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, An
         if not default_pawn_class or "spectator" in default_pawn_class.casefold():
             raise RuntimeError("The active GameMode does not define a non-spectator default pawn")
         game_mode = unreal.GameplayStatics.get_game_mode(world)
+        configured_pawn_class = game_mode.get_editor_property("default_pawn_class") if game_mode is not None else None
+        if configured_pawn_class is None:
+            raise RuntimeError("The active GameMode has no configured pawn class identity")
         restart_player = getattr(game_mode, "restart_player", None) if game_mode is not None else None
         if not callable(restart_player):
             raise RuntimeError("The active GameMode cannot restart the PIE player")
         restart_player(controller)
+        recovered_context = _pie_context()
+        if recovered_context[1] is not world or recovered_context[2] is not controller:
+            raise RuntimeError("Player recovery changed the bound world or controller")
+        recovered_player = recovered_context[3]
+        if recovered_player is player or recovered_player.get_class() != configured_pawn_class:
+            raise RuntimeError("Player recovery did not synchronously possess the configured playable pawn")
+        recovery_binding = _runtime_binding(recovered_context)
+        _require_bound_context(recovery_binding, recovered_context)
     elif action_name == "navigate_to_entity":
-        navigation = getattr(unreal, "AIBlueprintHelperLibrary", None)
-        navigate = getattr(navigation, "simple_move_to_actor", None) if navigation is not None else None
-        if not callable(navigate):
-            raise RuntimeError("Exact-object PIE navigation is unavailable")
-        navigate(controller, target)
+        bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
+        navigate = getattr(bridge, "navigate_owned_pie_to_actor", None)
+        if not callable(navigate) or not navigate(world, controller, player, target):
+            raise RuntimeError("Exact-object owned PIE navigation is unavailable")
     elif action_name == "navigate_to_location":
         bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
-        navigate = getattr(bridge, "navigate_pie_to_location", None) if bridge is not None else None
-        if not callable(navigate) or not navigate(location_target):
+        navigate = getattr(bridge, "navigate_owned_pie_to_location", None)
+        if not callable(navigate) or not navigate(world, controller, player, location_target):
             raise RuntimeError("The native PIE navigation bridge could not start location navigation")
     elif action_name == "face_entity":
         _face_target(unreal, controller, player, target)
@@ -1203,6 +1272,7 @@ def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, An
         "before": before,
         "session_identity": binding["session_identity"],
         "_release_input": release_input,
+        "_recovery_binding": recovery_binding,
         "transition": None,
     }
     episode["actions"][action_id] = record
@@ -1334,11 +1404,12 @@ def poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
     episode = get_episode(episode_id)
     try:
         return _poll_action(episode_id, action_id)
-    except BaseException:
+    except BaseException as exc:
         # Observation, context loss and cancellation all retire delivered input.
         action = episode["actions"].get(str(action_id))
         if action is not None:
-            _release_action_input(action)
+            cleanup = _cleanup_interrupted_action(episode, action)
+            _attach_cleanup(exc, [cleanup])
         raise
 
 
@@ -1355,6 +1426,29 @@ def _poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
     context_reason = _context_change_reason(episode["runtime_binding"], context)
     after = observe(episode["selectors"])
     elapsed = max(0.0, time.time() - action["started_at"])
+    recovery = action.get("_recovery_binding")
+    if recovery is not None:
+        recovery_reason = _context_change_reason(recovery, context) or _observation_change_reason(recovery, after)
+        if recovery_reason is not None:
+            return _finalize(episode, action, "blocked", after, reason=recovery_reason, observation_trusted=False)
+        if elapsed >= action["timeout_seconds"]:
+            return _finalize(episode, action, "timed_out", after, observation_trusted=False)
+        # Adopt only the exact pawn captured synchronously after our own restart.
+        previous = episode["runtime_binding"]
+        episode["runtime_binding"] = recovery
+        return _finalize(
+            episode,
+            action,
+            "completed",
+            after,
+            observation_trusted=False,
+            reason="authorized_player_recovery",
+            recovery={
+                "previous_session_identity": previous["session_identity"],
+                "session_identity": recovery["session_identity"],
+                "player": dict(recovery["player"]),
+            },
+        )
     observation_reason = _observation_change_reason(episode["runtime_binding"], after)
     identity_reason = context_reason or observation_reason
     if identity_reason is not None:

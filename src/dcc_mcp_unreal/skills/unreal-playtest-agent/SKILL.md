@@ -48,6 +48,28 @@ mismatched observation returns a stable non-success instead of using a delta
 from another world. Entity navigation also retains the exact selected actor;
 polling never re-adopts a same-name or same-path replacement target.
 
+`ensure_player_control` is the sole explicit possession-recovery exception.
+With no pending episode actions, it restarts the bound spectator controller
+through its GameMode. Recovery must synchronously possess a different pawn of
+the exact configured playable UClass captured before restart (not a matching
+short name or a subclass) in the same world/controller. Poll accepts only
+that exact captured pawn and reports `reason="authorized_player_recovery"`
+with old/new session identities in `recovery`; cross-pawn movement and telemetry
+deltas are null/empty. Only then does the episode adopt the recovered binding.
+A no-op/asynchronous restart or later external replacement is not adopted;
+start a new episode after independently verifying such a recovery.
+
+Navigation and steering pass the captured world/controller/pawn to typed native
+entry points; they never fall back to a current-controller resolver. Standalone
+observation and polling failures release the episode's owned input/navigation,
+including interruptions. Failure envelopes retain the primary Core `dcc.error`
+metadata and expose attempted cleanup diagnostics in `context.cleanup`.
+Native steering retains the original world and rechecks world/local-controller/
+possession before each callback mutation, including when seamless travel keeps
+the same controller and pawn in a transition world. Observation is published as
+non-read-only because of intentional owned cleanup; this hint describes effects,
+not an authorization gate.
+
 Terminal transitions retain the exact bounded `before` and `after`
 observations and report both `player_location_delta` and scalar
 `player_displacement`. All displacement fields and `min_displacement` use
