@@ -170,6 +170,20 @@ def test_unbounded_string_api_fails_closed(tmp_path):
     assert result["success"] is False
 
 
+def test_unknown_unbounded_api_signature_is_rejected_before_noarg_call(tmp_path):
+    """A backend that rejects the bounded signature must not be retried without args."""
+    with _patch_unreal():
+        import unreal
+
+        unreal.Paths.project_dir.return_value = str(tmp_path)
+        unreal.log.get_log.side_effect = TypeError("no limit")
+        mod = _import_script("pie_snapshot_log")
+        result = mod.pie_snapshot_log(max_lines=2, include_verbosity=False)
+
+    assert result["success"] is False
+    unreal.log.get_log.assert_called_once_with(2)
+
+
 def test_empty_file_nonzero_offset_still_falls_back(tmp_path):
     """A zero-byte file must not trigger the byte-offset fast path."""
     _write_log(tmp_path, "")
@@ -178,12 +192,11 @@ def test_empty_file_nonzero_offset_still_falls_back(tmp_path):
 
         unreal.Paths.project_dir.return_value = str(tmp_path)
         unreal.log.get_log.return_value = "LogCombat: Display: Damage dealt\n"
-        unreal.log.get_log.reset_mock()
         mod = _import_script("pie_snapshot_log")
         result = mod.pie_snapshot_log(since_line=1, include_verbosity=False)
 
     assert result["success"] is False
-    unreal.log.get_log.assert_called_once_with(200)
+    unreal.log.get_log.assert_not_called()
 
 
 def test_no_file_provenance_is_distinct(tmp_path):
@@ -198,6 +211,19 @@ def test_no_file_provenance_is_distinct(tmp_path):
 
     assert result["context"]["fallback_reason"] == "no_file"
     assert result["context"]["source_consistent"] is True
+
+
+def test_category_parser_is_anchored_after_timestamp(tmp_path):
+    """A category-looking fragment inside a message must not be parsed as category."""
+    _write_log(tmp_path, "LogOuter: Display: body contains LogCombat: Display: fake\n")
+    with _patch_unreal():
+        import unreal
+
+        unreal.Paths.project_dir.return_value = str(tmp_path)
+        mod = _import_script("pie_snapshot_log")
+        result = mod.pie_snapshot_log(filter="LogCombat", include_verbosity=False)
+
+    assert result["context"]["entries"] == []
 
 
 def test_large_cursor_is_rejected_before_scan(tmp_path):

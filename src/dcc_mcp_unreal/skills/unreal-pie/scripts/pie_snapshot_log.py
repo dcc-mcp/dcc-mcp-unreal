@@ -38,7 +38,7 @@ def _entry_parts(line: str) -> tuple[Optional[datetime], str, str]:
     if match:
         timestamp = _parse_timestamp(match.group("timestamp"))
         line = line[match.end() :]
-    match = _CATEGORY_RE.search(line)
+    match = _CATEGORY_RE.match(line)
     if not match:
         return timestamp, "", line.strip()
     return timestamp, match.group("category"), match.group("message").strip()
@@ -156,6 +156,7 @@ def _collect_log_entries(
     since_line: int = 0,
     dedupe: bool = False,
     cursor: Optional[int] = None,
+    cursor_requested: bool = False,
 ) -> dict:
     """Collect recent log entries using the best available method.
 
@@ -223,10 +224,38 @@ def _collect_log_entries(
         pass
     if hasattr(unreal, "log") and hasattr(unreal.log, "get_log"):
         try:
+            if since_line or cursor_requested:
+                return {
+                    "error": "unreal.log backend does not support physical cursor continuation",
+                    "method": "unreal.log.get_log",
+                    "log_path": "",
+                    "entries": [],
+                    "count": 0,
+                    "occurrence_counts": [],
+                    "occurrence_count": [],
+                    "next_cursor": None,
+                    "cursor": None,
+                    "cursor_supported": False,
+                    "source_consistent": file_fallback in ("", "no_file"),
+                    "fallback_reason": file_fallback,
+                }
             try:
                 raw = unreal.log.get_log(max_lines)
             except TypeError:
-                raw = unreal.log.get_log()
+                return {
+                    "error": "unreal.log backend does not expose a bounded get_log(max_lines) signature",
+                    "method": "unreal.log.get_log",
+                    "log_path": "",
+                    "entries": [],
+                    "count": 0,
+                    "occurrence_counts": [],
+                    "occurrence_count": [],
+                    "next_cursor": None,
+                    "cursor": None,
+                    "cursor_supported": False,
+                    "source_consistent": file_fallback in ("", "no_file"),
+                    "fallback_reason": file_fallback,
+                }
             if isinstance(raw, str) and len(raw.encode("utf-8", errors="replace")) > _MAX_API_PAYLOAD_BYTES:
                 return {
                     "error": "unreal.log payload exceeds the bounded API read budget",
@@ -240,21 +269,6 @@ def _collect_log_entries(
                     "cursor": None,
                     "cursor_supported": False,
                     "source_consistent": not bool(file_fallback and file_fallback != "no_file"),
-                    "fallback_reason": file_fallback,
-                }
-            if since_line:
-                return {
-                    "error": "unreal.log backend does not support physical cursor continuation",
-                    "method": "unreal.log.get_log",
-                    "log_path": "",
-                    "entries": [],
-                    "count": 0,
-                    "occurrence_counts": [],
-                    "occurrence_count": [],
-                    "next_cursor": None,
-                    "cursor": None,
-                    "cursor_supported": False,
-                    "source_consistent": file_fallback in ("", "no_file"),
                     "fallback_reason": file_fallback,
                 }
             # Keep iterable backends lazy; converting a large generator to a
@@ -351,6 +365,7 @@ def pie_snapshot_log(
             since_line=since_line,
             dedupe=bool(dedupe),
             cursor=cursor_value,
+            cursor_requested=bool(cursor),
         )
         if result.get("error"):
             raise ValueError(result["error"])
