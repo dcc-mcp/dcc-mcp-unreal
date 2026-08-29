@@ -150,11 +150,54 @@ def test_api_cursor_is_explicitly_unsupported_and_not_fabricated(tmp_path):
         unreal.log.get_log.return_value = "LogTest: Display: one\n"
         mod = _import_script("pie_snapshot_log")
         first = mod.pie_snapshot_log(max_lines=1, include_verbosity=False)
-        second = mod.pie_snapshot_log(cursor=first["context"]["next_cursor"] or "", include_verbosity=False)
+        second = mod.pie_snapshot_log(cursor="1", include_verbosity=False)
 
     assert first["context"]["next_cursor"] is None
     assert first["context"]["cursor_supported"] is False
-    assert second["context"]["entries"] == ["LogTest: Display: one"]
+    assert second["success"] is False
+
+
+def test_unbounded_string_api_fails_closed(tmp_path):
+    """A no-arg fallback returning a giant string is rejected before splitlines."""
+    with _patch_unreal():
+        import unreal
+
+        unreal.Paths.project_dir.return_value = str(tmp_path)
+        unreal.log.get_log.side_effect = [TypeError("no limit"), "LogTest: Display: " + ("x" * (9 * 1024 * 1024))]
+        mod = _import_script("pie_snapshot_log")
+        result = mod.pie_snapshot_log(max_lines=2, include_verbosity=False)
+
+    assert result["success"] is False
+
+
+def test_empty_file_nonzero_offset_still_falls_back(tmp_path):
+    """A zero-byte file must not trigger the byte-offset fast path."""
+    _write_log(tmp_path, "")
+    with _patch_unreal():
+        import unreal
+
+        unreal.Paths.project_dir.return_value = str(tmp_path)
+        unreal.log.get_log.return_value = "LogCombat: Display: Damage dealt\n"
+        unreal.log.get_log.reset_mock()
+        mod = _import_script("pie_snapshot_log")
+        result = mod.pie_snapshot_log(since_line=1, include_verbosity=False)
+
+    assert result["success"] is False
+    unreal.log.get_log.assert_called_once_with(200)
+
+
+def test_no_file_provenance_is_distinct(tmp_path):
+    """API-only reads identify the absence of a Saved/Logs file explicitly."""
+    with _patch_unreal():
+        import unreal
+
+        unreal.Paths.project_dir.return_value = str(tmp_path)
+        unreal.log.get_log.return_value = "LogTest: Display: one\n"
+        mod = _import_script("pie_snapshot_log")
+        result = mod.pie_snapshot_log(include_verbosity=False)
+
+    assert result["context"]["fallback_reason"] == "no_file"
+    assert result["context"]["source_consistent"] is True
 
 
 def test_large_cursor_is_rejected_before_scan(tmp_path):

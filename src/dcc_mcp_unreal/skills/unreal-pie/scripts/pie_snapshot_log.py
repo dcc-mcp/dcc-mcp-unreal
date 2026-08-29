@@ -15,6 +15,7 @@ from dcc_mcp_unreal.api import unreal_from_exception, unreal_success
 _TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}\.\d{2}\.\d{2}-[^\]]+)\]")
 _CATEGORY_RE = re.compile(r"(?P<category>[A-Za-z_][\w]*)\s*:\s*(?P<verbosity>[A-Za-z]+)\s*:\s*(?P<message>.*)$")
 _MAX_CURSOR_OFFSET = 10_000_000
+_MAX_API_PAYLOAD_BYTES = 8 * 1024 * 1024
 
 
 def _parse_timestamp(value: str) -> Optional[datetime]:
@@ -179,7 +180,8 @@ def _collect_log_entries(
             )
             if log_files:
                 log_path = os.path.join(log_dir, log_files[0])
-                if since_line > _MAX_CURSOR_OFFSET or since_line > os.path.getsize(log_path):
+                file_size = os.path.getsize(log_path)
+                if file_size and (since_line > _MAX_CURSOR_OFFSET or since_line > file_size):
                     return {
                         "entries": [],
                         "count": 0,
@@ -189,6 +191,7 @@ def _collect_log_entries(
                         "cursor": str(since_line),
                         "cursor_supported": True,
                         "source_consistent": True,
+                        "fallback_reason": "",
                         "method": "log_file",
                         "log_path": log_path,
                     }
@@ -203,9 +206,19 @@ def _collect_log_entries(
                     since_line=since_line,
                     dedupe=dedupe,
                 )
-            if result["count"]:
-                return {**result, "method": "log_file", "log_path": log_path}
-            file_fallback = "empty_or_filtered_file"
+                if result["count"]:
+                    return {
+                        **result,
+                        "method": "log_file",
+                        "log_path": log_path,
+                        "source_consistent": True,
+                        "fallback_reason": "",
+                    }
+                file_fallback = "empty_or_filtered_file"
+            else:
+                file_fallback = "no_file"
+        else:
+            file_fallback = "no_file"
     except Exception:
         pass
     if hasattr(unreal, "log") and hasattr(unreal.log, "get_log"):
@@ -214,6 +227,36 @@ def _collect_log_entries(
                 raw = unreal.log.get_log(max_lines)
             except TypeError:
                 raw = unreal.log.get_log()
+            if isinstance(raw, str) and len(raw.encode("utf-8", errors="replace")) > _MAX_API_PAYLOAD_BYTES:
+                return {
+                    "error": "unreal.log payload exceeds the bounded API read budget",
+                    "method": "unreal.log.get_log",
+                    "log_path": "",
+                    "entries": [],
+                    "count": 0,
+                    "occurrence_counts": [],
+                    "occurrence_count": [],
+                    "next_cursor": None,
+                    "cursor": None,
+                    "cursor_supported": False,
+                    "source_consistent": not bool(file_fallback and file_fallback != "no_file"),
+                    "fallback_reason": file_fallback,
+                }
+            if since_line:
+                return {
+                    "error": "unreal.log backend does not support physical cursor continuation",
+                    "method": "unreal.log.get_log",
+                    "log_path": "",
+                    "entries": [],
+                    "count": 0,
+                    "occurrence_counts": [],
+                    "occurrence_count": [],
+                    "next_cursor": None,
+                    "cursor": None,
+                    "cursor_supported": False,
+                    "source_consistent": file_fallback in ("", "no_file"),
+                    "fallback_reason": file_fallback,
+                }
             # Keep iterable backends lazy; converting a large generator to a
             # list would defeat the max_lines memory bound.
             lines = raw.splitlines() if isinstance(raw, str) else (raw or ())
@@ -236,12 +279,13 @@ def _collect_log_entries(
                 "cursor": None,
                 "cursor_supported": False,
                 "fallback_reason": file_fallback,
-                "source_consistent": not bool(file_fallback),
+                "source_consistent": file_fallback in ("", "no_file"),
             }
         except Exception:
             pass
     cursor = str(since_line)
     return {
+        "error": "no log source available",
         "method": method,
         "log_path": log_path,
         "entries": [],
@@ -252,6 +296,7 @@ def _collect_log_entries(
         "cursor": cursor,
         "cursor_supported": False,
         "source_consistent": False,
+        "fallback_reason": file_fallback or "no_source",
     }
 
 
@@ -307,6 +352,8 @@ def pie_snapshot_log(
             dedupe=bool(dedupe),
             cursor=cursor_value,
         )
+        if result.get("error"):
+            raise ValueError(result["error"])
 
         return unreal_success(
             "Log snapshot captured: {} entries via {}".format(result["count"], result["method"]),
