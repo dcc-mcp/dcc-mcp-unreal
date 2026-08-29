@@ -43,7 +43,8 @@ log sampling, performance monitoring, and async Automation Test job execution.
 - `pie_inject_input` — Inject keyboard, pointer, scroll, or deterministic
   possessed-controller look input into PIE.
 - `pie_capture_screenshot` — Capture the active viewport to a file.
-- `pie_snapshot_log` — Snapshot the Output Log buffer.
+- `pie_snapshot_log` — Snapshot the Output Log buffer with category/message
+  filters, time/cursor bounds, and optional deduplication.
 - `pie_get_status` — Query PIE state and performance counters.
 - `pie_run_test` — Queue an Automation Test run; returns a `job_id`.
 - `pie_poll_test` — Poll a previously queued Automation Test job for results.
@@ -72,7 +73,16 @@ log sampling, performance monitoring, and async Automation Test job execution.
 
 # 5. Snapshot logs
 # MCP tool call: unreal_pie__snapshot_log
-# params: {"max_lines": 200}
+# params: {
+#   "filter": "LogCombat", "message_contains": "Damage",
+#   "since_timestamp": "2026-08-29T10:00:00Z",
+#   "max_lines": 200, "dedupe": true
+# }
+# `filter` matches category only (never asset paths or message bodies).
+# Use the returned `next_cursor` as `cursor` on the next snapshot.
+# When `dedupe` is true, `occurrence_counts` (also exposed as
+# `occurrence_count`) aligns with the returned entries.
+
 
 # 6. Exit PIE
 # MCP tool call: unreal_pie__control
