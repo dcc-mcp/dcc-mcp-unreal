@@ -82,6 +82,8 @@ log sampling, performance monitoring, and async Automation Test job execution.
 # Use the returned `next_cursor` as `cursor` on the next snapshot.
 # When `dedupe` is true, `occurrence_counts` (also exposed as
 # `occurrence_count`) aligns with the returned entries.
+# `cursor_supported` is false for tail-only unreal.log snapshots; in that case
+# `next_cursor` is null and must not be used for continuation.
 
 
 # 6. Exit PIE

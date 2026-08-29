@@ -14,6 +14,7 @@ from dcc_mcp_unreal.api import unreal_from_exception, unreal_success
 
 _TIMESTAMP_RE = re.compile(r"^\[(?P<timestamp>\d{4}\.\d{2}\.\d{2}-[^\]]+)\]")
 _CATEGORY_RE = re.compile(r"(?P<category>[A-Za-z_][\w]*)\s*:\s*(?P<verbosity>[A-Za-z]+)\s*:\s*(?P<message>.*)$")
+_MAX_CURSOR_OFFSET = 10_000_000
 
 
 def _parse_timestamp(value: str) -> Optional[datetime]:
@@ -57,7 +58,7 @@ def _process_lines(
     category_filter = category_filter.casefold()
     message_contains = message_contains.casefold()
     accepted = deque(maxlen=max_lines)
-    counts: OrderedDict[tuple[str, str], int] = OrderedDict()
+    groups: OrderedDict[tuple[str, str], list] = OrderedDict()
     total_lines = 0
     for raw in lines:
         line = str(raw).rstrip("\r\n")
@@ -83,22 +84,22 @@ def _process_lines(
             output = f"[{verbosity}] {line}"
         key = (category.casefold(), message.casefold())
         if dedupe:
-            if key in counts:
-                counts[key] += 1
-                for item in accepted:
-                    if item[0] == key:
-                        accepted.remove(item)
-                        accepted.append([key, output])
-                        break
+            if key in groups:
+                groups[key][1] += 1
+                groups.move_to_end(key)
+                groups[key][0] = output
             else:
-                counts[key] = 1
-                accepted.append([key, output])
-                while len(counts) > len(accepted):
-                    counts.popitem(last=False)
+                groups[key] = [output, 1]
+                if len(groups) > max_lines:
+                    groups.popitem(last=False)
         else:
             accepted.append([key, output])
-    entries = [item[1] for item in accepted]
-    occurrence_counts = [counts.get(item[0], 1) if dedupe else 1 for item in accepted]
+    if dedupe:
+        entries = [item[0] for item in groups.values()]
+        occurrence_counts = [item[1] for item in groups.values()]
+    else:
+        entries = [item[1] for item in accepted]
+        occurrence_counts = [1 for _ in accepted]
     return {
         "entries": entries,
         "count": len(entries),
@@ -108,6 +109,7 @@ def _process_lines(
         "occurrence_count": occurrence_counts,
         "next_cursor": str(total_lines),
         "cursor": str(total_lines),
+        "cursor_supported": True,
     }
 
 
@@ -122,6 +124,8 @@ def _read_log_via_file(log_path: str, max_lines: int, line_filter: str = "", **k
             "occurrence_count": [],
             "next_cursor": cursor,
             "cursor": cursor,
+            "cursor_supported": True,
+            "source_consistent": True,
         }
     try:
         with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
@@ -135,6 +139,8 @@ def _read_log_via_file(log_path: str, max_lines: int, line_filter: str = "", **k
             "occurrence_count": [],
             "next_cursor": cursor,
             "cursor": cursor,
+            "cursor_supported": True,
+            "source_consistent": True,
         }
 
 
@@ -160,6 +166,7 @@ def _collect_log_entries(
 
     method = "none"
     log_path = ""
+    file_fallback = ""
     since_line = cursor if cursor is not None else since_line
     try:
         project_dir = unreal.Paths.project_dir()
@@ -172,6 +179,19 @@ def _collect_log_entries(
             )
             if log_files:
                 log_path = os.path.join(log_dir, log_files[0])
+                if since_line > _MAX_CURSOR_OFFSET or since_line > os.path.getsize(log_path):
+                    return {
+                        "entries": [],
+                        "count": 0,
+                        "occurrence_counts": [],
+                        "occurrence_count": [],
+                        "next_cursor": str(since_line),
+                        "cursor": str(since_line),
+                        "cursor_supported": True,
+                        "source_consistent": True,
+                        "method": "log_file",
+                        "log_path": log_path,
+                    }
                 result = _read_log_via_file(
                     log_path,
                     max_lines,
@@ -183,16 +203,20 @@ def _collect_log_entries(
                     since_line=since_line,
                     dedupe=dedupe,
                 )
+            if result["count"]:
                 return {**result, "method": "log_file", "log_path": log_path}
+            file_fallback = "empty_or_filtered_file"
     except Exception:
         pass
     if hasattr(unreal, "log") and hasattr(unreal.log, "get_log"):
         try:
             try:
-                raw = unreal.log.get_log()
-            except TypeError:
                 raw = unreal.log.get_log(max_lines)
-            lines = raw.splitlines() if isinstance(raw, str) else list(raw or [])
+            except TypeError:
+                raw = unreal.log.get_log()
+            # Keep iterable backends lazy; converting a large generator to a
+            # list would defeat the max_lines memory bound.
+            lines = raw.splitlines() if isinstance(raw, str) else (raw or ())
             result = _process_lines(
                 lines,
                 max_lines,
@@ -204,7 +228,16 @@ def _collect_log_entries(
                 since_line,
                 dedupe,
             )
-            return {**result, "method": "unreal.log.get_log", "log_path": ""}
+            return {
+                **result,
+                "method": "unreal.log.get_log",
+                "log_path": "",
+                "next_cursor": None,
+                "cursor": None,
+                "cursor_supported": False,
+                "fallback_reason": file_fallback,
+                "source_consistent": not bool(file_fallback),
+            }
         except Exception:
             pass
     cursor = str(since_line)
@@ -217,6 +250,8 @@ def _collect_log_entries(
         "occurrence_count": [],
         "next_cursor": cursor,
         "cursor": cursor,
+        "cursor_supported": False,
+        "source_consistent": False,
     }
 
 
@@ -245,11 +280,15 @@ def pie_snapshot_log(
         since_line = int(since_line)
         if since_line < 0:
             raise ValueError("since_line must be non-negative")
+        if since_line > _MAX_CURSOR_OFFSET:
+            raise ValueError("since_line exceeds the supported scan budget")
         cursor_value = None
         if cursor:
             if not str(cursor).isdigit():
                 raise ValueError("cursor must be numeric")
             cursor_value = int(cursor)
+            if cursor_value > _MAX_CURSOR_OFFSET:
+                raise ValueError("cursor exceeds the supported scan budget")
         since_dt = _parse_timestamp(since_timestamp)
         until_dt = _parse_timestamp(until_timestamp)
         if (since_timestamp and since_dt is None) or (until_timestamp and until_dt is None):

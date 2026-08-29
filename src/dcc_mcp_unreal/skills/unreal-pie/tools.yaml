@@ -207,7 +207,7 @@ tools:
         cursor:
           type: string
           pattern: "^[0-9]*$"
-          description: Numeric continuation cursor returned as next_cursor by a previous call.
+          description: Numeric continuation cursor returned by a file-backed snapshot; tail-only unreal.log snapshots do not support continuation.
           default: ""
         dedupe:
           type: boolean
