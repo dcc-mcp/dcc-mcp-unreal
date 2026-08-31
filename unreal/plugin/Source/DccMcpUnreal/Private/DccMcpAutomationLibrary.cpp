@@ -255,6 +255,15 @@ bool MaterialOwnsExpression(UMaterial* Material, UMaterialExpression* SourceExpr
 #endif
 }
 
+FString MaterialOutputName(const FExpressionOutput& Output)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26
+    return Output.OutputName;
+#else
+    return Output.OutputName.ToString();
+#endif
+}
+
 FString OutputNameAt(UMaterialExpression* SourceExpression, int32 SourceOutputIndex)
 {
     if (!SourceExpression)
@@ -262,7 +271,9 @@ FString OutputNameAt(UMaterialExpression* SourceExpression, int32 SourceOutputIn
         return FString();
     }
     const TArray<FExpressionOutput>& Outputs = SourceExpression->GetOutputs();
-    return Outputs.IsValidIndex(SourceOutputIndex) ? Outputs[SourceOutputIndex].OutputName.ToString() : FString();
+    return Outputs.IsValidIndex(SourceOutputIndex)
+        ? MaterialOutputName(Outputs[SourceOutputIndex])
+        : FString();
 }
 
 void AddCustomizedUvConnectionFields(
@@ -1155,7 +1166,7 @@ FString UDccMcpAutomationLibrary::ConnectMaterialExpressionToCustomizedUv(
         int32 MatchCount = 0;
         for (int32 Index = 0; Index < Outputs.Num(); ++Index)
         {
-            if (Outputs[Index].OutputName.ToString().Equals(SourceOutputName, ESearchCase::CaseSensitive))
+            if (MaterialOutputName(Outputs[Index]).Equals(SourceOutputName, ESearchCase::CaseSensitive))
             {
                 ResolvedOutputIndex = Index;
                 ++MatchCount;
@@ -1249,6 +1260,9 @@ FString UDccMcpAutomationLibrary::ConnectMaterialExpressionToCustomizedUv(
 #endif
     Material->NumCustomizedUVs = FMath::Max(Material->NumCustomizedUVs, CustomizedUvIndex + 1);
     Material->PostEditChange();
+#if ENGINE_MAJOR_VERSION >= 5
+    Material->EnsureIsComplete();
+#endif
 
     const auto HasExpectedConnection = [Material, SourceExpression, ResolvedOutputIndex, CustomizedUvIndex]()
     {
