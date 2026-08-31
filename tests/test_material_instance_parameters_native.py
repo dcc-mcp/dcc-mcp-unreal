@@ -11,9 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "src" / "dcc_mcp_unreal" / "skills" / "unreal-materials"
 SCRIPT = SKILL / "scripts" / "set_material_instance_parameters.py"
 HEADER = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Public" / "DccMcpAutomationLibrary.h"
-IMPLEMENTATION = (
-    ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
-)
+IMPLEMENTATION = ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpAutomationLibrary.cpp"
 
 
 def _load_script():
@@ -39,10 +37,12 @@ def test_native_material_instance_bridge_is_transactional_saved_and_verified() -
     assert 'Root->SetBoolField(TEXT("verified"), true)' in implementation
     assert "Transaction.Cancel()" in implementation
     assert "#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18" in implementation
-    assert "MaterialInstanceParameterName(Value)" in implementation
+    assert "MaterialInstanceParameterMatches(Value, ExpectedName)" in implementation
     assert "ScalarArraysEqual" in implementation
     assert "VectorArraysEqual" in implementation
     assert "TextureArraysEqual" in implementation
+    assert "Pair.Value->HasAllFlags(RF_Public | RF_Standalone)" in implementation
+    assert "TexturePackage == GetTransientPackage()" in implementation
 
 
 def test_python_tool_routes_all_parameter_types_through_native_bridge() -> None:
@@ -95,7 +95,7 @@ def test_python_tool_routes_all_parameter_types_through_native_bridge() -> None:
     )
 
 
-def test_invalid_vector_components_fail_before_native_mutation() -> None:
+def test_non_numeric_vector_components_fail_before_native_mutation() -> None:
     class MaterialInstanceConstant:
         pass
 
@@ -103,13 +103,23 @@ def test_invalid_vector_components_fail_before_native_mutation() -> None:
     bridge = types.SimpleNamespace(configure_material_instance_parameters=MagicMock())
     unreal = types.ModuleType("unreal")
     unreal.MaterialInstanceConstant = MaterialInstanceConstant
+    unreal.LinearColor = MagicMock(return_value=object())
     unreal.EditorAssetLibrary = types.SimpleNamespace(load_asset=MagicMock(return_value=instance))
     unreal.DccMcpAutomationLibrary = bridge
 
     with patch.dict(sys.modules, {"unreal": unreal}):
         result = _load_script().set_material_instance_parameters(
             instance_path="/Game/MI",
-            vector_parameters={"tint": ["invalid", 0.5, 0.25]},
+            vector_parameters={"tint": ["0.5", 0.5, 0.25]},
+        )
+
+    assert result["success"] is False
+    bridge.configure_material_instance_parameters.assert_not_called()
+
+    with patch.dict(sys.modules, {"unreal": unreal}):
+        result = _load_script().set_material_instance_parameters(
+            instance_path="/Game/MI",
+            scalar_parameters={"speed": True},
         )
 
     assert result["success"] is False
