@@ -1136,31 +1136,37 @@ def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, An
 
     release_input = None
     recovery_binding = None
+    recovery_reason = None
     if action_name == "ensure_player_control":
         if any(item["status"] == "pending" for item in episode["actions"].values()):
             raise RuntimeError("Finish pending episode actions before recovering player control")
         runtime_state = before["runtime"]
         if not runtime_state["spectating"]:
-            raise RuntimeError("The PIE controller already owns a playable pawn")
-        default_pawn_class = str(runtime_state.get("default_pawn_class", ""))
-        if not default_pawn_class or "spectator" in default_pawn_class.casefold():
-            raise RuntimeError("The active GameMode does not define a non-spectator default pawn")
-        game_mode = unreal.GameplayStatics.get_game_mode(world)
-        configured_pawn_class = game_mode.get_editor_property("default_pawn_class") if game_mode is not None else None
-        if configured_pawn_class is None:
-            raise RuntimeError("The active GameMode has no configured pawn class identity")
-        restart_player = getattr(game_mode, "restart_player", None) if game_mode is not None else None
-        if not callable(restart_player):
-            raise RuntimeError("The active GameMode cannot restart the PIE player")
-        restart_player(controller)
-        recovered_context = _pie_context()
-        if recovered_context[1] is not world or recovered_context[2] is not controller:
-            raise RuntimeError("Player recovery changed the bound world or controller")
-        recovered_player = recovered_context[3]
-        if recovered_player is player or recovered_player.get_class() != configured_pawn_class:
-            raise RuntimeError("Player recovery did not synchronously possess the configured playable pawn")
-        recovery_binding = _runtime_binding(recovered_context)
-        _require_bound_context(recovery_binding, recovered_context)
+            recovery_binding = binding
+            recovery_reason = "already_satisfied"
+        else:
+            default_pawn_class = str(runtime_state.get("default_pawn_class", ""))
+            if not default_pawn_class or "spectator" in default_pawn_class.casefold():
+                raise RuntimeError("The active GameMode does not define a non-spectator default pawn")
+            game_mode = unreal.GameplayStatics.get_game_mode(world)
+            configured_pawn_class = (
+                game_mode.get_editor_property("default_pawn_class") if game_mode is not None else None
+            )
+            if configured_pawn_class is None:
+                raise RuntimeError("The active GameMode has no configured pawn class identity")
+            restart_player = getattr(game_mode, "restart_player", None) if game_mode is not None else None
+            if not callable(restart_player):
+                raise RuntimeError("The active GameMode cannot restart the PIE player")
+            restart_player(controller)
+            recovered_context = _pie_context()
+            if recovered_context[1] is not world or recovered_context[2] is not controller:
+                raise RuntimeError("Player recovery changed the bound world or controller")
+            recovered_player = recovered_context[3]
+            if recovered_player is player or recovered_player.get_class() != configured_pawn_class:
+                raise RuntimeError("Player recovery did not synchronously possess the configured playable pawn")
+            recovery_binding = _runtime_binding(recovered_context)
+            recovery_reason = "authorized_player_recovery"
+            _require_bound_context(recovery_binding, recovered_context)
     elif action_name == "navigate_to_entity":
         bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
         navigate = getattr(bridge, "navigate_owned_pie_to_actor", None)
@@ -1273,6 +1279,7 @@ def _execute_action(episode_id: str, action_name: str, **kwargs) -> dict[str, An
         "session_identity": binding["session_identity"],
         "_release_input": release_input,
         "_recovery_binding": recovery_binding,
+        "_recovery_reason": recovery_reason,
         "transition": None,
     }
     episode["actions"][action_id] = record
@@ -1442,7 +1449,7 @@ def _poll_action(episode_id: str, action_id: str) -> dict[str, Any]:
             "completed",
             after,
             observation_trusted=False,
-            reason="authorized_player_recovery",
+            reason=action["_recovery_reason"],
             recovery={
                 "previous_session_identity": previous["session_identity"],
                 "session_identity": recovery["session_identity"],

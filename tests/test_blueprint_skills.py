@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import yaml
 
 
 def _load_module(name: str, path: str):
@@ -257,3 +260,43 @@ class TestFindNodes:
 
         assert result["success"] is False
         assert "Blueprint not found" in result["message"]
+
+    @patch.dict(sys.modules, {"unreal": MagicMock()})
+    def test_reflection_failure_returns_structured_diagnostics(self):
+        import unreal
+
+        blueprint = object()
+        unreal.EditorAssetLibrary.load_asset.return_value = blueprint
+
+        def fail_graph_walk(_blueprint):
+            raise RuntimeError("large graph reflection failed")
+
+        graph_api = SimpleNamespace(
+            get_graph=fail_graph_walk,
+            get_node_id=MagicMock(),
+            get_node_position=MagicMock(),
+            get_nodes=MagicMock(),
+        )
+        with patch.dict(sys.modules, {"_blueprint_graph_api": graph_api}):
+            module, spec = _load_module(
+                "find_nodes_structured_error",
+                "src/dcc_mcp_unreal/skills/unreal-blueprints/scripts/find_nodes.py",
+            )
+            spec.loader.exec_module(module)
+            result = module.find_nodes(blueprint_name="BP_ShooterEnemyAI")
+
+        assert result["success"] is False
+        assert result["context"]["reason"] == "internal_error"
+        assert result["context"]["error_type"] == "RuntimeError"
+        assert result["_meta"]["dcc.error"]["message"] == "large graph reflection failed"
+
+    def test_manifest_documents_rejected_find_node_arguments(self):
+        manifest = yaml.safe_load(
+            Path("src/dcc_mcp_unreal/skills/unreal-blueprints/tools.yaml").read_text(encoding="utf-8")
+        )
+        tool = next(item for item in manifest["tools"] if item["name"] == "find_nodes")
+        schema = tool["input_schema"]
+
+        assert schema["additionalProperties"] is False
+        assert schema["properties"]["blueprint_name"]["minLength"] == 1
+        assert "non-empty" in schema["properties"]["blueprint_name"]["description"]

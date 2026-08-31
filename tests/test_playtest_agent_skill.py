@@ -821,16 +821,20 @@ def test_ensure_player_control_restarts_only_a_spectator(monkeypatch):
     assert controller.get_pawn() is not player
 
 
-def test_ensure_player_control_rejects_an_existing_player_pawn(monkeypatch):
-    runtime, _player, _enemy, _door, _controller, _keys, _navigation = _load_runtime(monkeypatch)
+def test_ensure_player_control_is_idempotent_for_an_existing_player_pawn(monkeypatch):
+    runtime, _player, _enemy, _door, controller, _keys, _navigation = _load_runtime(monkeypatch)
+    clock = [175.0]
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
     episode = runtime.start_episode(include_pawns=True, max_entities=8)
 
-    try:
-        runtime.execute_action(episode["episode_id"], "ensure_player_control")
-    except RuntimeError as exc:
-        assert "already owns a playable pawn" in str(exc)
-    else:
-        raise AssertionError("expected ensure_player_control to fail closed")
+    accepted = runtime.execute_action(episode["episode_id"], "ensure_player_control")
+    assert controller.game_mode.restart_calls == []
+    clock[0] = 175.2
+    transition = runtime.poll_action(episode["episode_id"], accepted["action_id"])
+
+    assert transition["status"] == "completed"
+    assert transition["reason"] == "already_satisfied"
+    assert controller.game_mode.restart_calls == []
 
 
 def test_navigation_falls_back_to_bounded_input_steering_and_releases_forward(monkeypatch):

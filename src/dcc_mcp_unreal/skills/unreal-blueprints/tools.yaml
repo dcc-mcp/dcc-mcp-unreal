@@ -244,11 +244,16 @@ tools:
       properties:
         blueprint_name:
           type: string
-          description: Name of the target Blueprint
+          minLength: 1
+          maxLength: 256
+          description: A non-empty asset name under /Game/Blueprints; missing assets return reason=not_found.
         node_type:
           type: string
-          description: Optional type of node to find (Event, Function, Variable)
+          maxLength: 256
+          description: Optional case-insensitive substring filter for the reflected node class.
         event_type:
           type: string
-          description: Optional specific event type to find (BeginPlay, Tick)
+          maxLength: 256
+          description: Optional case-insensitive substring filter for the reflected node title.
       required: ["blueprint_name"]
+      additionalProperties: false
