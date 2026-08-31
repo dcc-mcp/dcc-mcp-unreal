@@ -36,6 +36,8 @@
 #include "GeometryCollection/GeometryCollectionObject.h"
 #endif
 #include "Interfaces/IPluginManager.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/AutomationTest.h"
@@ -45,8 +47,12 @@
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "ScopedTransaction.h"
 #include "Templates/SharedPointer.h"
 #include "UObject/Package.h"
+#if ENGINE_MAJOR_VERSION >= 5
+#include "UObject/SavePackage.h"
+#endif
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
 #include "Widgets/SWindow.h"
@@ -208,6 +214,112 @@ FString SerializeJson(const TSharedRef<FJsonObject>& Root)
         TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Output);
     FJsonSerializer::Serialize(Root, Writer);
     return Output;
+}
+
+FString MaterialGraphError(const FString& ErrorCode, const FString& Message, bool bRollbackCompleted = true)
+{
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("success"), false);
+    Root->SetStringField(TEXT("error_code"), ErrorCode);
+    Root->SetStringField(TEXT("message"), Message);
+    Root->SetBoolField(TEXT("rollback_completed"), bRollbackCompleted);
+    return SerializeJson(Root);
+}
+
+FVector2MaterialInput* GetCustomizedUvInput(UMaterial* Material, int32 CustomizedUvIndex)
+{
+    if (!Material || CustomizedUvIndex < 0 || CustomizedUvIndex >= 8)
+    {
+        return nullptr;
+    }
+#if ENGINE_MAJOR_VERSION >= 5
+    UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
+    return EditorOnlyData ? &EditorOnlyData->CustomizedUVs[CustomizedUvIndex] : nullptr;
+#else
+    return &Material->CustomizedUVs[CustomizedUvIndex];
+#endif
+}
+
+bool MaterialOwnsExpression(UMaterial* Material, UMaterialExpression* SourceExpression)
+{
+    if (!Material || !SourceExpression)
+    {
+        return false;
+    }
+#if ENGINE_MAJOR_VERSION >= 5
+    UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
+    return EditorOnlyData
+        && EditorOnlyData->ExpressionCollection.Expressions.Contains(SourceExpression);
+#else
+    return Material->Expressions.Contains(SourceExpression);
+#endif
+}
+
+FString OutputNameAt(UMaterialExpression* SourceExpression, int32 SourceOutputIndex)
+{
+    if (!SourceExpression)
+    {
+        return FString();
+    }
+    const TArray<FExpressionOutput>& Outputs = SourceExpression->GetOutputs();
+    return Outputs.IsValidIndex(SourceOutputIndex) ? Outputs[SourceOutputIndex].OutputName.ToString() : FString();
+}
+
+void AddCustomizedUvConnectionFields(
+    const TSharedRef<FJsonObject>& Root,
+    UMaterial* Material,
+    int32 CustomizedUvIndex
+)
+{
+    FVector2MaterialInput* Input = GetCustomizedUvInput(Material, CustomizedUvIndex);
+    UMaterialExpression* Expression = Input ? Input->Expression : nullptr;
+    Root->SetNumberField(TEXT("customized_uv_index"), CustomizedUvIndex);
+    Root->SetBoolField(TEXT("connected"), Expression != nullptr);
+    Root->SetStringField(TEXT("source_expression_name"), Expression ? Expression->GetName() : FString());
+    Root->SetStringField(
+        TEXT("source_expression_guid"),
+        Expression ? Expression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens) : FString()
+    );
+    Root->SetNumberField(TEXT("source_output_index"), Expression ? Input->OutputIndex : -1);
+    Root->SetStringField(
+        TEXT("source_output_name"),
+        Expression ? OutputNameAt(Expression, Input->OutputIndex) : FString()
+    );
+    Root->SetNumberField(TEXT("num_customized_uvs"), Material ? Material->NumCustomizedUVs : 0);
+    UPackage* Package = Material ? Material->GetOutermost() : nullptr;
+    Root->SetBoolField(TEXT("package_dirty"), Package ? Package->IsDirty() : false);
+}
+
+bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
+{
+    UPackage* Package = Material ? Material->GetOutermost() : nullptr;
+    if (!Package || Filename.IsEmpty())
+    {
+        return false;
+    }
+#if ENGINE_MAJOR_VERSION >= 5
+    FSavePackageArgs SaveArgs;
+    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+    SaveArgs.SaveFlags = SAVE_NoError;
+    SaveArgs.bWarnOfLongFilename = false;
+    SaveArgs.bSlowTask = false;
+    return UPackage::SavePackage(Package, Material, *Filename, SaveArgs);
+#else
+    return UPackage::SavePackage(
+        Package,
+        Material,
+        RF_Public | RF_Standalone,
+        *Filename,
+        GError,
+        nullptr,
+        false,
+        false,
+        SAVE_NoError,
+        nullptr,
+        FDateTime::MinValue(),
+        false
+    );
+#endif
 }
 
 bool HasPieWorld()
@@ -947,6 +1059,266 @@ bool UDccMcpAutomationLibrary::OpenFabListing(const FString& ListingUrl)
         return false;
     }
     return InvokeFabString(NewFabApi(), TEXT("OpenInNewTab"), ListingUrl);
+}
+
+FString UDccMcpAutomationLibrary::GetMaterialCustomizedUvConnection(
+    UMaterial* Material,
+    int32 CustomizedUvIndex
+)
+{
+    if (!IsInGameThread())
+    {
+        return MaterialGraphError(TEXT("wrong_thread"), TEXT("Material graph inspection requires the game thread"));
+    }
+    if (!IsValid(Material))
+    {
+        return MaterialGraphError(TEXT("invalid_material"), TEXT("A valid Material asset is required"));
+    }
+    if (CustomizedUvIndex < 0 || CustomizedUvIndex >= 8 || !GetCustomizedUvInput(Material, CustomizedUvIndex))
+    {
+        return MaterialGraphError(
+            TEXT("invalid_customized_uv_index"),
+            TEXT("Customized UV index must be between 0 and 7")
+        );
+    }
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("success"), true);
+    AddCustomizedUvConnectionFields(Root, Material, CustomizedUvIndex);
+    return SerializeJson(Root);
+}
+
+FString UDccMcpAutomationLibrary::ConnectMaterialExpressionToCustomizedUv(
+    UMaterial* Material,
+    UMaterialExpression* SourceExpression,
+    int32 SourceOutputIndex,
+    const FString& SourceOutputName,
+    int32 CustomizedUvIndex,
+    bool bReplaceExisting
+)
+{
+    if (!IsInGameThread())
+    {
+        return MaterialGraphError(TEXT("wrong_thread"), TEXT("Material graph mutation requires the game thread"));
+    }
+    if (!IsValid(Material) || Material->HasAnyFlags(RF_Transient | RF_ClassDefaultObject | RF_ArchetypeObject))
+    {
+        return MaterialGraphError(TEXT("invalid_material"), TEXT("A persistent Material asset is required"));
+    }
+    if (!IsValid(SourceExpression) || !MaterialOwnsExpression(Material, SourceExpression))
+    {
+        return MaterialGraphError(
+            TEXT("expression_ownership_mismatch"),
+            TEXT("The source expression must belong to the target Material")
+        );
+    }
+    if (CustomizedUvIndex < 0 || CustomizedUvIndex >= 8)
+    {
+        return MaterialGraphError(
+            TEXT("invalid_customized_uv_index"),
+            TEXT("Customized UV index must be between 0 and 7")
+        );
+    }
+
+    if (SourceOutputIndex < -1)
+    {
+        return MaterialGraphError(
+            TEXT("invalid_output_selector"),
+            TEXT("Source output index must be -1 when selecting by exact name")
+        );
+    }
+    const bool bHasOutputIndex = SourceOutputIndex >= 0;
+    const bool bHasOutputName = !SourceOutputName.IsEmpty() && !SourceOutputName.TrimStartAndEnd().IsEmpty();
+    if (bHasOutputIndex == bHasOutputName)
+    {
+        return MaterialGraphError(
+            TEXT("invalid_output_selector"),
+            TEXT("Select exactly one source output by index or exact name")
+        );
+    }
+
+    TArray<FExpressionOutput>& Outputs = SourceExpression->GetOutputs();
+    int32 ResolvedOutputIndex = INDEX_NONE;
+    if (bHasOutputIndex)
+    {
+        if (!Outputs.IsValidIndex(SourceOutputIndex))
+        {
+            return MaterialGraphError(
+                TEXT("source_output_not_found"),
+                FString::Printf(TEXT("Source output index %d is out of range"), SourceOutputIndex)
+            );
+        }
+        ResolvedOutputIndex = SourceOutputIndex;
+    }
+    else
+    {
+        int32 MatchCount = 0;
+        for (int32 Index = 0; Index < Outputs.Num(); ++Index)
+        {
+            if (Outputs[Index].OutputName.ToString().Equals(SourceOutputName, ESearchCase::CaseSensitive))
+            {
+                ResolvedOutputIndex = Index;
+                ++MatchCount;
+            }
+        }
+        if (MatchCount != 1)
+        {
+            return MaterialGraphError(
+                TEXT("source_output_not_found"),
+                FString::Printf(
+                    TEXT("Source output name '%s' matched %d outputs; exactly one is required"),
+                    *SourceOutputName,
+                    MatchCount
+                )
+            );
+        }
+    }
+
+    UPackage* Package = Material->GetOutermost();
+    const FString PackageName = Package ? Package->GetName() : FString();
+    FString Filename;
+    if (!Package || Package == GetTransientPackage() || Package->HasAnyFlags(RF_Transient)
+        || !PackageName.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+        || !FPackageName::TryConvertLongPackageNameToFilename(
+            PackageName,
+            Filename,
+            FPackageName::GetAssetPackageExtension()
+        ))
+    {
+        return MaterialGraphError(
+            TEXT("invalid_material_package"),
+            TEXT("The Material must be stored in a valid /Game asset package")
+        );
+    }
+    if (Package->IsDirty())
+    {
+        return MaterialGraphError(
+            TEXT("material_package_dirty"),
+            TEXT("Save or revert existing Material changes before connecting a Customized UV input")
+        );
+    }
+
+    FVector2MaterialInput* TargetInput = GetCustomizedUvInput(Material, CustomizedUvIndex);
+    if (!TargetInput)
+    {
+        return MaterialGraphError(
+            TEXT("editor_only_data_unavailable"),
+            TEXT("Material editor-only graph data is unavailable")
+        );
+    }
+    if (TargetInput->Expression == SourceExpression
+        && TargetInput->OutputIndex == ResolvedOutputIndex
+        && Material->NumCustomizedUVs >= CustomizedUvIndex + 1)
+    {
+        TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+        Root->SetBoolField(TEXT("success"), true);
+        Root->SetBoolField(TEXT("changed"), false);
+        Root->SetBoolField(TEXT("saved"), true);
+        Root->SetBoolField(TEXT("verified"), true);
+        AddCustomizedUvConnectionFields(Root, Material, CustomizedUvIndex);
+        return SerializeJson(Root);
+    }
+    if (TargetInput->Expression && !bReplaceExisting)
+    {
+        return MaterialGraphError(
+            TEXT("customized_uv_occupied"),
+            TEXT("Customized UV input already has a different connection; set replace_existing=true to replace it")
+        );
+    }
+
+    const FVector2MaterialInput PreviousInput = *TargetInput;
+    const int32 PreviousNumCustomizedUvs = Material->NumCustomizedUVs;
+    FScopedTransaction Transaction(
+        NSLOCTEXT("DccMcpUnreal", "ConnectCustomizedUv", "DCC MCP Connect Customized UV")
+    );
+    Material->Modify();
+    Material->PreEditChange(nullptr);
+#if ENGINE_MAJOR_VERSION >= 5
+    UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
+    if (!EditorOnlyData)
+    {
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("editor_only_data_unavailable"),
+            TEXT("Material editor-only graph data is unavailable")
+        );
+    }
+    EditorOnlyData->CustomizedUVs[CustomizedUvIndex].Connect(ResolvedOutputIndex, SourceExpression);
+#else
+    Material->CustomizedUVs[CustomizedUvIndex].Connect(ResolvedOutputIndex, SourceExpression);
+#endif
+    Material->NumCustomizedUVs = FMath::Max(Material->NumCustomizedUVs, CustomizedUvIndex + 1);
+    Material->PostEditChange();
+
+    const auto HasExpectedConnection = [Material, SourceExpression, ResolvedOutputIndex, CustomizedUvIndex]()
+    {
+        const FVector2MaterialInput* Input = GetCustomizedUvInput(Material, CustomizedUvIndex);
+        return Input && Input->Expression == SourceExpression && Input->OutputIndex == ResolvedOutputIndex
+            && Material->NumCustomizedUVs >= CustomizedUvIndex + 1;
+    };
+    const auto RestorePreviousConnection = [
+        Material,
+        Package,
+        CustomizedUvIndex,
+        PreviousInput,
+        PreviousNumCustomizedUvs
+    ]()
+    {
+        FVector2MaterialInput* Input = GetCustomizedUvInput(Material, CustomizedUvIndex);
+        if (!Input)
+        {
+            return false;
+        }
+        Material->PreEditChange(nullptr);
+        *Input = PreviousInput;
+        Material->NumCustomizedUVs = PreviousNumCustomizedUvs;
+        Material->PostEditChange();
+        Package->SetDirtyFlag(false);
+        return Input->Expression == PreviousInput.Expression
+            && Input->OutputIndex == PreviousInput.OutputIndex
+            && Material->NumCustomizedUVs == PreviousNumCustomizedUvs
+            && !Package->IsDirty();
+    };
+
+    if (!HasExpectedConnection())
+    {
+        const bool bRolledBack = RestorePreviousConnection();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("postcondition_not_met"),
+            TEXT("Customized UV connection did not match the requested graph state"),
+            bRolledBack
+        );
+    }
+    if (!SaveMaterialPackage(Material, Filename))
+    {
+        const bool bRolledBack = RestorePreviousConnection();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("material_save_failed"),
+            TEXT("Unreal failed to save the Material package; the in-memory connection was rolled back"),
+            bRolledBack
+        );
+    }
+    if (!HasExpectedConnection() || Package->IsDirty())
+    {
+        const bool bRestoredInMemory = RestorePreviousConnection();
+        const bool bRestoredOnDisk = bRestoredInMemory && SaveMaterialPackage(Material, Filename) && !Package->IsDirty();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("post_save_verification_failed"),
+            TEXT("Saved Material state failed verification and rollback was attempted"),
+            bRestoredOnDisk
+        );
+    }
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("success"), true);
+    Root->SetBoolField(TEXT("changed"), true);
+    Root->SetBoolField(TEXT("saved"), true);
+    Root->SetBoolField(TEXT("verified"), true);
+    AddCustomizedUvConnectionFields(Root, Material, CustomizedUvIndex);
+    return SerializeJson(Root);
 }
 
 FString UDccMcpAutomationLibrary::CreateGeometryCollectionFromStaticMesh(

@@ -101,3 +101,54 @@ tools:
     next-tools:
       on-success: [unreal_assets__get_asset_info]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
+
+  - name: connect_material_expression_to_customized_uv
+    description: Connect one material-expression output to a numbered Customized UV input with native transaction, save, and post-save readback verification.
+    source_file: scripts/connect_material_expression_to_customized_uv.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 60
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [material_path, source_expression_name, customized_uv_index]
+      additionalProperties: false
+      oneOf:
+        - required: [source_output_index]
+          not:
+            required: [source_output_name]
+        - required: [source_output_name]
+          not:
+            required: [source_output_index]
+      properties:
+        material_path:
+          type: string
+          minLength: 1
+          description: Object path of a saved Material asset under /Game.
+        source_expression_name:
+          type: string
+          minLength: 1
+          description: Exact persistent UObject name of an expression owned by the material.
+        source_output_index:
+          type: integer
+          minimum: 0
+          description: Zero-based source output index; mutually exclusive with source_output_name.
+        source_output_name:
+          type: string
+          minLength: 1
+          description: Exact case-sensitive source output name; mutually exclusive with source_output_index.
+        customized_uv_index:
+          type: integer
+          minimum: 0
+          maximum: 7
+          description: Zero-based Customized UV input index on the material root node.
+        replace_existing:
+          type: boolean
+          default: false
+          description: Explicitly replace a different connection already occupying this Customized UV input.
+    next-tools:
+      on-success: [unreal_assets__get_asset_info]
+      on-failure: [dcc_diagnostics__audit_log]

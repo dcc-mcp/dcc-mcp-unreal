@@ -7,7 +7,12 @@ SKILLS = ROOT / "src" / "dcc_mcp_unreal" / "skills"
 def test_core_fracture_editor_skills_are_typed_and_discoverable() -> None:
     expected = {
         "unreal-chaos": ["create_geometry_collection", "spawn_geometry_collection_actor"],
-        "unreal-materials": ["create_material_instance", "set_material_instance_parameters", "assign_material"],
+        "unreal-materials": [
+            "create_material_instance",
+            "set_material_instance_parameters",
+            "connect_material_expression_to_customized_uv",
+            "assign_material",
+        ],
         "unreal-runtime": ["start_physics_simulation", "stop_physics_simulation"],
     }
 
