@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
@@ -25,31 +26,62 @@ def set_material_instance_parameters(
     vector_parameters = vector_parameters or {}
     texture_parameters = texture_parameters or {}
 
+    normalized_scalars = {}
     for name, value in scalar_parameters.items():
         if not isinstance(value, (int, float)):
             return skill_error("Invalid scalar parameter", f"'{name}' must be a number")
-        unreal.MaterialEditingLibrary.set_material_instance_scalar_parameter_value(instance, name, float(value))
+        normalized_scalars[name] = float(value)
+    normalized_vectors = {}
     for name, value in vector_parameters.items():
         if not isinstance(value, (list, tuple)) or len(value) not in (3, 4):
             return skill_error("Invalid vector parameter", f"'{name}' must contain three or four numbers")
         rgba = [float(component) for component in value]
         if len(rgba) == 3:
             rgba.append(1.0)
-        unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value(
-            instance, name, unreal.LinearColor(*rgba)
-        )
+        normalized_vectors[name] = unreal.LinearColor(*rgba)
+    texture_assets = {}
     for name, texture_path in texture_parameters.items():
         texture = unreal.EditorAssetLibrary.load_asset(texture_path)
         if texture is None or not isinstance(texture, unreal.Texture):
             return skill_error("Texture parameter asset not found", f"'{texture_path}' is not a Texture")
-        unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value(instance, name, texture)
+        texture_assets[name] = texture
 
-    if not unreal.EditorAssetLibrary.save_loaded_asset(instance, only_if_is_dirty=False):
-        return skill_error("Failed to save Material Instance", instance_path)
+    bridge = getattr(unreal, "DccMcpAutomationLibrary", None)
+    configure = getattr(bridge, "configure_material_instance_parameters", None)
+    if not callable(configure):
+        return skill_error(
+            "Native Material Instance bridge unavailable",
+            "Install a DCC-MCP Unreal plugin that exposes configure_material_instance_parameters",
+        )
+    try:
+        native_result = json.loads(
+            configure(instance, normalized_scalars, normalized_vectors, texture_assets)
+        )
+    except (TypeError, ValueError) as exc:
+        return skill_error("Native Material Instance bridge failed", f"invalid result: {exc}")
+    if not isinstance(native_result, dict) or not native_result.get("success"):
+        return skill_error(
+            "Native Material Instance bridge failed",
+            str((native_result or {}).get("message") or "native operation failed"),
+            native_result=native_result,
+        )
+    if (
+        not native_result.get("saved")
+        or not native_result.get("verified")
+        or native_result.get("package_dirty")
+    ):
+        return skill_error(
+            "Native Material Instance verification failed",
+            "The native bridge did not verify a clean saved package",
+            native_result=native_result,
+        )
     return skill_success(
         f"Updated Material Instance '{instance_path}'",
         instance_path=instance_path,
         scalar_parameters=scalar_parameters,
         vector_parameters=vector_parameters,
         texture_parameters=texture_parameters,
+        changed=bool(native_result.get("changed")),
+        native_verified=True,
+        native_result=native_result,
     )
