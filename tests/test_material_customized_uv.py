@@ -91,9 +91,22 @@ def test_native_bridge_uses_editor_only_customized_uv_and_synchronous_save_verif
     assert "EditorOnlyData->CustomizedUVs[CustomizedUvIndex].Connect" in implementation
     assert "EditorOnlyData->ExpressionCollection.Expressions.Contains(SourceExpression)" in implementation
     assert "FScopedTransaction Transaction" in implementation
+    ensure_call = implementation.index("Material->EnsureIsComplete()")
+    assert implementation.rfind("#if ENGINE_MAJOR_VERSION >= 5", 0, ensure_call) != -1
+    assert implementation.find("#endif", ensure_call) != -1
     assert "UPackage::SavePackage" in implementation
     assert "Package->IsDirty()" in implementation
     assert "MP_CustomizedUVs" not in implementation
+    assert "FString MaterialOutputName(const FExpressionOutput& Output)" in implementation
+    assert "#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26" in implementation
+
+
+def test_native_automation_fixture_uses_the_ue418_create_package_signature() -> None:
+    automation_test = (
+        ROOT / "unreal" / "plugin" / "Source" / "DccMcpUnreal" / "Private" / "DccMcpUnrealAutomationTests.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "CreatePackage(nullptr, *PackageName)" in automation_test
 
 
 def test_connects_by_output_index_and_verifies_the_saved_connection() -> None:

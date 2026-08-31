@@ -122,7 +122,11 @@ bool FDccMcpCustomizedUvBridgeTest::RunTest(const FString& Parameters)
         PackageName,
         FPackageName::GetAssetPackageExtension()
     );
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26
+    UPackage* Package = CreatePackage(nullptr, *PackageName);
+#else
     UPackage* Package = CreatePackage(*PackageName);
+#endif
     UMaterial* Material = NewObject<UMaterial>(
         Package,
         FName(*AssetName),
