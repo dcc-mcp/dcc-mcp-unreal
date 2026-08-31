@@ -25,6 +25,11 @@ metadata:
 - `connect_material_expression_to_customized_uv`
 - `assign_material`
 
+`set_material_instance_parameters` routes scalar, vector, and texture overrides
+through one native editor transaction. It rejects dirty packages, saves
+synchronously, verifies the requested overrides and clean package state, and
+restores the previous override arrays when mutation or persistence fails.
+
 `connect_material_expression_to_customized_uv` is the typed material-root path for
 Customized UV 0-7. Select exactly one source output by zero-based index or exact,
 case-sensitive output name. The native editor bridge validates graph ownership,

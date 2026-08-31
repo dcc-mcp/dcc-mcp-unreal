@@ -9,6 +9,8 @@ class AActor;
 class APawn;
 class UMaterial;
 class UMaterialExpression;
+class UMaterialInstanceConstant;
+class UTexture;
 class UWorld;
 
 UCLASS()
@@ -111,4 +113,12 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "DCC MCP|Materials")
     static FString GetMaterialCustomizedUvConnection(UMaterial* Material, int32 CustomizedUvIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Materials")
+    static FString ConfigureMaterialInstanceParameters(
+        UMaterialInstanceConstant* Instance,
+        const TMap<FString, float>& ScalarParameters,
+        const TMap<FString, FLinearColor>& VectorParameters,
+        const TMap<FString, UTexture*>& TextureParameters
+    );
 };

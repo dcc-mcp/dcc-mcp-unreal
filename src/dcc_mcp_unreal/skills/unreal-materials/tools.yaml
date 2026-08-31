@@ -31,7 +31,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: set_material_instance_parameters
-    description: Set scalar, vector, and texture parameters on a Material Instance.
+    description: Set scalar, vector, and texture parameters on a Material Instance with native transaction, save, and post-save verification.
     source_file: scripts/set_material_instance_parameters.py
     execution: sync
     affinity: main

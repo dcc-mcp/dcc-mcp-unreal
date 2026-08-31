@@ -39,6 +39,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
@@ -55,6 +56,7 @@
 #endif
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "Engine/Texture.h"
 #include "Widgets/SWindow.h"
 
 namespace
@@ -301,9 +303,9 @@ void AddCustomizedUvConnectionFields(
     Root->SetBoolField(TEXT("package_dirty"), Package ? Package->IsDirty() : false);
 }
 
-bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
+bool SaveAssetPackage(UObject* Asset, const FString& Filename)
 {
-    UPackage* Package = Material ? Material->GetOutermost() : nullptr;
+    UPackage* Package = Asset ? Asset->GetOutermost() : nullptr;
     if (!Package || Filename.IsEmpty())
     {
         return false;
@@ -314,11 +316,11 @@ bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
     SaveArgs.SaveFlags = SAVE_NoError;
     SaveArgs.bWarnOfLongFilename = false;
     SaveArgs.bSlowTask = false;
-    return UPackage::SavePackage(Package, Material, *Filename, SaveArgs);
+    return UPackage::SavePackage(Package, Asset, *Filename, SaveArgs);
 #else
     return UPackage::SavePackage(
         Package,
-        Material,
+        Asset,
         RF_Public | RF_Standalone,
         *Filename,
         GError,
@@ -330,6 +332,65 @@ bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
         FDateTime::MinValue(),
         false
     );
+#endif
+}
+
+bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
+{
+    return SaveAssetPackage(Material, Filename);
+}
+
+FName MaterialInstanceParameterName(const FScalarParameterValue& Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    return Value.ParameterName;
+#else
+    return Value.ParameterInfo.Name;
+#endif
+}
+
+FName MaterialInstanceParameterName(const FVectorParameterValue& Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    return Value.ParameterName;
+#else
+    return Value.ParameterInfo.Name;
+#endif
+}
+
+FName MaterialInstanceParameterName(const FTextureParameterValue& Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    return Value.ParameterName;
+#else
+    return Value.ParameterInfo.Name;
+#endif
+}
+
+void SetMaterialInstanceScalarOverride(UMaterialInstanceConstant* Instance, FName Name, float Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    Instance->SetScalarParameterValueEditorOnly(Name, Value);
+#else
+    Instance->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(Name), Value);
+#endif
+}
+
+void SetMaterialInstanceVectorOverride(UMaterialInstanceConstant* Instance, FName Name, FLinearColor Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    Instance->SetVectorParameterValueEditorOnly(Name, Value);
+#else
+    Instance->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(Name), Value);
+#endif
+}
+
+void SetMaterialInstanceTextureOverride(UMaterialInstanceConstant* Instance, FName Name, UTexture* Value)
+{
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    Instance->SetTextureParameterValueEditorOnly(Name, Value);
+#else
+    Instance->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(Name), Value);
 #endif
 }
 
@@ -1096,6 +1157,308 @@ FString UDccMcpAutomationLibrary::GetMaterialCustomizedUvConnection(
     TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
     Root->SetBoolField(TEXT("success"), true);
     AddCustomizedUvConnectionFields(Root, Material, CustomizedUvIndex);
+    return SerializeJson(Root);
+}
+
+FString UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
+    UMaterialInstanceConstant* Instance,
+    const TMap<FString, float>& ScalarParameters,
+    const TMap<FString, FLinearColor>& VectorParameters,
+    const TMap<FString, UTexture*>& TextureParameters
+)
+{
+    if (!IsInGameThread())
+    {
+        return MaterialGraphError(TEXT("wrong_thread"), TEXT("Material Instance mutation requires the game thread"));
+    }
+    if (!IsValid(Instance) || Instance->HasAnyFlags(RF_Transient | RF_ClassDefaultObject | RF_ArchetypeObject))
+    {
+        return MaterialGraphError(
+            TEXT("invalid_material_instance"),
+            TEXT("A persistent Material Instance Constant asset is required")
+        );
+    }
+    if (ScalarParameters.Num() == 0 && VectorParameters.Num() == 0 && TextureParameters.Num() == 0)
+    {
+        return MaterialGraphError(
+            TEXT("empty_parameter_set"),
+            TEXT("At least one scalar, vector, or texture parameter is required")
+        );
+    }
+    for (const TPair<FString, float>& Pair : ScalarParameters)
+    {
+        if (Pair.Key.TrimStartAndEnd().IsEmpty() || !FMath::IsFinite(Pair.Value))
+        {
+            return MaterialGraphError(
+                TEXT("invalid_scalar_parameter"),
+                TEXT("Scalar parameter names must be non-empty and values must be finite")
+            );
+        }
+    }
+    for (const TPair<FString, FLinearColor>& Pair : VectorParameters)
+    {
+        if (Pair.Key.TrimStartAndEnd().IsEmpty()
+            || !FMath::IsFinite(Pair.Value.R)
+            || !FMath::IsFinite(Pair.Value.G)
+            || !FMath::IsFinite(Pair.Value.B)
+            || !FMath::IsFinite(Pair.Value.A))
+        {
+            return MaterialGraphError(
+                TEXT("invalid_vector_parameter"),
+                TEXT("Vector parameter names must be non-empty and values must be finite")
+            );
+        }
+    }
+    for (const TPair<FString, UTexture*>& Pair : TextureParameters)
+    {
+        if (Pair.Key.TrimStartAndEnd().IsEmpty() || !IsValid(Pair.Value))
+        {
+            return MaterialGraphError(
+                TEXT("invalid_texture_parameter"),
+                TEXT("Texture parameter names and assets must be valid")
+            );
+        }
+    }
+
+    UPackage* Package = Instance->GetOutermost();
+    const FString PackageName = Package ? Package->GetName() : FString();
+    FString Filename;
+    if (!Package || Package == GetTransientPackage() || Package->HasAnyFlags(RF_Transient)
+        || !PackageName.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+        || !FPackageName::TryConvertLongPackageNameToFilename(
+            PackageName,
+            Filename,
+            FPackageName::GetAssetPackageExtension()
+        ))
+    {
+        return MaterialGraphError(
+            TEXT("invalid_material_instance_package"),
+            TEXT("The Material Instance must be stored in a valid /Game asset package")
+        );
+    }
+    if (Package->IsDirty())
+    {
+        return MaterialGraphError(
+            TEXT("material_instance_package_dirty"),
+            TEXT("Save or revert existing Material Instance changes before configuring parameters")
+        );
+    }
+
+    const auto HasExpectedOverrides = [Instance, &ScalarParameters, &VectorParameters, &TextureParameters]()
+    {
+        for (const TPair<FString, float>& Pair : ScalarParameters)
+        {
+            const FName ExpectedName(*Pair.Key);
+            const FScalarParameterValue* Match = Instance->ScalarParameterValues.FindByPredicate(
+                [ExpectedName](const FScalarParameterValue& Value)
+                {
+                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                }
+            );
+            if (!Match || !FMath::IsNearlyEqual(Match->ParameterValue, Pair.Value))
+            {
+                return false;
+            }
+        }
+        for (const TPair<FString, FLinearColor>& Pair : VectorParameters)
+        {
+            const FName ExpectedName(*Pair.Key);
+            const FVectorParameterValue* Match = Instance->VectorParameterValues.FindByPredicate(
+                [ExpectedName](const FVectorParameterValue& Value)
+                {
+                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                }
+            );
+            if (!Match || !Match->ParameterValue.Equals(Pair.Value))
+            {
+                return false;
+            }
+        }
+        for (const TPair<FString, UTexture*>& Pair : TextureParameters)
+        {
+            const FName ExpectedName(*Pair.Key);
+            const FTextureParameterValue* Match = Instance->TextureParameterValues.FindByPredicate(
+                [ExpectedName](const FTextureParameterValue& Value)
+                {
+                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                }
+            );
+            if (!Match || Match->ParameterValue != Pair.Value)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (HasExpectedOverrides())
+    {
+        TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+        Root->SetBoolField(TEXT("success"), true);
+        Root->SetBoolField(TEXT("changed"), false);
+        Root->SetBoolField(TEXT("saved"), true);
+        Root->SetBoolField(TEXT("verified"), true);
+        Root->SetNumberField(TEXT("scalar_parameter_count"), ScalarParameters.Num());
+        Root->SetNumberField(TEXT("vector_parameter_count"), VectorParameters.Num());
+        Root->SetNumberField(TEXT("texture_parameter_count"), TextureParameters.Num());
+        Root->SetBoolField(TEXT("package_dirty"), false);
+        return SerializeJson(Root);
+    }
+
+    const TArray<FScalarParameterValue> PreviousScalarParameters = Instance->ScalarParameterValues;
+    const TArray<FVectorParameterValue> PreviousVectorParameters = Instance->VectorParameterValues;
+    const TArray<FTextureParameterValue> PreviousTextureParameters = Instance->TextureParameterValues;
+    FScopedTransaction Transaction(
+        NSLOCTEXT("DccMcpUnreal", "ConfigureMaterialInstance", "DCC MCP Configure Material Instance")
+    );
+    Instance->Modify();
+    Instance->PreEditChange(nullptr);
+    for (const TPair<FString, float>& Pair : ScalarParameters)
+    {
+        SetMaterialInstanceScalarOverride(Instance, FName(*Pair.Key), Pair.Value);
+    }
+    for (const TPair<FString, FLinearColor>& Pair : VectorParameters)
+    {
+        SetMaterialInstanceVectorOverride(Instance, FName(*Pair.Key), Pair.Value);
+    }
+    for (const TPair<FString, UTexture*>& Pair : TextureParameters)
+    {
+        SetMaterialInstanceTextureOverride(Instance, FName(*Pair.Key), Pair.Value);
+    }
+    Instance->PostEditChange();
+#if ENGINE_MAJOR_VERSION >= 5
+    Instance->EnsureIsComplete();
+#endif
+
+    const auto RestorePreviousOverrides = [
+        Instance,
+        Package,
+        PreviousScalarParameters,
+        PreviousVectorParameters,
+        PreviousTextureParameters
+    ]()
+    {
+        Instance->PreEditChange(nullptr);
+        Instance->ScalarParameterValues = PreviousScalarParameters;
+        Instance->VectorParameterValues = PreviousVectorParameters;
+        Instance->TextureParameterValues = PreviousTextureParameters;
+        Instance->PostEditChange();
+        Package->SetDirtyFlag(false);
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+        const auto ScalarArraysEqual = [](
+            const TArray<FScalarParameterValue>& Left,
+            const TArray<FScalarParameterValue>& Right
+        )
+        {
+            if (Left.Num() != Right.Num())
+            {
+                return false;
+            }
+            for (int32 Index = 0; Index < Left.Num(); ++Index)
+            {
+                if (Left[Index].ParameterName != Right[Index].ParameterName
+                    || !FMath::IsNearlyEqual(Left[Index].ParameterValue, Right[Index].ParameterValue)
+                    || Left[Index].ExpressionGUID != Right[Index].ExpressionGUID)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto VectorArraysEqual = [](
+            const TArray<FVectorParameterValue>& Left,
+            const TArray<FVectorParameterValue>& Right
+        )
+        {
+            if (Left.Num() != Right.Num())
+            {
+                return false;
+            }
+            for (int32 Index = 0; Index < Left.Num(); ++Index)
+            {
+                if (Left[Index].ParameterName != Right[Index].ParameterName
+                    || Left[Index].ParameterValue != Right[Index].ParameterValue
+                    || Left[Index].ExpressionGUID != Right[Index].ExpressionGUID)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto TextureArraysEqual = [](
+            const TArray<FTextureParameterValue>& Left,
+            const TArray<FTextureParameterValue>& Right
+        )
+        {
+            if (Left.Num() != Right.Num())
+            {
+                return false;
+            }
+            for (int32 Index = 0; Index < Left.Num(); ++Index)
+            {
+                if (Left[Index].ParameterName != Right[Index].ParameterName
+                    || Left[Index].ParameterValue != Right[Index].ParameterValue
+                    || Left[Index].ExpressionGUID != Right[Index].ExpressionGUID)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        return ScalarArraysEqual(Instance->ScalarParameterValues, PreviousScalarParameters)
+            && VectorArraysEqual(Instance->VectorParameterValues, PreviousVectorParameters)
+            && TextureArraysEqual(Instance->TextureParameterValues, PreviousTextureParameters)
+            && !Package->IsDirty();
+#else
+        return Instance->ScalarParameterValues == PreviousScalarParameters
+            && Instance->VectorParameterValues == PreviousVectorParameters
+            && Instance->TextureParameterValues == PreviousTextureParameters
+            && !Package->IsDirty();
+#endif
+    };
+
+    if (!HasExpectedOverrides())
+    {
+        const bool bRolledBack = RestorePreviousOverrides();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("postcondition_not_met"),
+            TEXT("Material Instance overrides did not match the requested values"),
+            bRolledBack
+        );
+    }
+    if (!SaveAssetPackage(Instance, Filename))
+    {
+        const bool bRolledBack = RestorePreviousOverrides();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("material_instance_save_failed"),
+            TEXT("Unreal failed to save the Material Instance package; in-memory overrides were rolled back"),
+            bRolledBack
+        );
+    }
+    if (!HasExpectedOverrides() || Package->IsDirty())
+    {
+        const bool bRestoredInMemory = RestorePreviousOverrides();
+        const bool bRestoredOnDisk = bRestoredInMemory
+            && SaveAssetPackage(Instance, Filename)
+            && !Package->IsDirty();
+        Transaction.Cancel();
+        return MaterialGraphError(
+            TEXT("post_save_verification_failed"),
+            TEXT("Saved Material Instance state failed verification and rollback was attempted"),
+            bRestoredOnDisk
+        );
+    }
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("success"), true);
+    Root->SetBoolField(TEXT("changed"), true);
+    Root->SetBoolField(TEXT("saved"), true);
+    Root->SetBoolField(TEXT("verified"), true);
+    Root->SetNumberField(TEXT("scalar_parameter_count"), ScalarParameters.Num());
+    Root->SetNumberField(TEXT("vector_parameter_count"), VectorParameters.Num());
+    Root->SetNumberField(TEXT("texture_parameter_count"), TextureParameters.Num());
+    Root->SetBoolField(TEXT("package_dirty"), Package->IsDirty());
     return SerializeJson(Root);
 }
 
