@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.5](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.4...v0.3.5) (2026-08-31)
+
+
+### Features
+
+* add verified customized uv connections ([fbc5bc9](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/fbc5bc960fb02c841c300f8b2c6c4284e2b887d0))
+* add verified material instance parameters ([38189af](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/38189af7460ba7b7f3f92606275d0ff90080d09b))
+
+
+### Bug Fixes
+
+* bind install payload to target distribution ([01cc703](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/01cc7031919237f8e76a90f9a63d93cf400579ca))
+* harden install transaction ownership ([5231e1c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5231e1c5bfff3076366a4bd98c43f28569cd9b68))
+* harden material instance verification ([002eae5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/002eae58ce878f4fccdce1f0e18f5896bfd374d9))
+* isolate target ownership probe ([bd8fa87](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/bd8fa87026774a2f4648629a904ca43749d48a8d))
+* make PIE log snapshots queryable ([#201](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/201)) ([25438f4](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/25438f4bfb601b65bda2146a2634b80a2d5683d7))
+* make Unreal diagnostics retry-safe ([4268466](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4268466945eb163a0350bd36d6600fd93b990b5d))
+* **playtest:** bind input cleanup to native receivers ([b2e4f21](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b2e4f21ff9099175be84d881a78d92ce175ade38))
+* **playtest:** bind navigation and recovery lifecycles ([9c079dd](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/9c079dd670e5f3dbb06f493583f84218a3af3f4b))
+* **playtest:** guarantee bounded key release ([33ce631](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/33ce6315894b80d1774df7e711607978fcd50685))
+* preserve install ownership across package contexts ([d1eec31](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d1eec31aa4f7a2d3b6673b9c3e6a41dc71f11adf))
+* support embedded Python ownership probes ([e0acb83](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/e0acb83f89a8a36c4968678f79dd095ad5045209))
+* support material bridge on unreal 4.18 ([582d1b5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/582d1b5b95e6125f9a4ac43b0386894bca989de3))
+* verify playtest movement transitions ([e5665e8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/e5665e837b75ba7d9d7d7af4050581ee888afdad))
+
 ## [0.3.4](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.3...v0.3.4) (2026-08-26)
 
 
