@@ -7,6 +7,8 @@
 class APlayerController;
 class AActor;
 class APawn;
+class UMaterial;
+class UMaterialExpression;
 class UWorld;
 
 UCLASS()
@@ -96,4 +98,17 @@ public:
         float DamageThreshold,
         const FString& Label
     );
+
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Materials")
+    static FString ConnectMaterialExpressionToCustomizedUv(
+        UMaterial* Material,
+        UMaterialExpression* SourceExpression,
+        int32 SourceOutputIndex,
+        const FString& SourceOutputName,
+        int32 CustomizedUvIndex,
+        bool bReplaceExisting
+    );
+
+    UFUNCTION(BlueprintPure, Category = "DCC MCP|Materials")
+    static FString GetMaterialCustomizedUvConnection(UMaterial* Material, int32 CustomizedUvIndex);
 };
