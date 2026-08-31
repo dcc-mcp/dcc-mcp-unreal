@@ -1,10 +1,12 @@
 #include "DccMcpAutomationLibrary.h"
 
 #include "Dom/JsonObject.h"
+#include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
@@ -72,9 +74,9 @@ bool FDccMcpUnrealNativeSmokeTest::RunTest(const FString& Parameters)
 
 namespace
 {
-bool SaveAutomationMaterial(UMaterial* Material, const FString& Filename)
+bool SaveAutomationAsset(UObject* Asset, const FString& Filename)
 {
-    UPackage* Package = Material ? Material->GetOutermost() : nullptr;
+    UPackage* Package = Asset ? Asset->GetOutermost() : nullptr;
     if (!Package)
     {
         return false;
@@ -85,11 +87,11 @@ bool SaveAutomationMaterial(UMaterial* Material, const FString& Filename)
     SaveArgs.SaveFlags = SAVE_NoError;
     SaveArgs.bWarnOfLongFilename = false;
     SaveArgs.bSlowTask = false;
-    return UPackage::SavePackage(Package, Material, *Filename, SaveArgs);
+    return UPackage::SavePackage(Package, Asset, *Filename, SaveArgs);
 #else
     return UPackage::SavePackage(
         Package,
-        Material,
+        Asset,
         RF_Public | RF_Standalone,
         *Filename,
         GError,
@@ -159,7 +161,7 @@ bool FDccMcpCustomizedUvBridgeTest::RunTest(const FString& Parameters)
     Material->Expressions.Add(Expression);
 #endif
     Material->MarkPackageDirty();
-    if (!SaveAutomationMaterial(Material, Filename) || Package->IsDirty())
+    if (!SaveAutomationAsset(Material, Filename) || Package->IsDirty())
     {
         AddError(TEXT("Failed to save the baseline automation Material."));
         IFileManager::Get().Delete(*Filename, false, true, true);
@@ -246,6 +248,208 @@ bool FDccMcpCustomizedUvBridgeTest::RunTest(const FString& Parameters)
     if (!IFileManager::Get().Delete(*Filename, false, true, true))
     {
         AddError(TEXT("Failed to remove the automation Material package."));
+        bPassed = false;
+    }
+    return bPassed;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDccMcpMaterialInstanceParameterIdentityTest,
+    "DccMcp.Smoke.MaterialInstanceParameterIdentity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FDccMcpMaterialInstanceParameterIdentityTest::RunTest(const FString& Parameters)
+{
+    const FString AssetName = FString::Printf(
+        TEXT("MI_DccMcpParameterIdentity_%s"),
+        *FGuid::NewGuid().ToString(EGuidFormats::Digits)
+    );
+    const FString PackageName = TEXT("/Game/DccMcpAutomation/") + AssetName;
+    const FString Filename = FPackageName::LongPackageNameToFilename(
+        PackageName,
+        FPackageName::GetAssetPackageExtension()
+    );
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26
+    UPackage* Package = CreatePackage(nullptr, *PackageName);
+#else
+    UPackage* Package = CreatePackage(*PackageName);
+#endif
+    UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(
+        Package,
+        FName(*AssetName),
+        RF_Public | RF_Standalone | RF_Transactional
+    );
+    if (!Package || !Instance)
+    {
+        AddError(TEXT("Failed to create the automation Material Instance."));
+        return false;
+    }
+
+    const FName ParameterName(TEXT("SharedParameter"));
+#if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION > 18
+    FScalarParameterValue LayerOverride;
+    LayerOverride.ParameterInfo = FMaterialParameterInfo(
+        ParameterName,
+        EMaterialParameterAssociation::LayerParameter,
+        0
+    );
+    LayerOverride.ParameterValue = 0.5f;
+    Instance->ScalarParameterValues.Add(LayerOverride);
+#endif
+    Package->MarkPackageDirty();
+    if (!SaveAutomationAsset(Instance, Filename) || Package->IsDirty())
+    {
+        AddError(TEXT("Failed to save the baseline automation Material Instance."));
+        IFileManager::Get().Delete(*Filename, false, true, true);
+        return false;
+    }
+
+    TMap<FString, float> ScalarParameters;
+    ScalarParameters.Add(ParameterName.ToString(), 0.5f);
+    const TMap<FString, FLinearColor> VectorParameters;
+    const TMap<FString, UTexture*> TextureParameters;
+
+    const auto ParseResult = [this](const FString& Payload, bool ExpectedChanged)
+    {
+        TSharedPtr<FJsonObject> Result;
+        const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Payload);
+        bool bSuccess = false;
+        bool bChanged = !ExpectedChanged;
+        bool bVerified = false;
+        bool bPackageDirty = true;
+        const bool bValid = FJsonSerializer::Deserialize(Reader, Result) && Result.IsValid()
+            && Result->TryGetBoolField(TEXT("success"), bSuccess)
+            && Result->TryGetBoolField(TEXT("changed"), bChanged)
+            && Result->TryGetBoolField(TEXT("verified"), bVerified)
+            && Result->TryGetBoolField(TEXT("package_dirty"), bPackageDirty);
+        TestTrue(TEXT("Material Instance bridge returned valid JSON"), bValid);
+        TestTrue(TEXT("Material Instance bridge reported success"), bSuccess);
+        TestEqual(TEXT("Material Instance bridge reported the expected change state"), bChanged, ExpectedChanged);
+        TestTrue(TEXT("Material Instance bridge verified the override"), bVerified);
+        TestFalse(TEXT("Saved Material Instance package is clean"), bPackageDirty);
+        return bValid && bSuccess && bChanged == ExpectedChanged && bVerified && !bPackageDirty;
+    };
+
+    bool bPassed = ParseResult(
+        UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
+            Instance,
+            ScalarParameters,
+            VectorParameters,
+            TextureParameters
+        ),
+        true
+    );
+
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
+    const bool bHasGlobalOverride = Instance->ScalarParameterValues.ContainsByPredicate(
+        [ParameterName](const FScalarParameterValue& Value)
+        {
+            return Value.ParameterName == ParameterName && FMath::IsNearlyEqual(Value.ParameterValue, 0.5f);
+        }
+    );
+#else
+    const FMaterialParameterInfo ExpectedInfo(ParameterName);
+    const bool bHasGlobalOverride = Instance->ScalarParameterValues.ContainsByPredicate(
+        [ExpectedInfo](const FScalarParameterValue& Value)
+        {
+            return Value.ParameterInfo == ExpectedInfo && FMath::IsNearlyEqual(Value.ParameterValue, 0.5f);
+        }
+    );
+#endif
+    TestTrue(TEXT("The requested global parameter override exists"), bHasGlobalOverride);
+    bPassed &= bHasGlobalOverride;
+
+    bPassed &= ParseResult(
+        UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
+            Instance,
+            ScalarParameters,
+            VectorParameters,
+            TextureParameters
+        ),
+        false
+    );
+
+    Package->SetDirtyFlag(false);
+    if (!IFileManager::Get().Delete(*Filename, false, true, true))
+    {
+        AddError(TEXT("Failed to remove the automation Material Instance package."));
+        bPassed = false;
+    }
+    return bPassed;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDccMcpMaterialInstanceTransientTextureTest,
+    "DccMcp.Smoke.MaterialInstanceTransientTexture",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FDccMcpMaterialInstanceTransientTextureTest::RunTest(const FString& Parameters)
+{
+    const FString AssetName = FString::Printf(
+        TEXT("MI_DccMcpTransientTexture_%s"),
+        *FGuid::NewGuid().ToString(EGuidFormats::Digits)
+    );
+    const FString PackageName = TEXT("/Game/DccMcpAutomation/") + AssetName;
+    const FString Filename = FPackageName::LongPackageNameToFilename(
+        PackageName,
+        FPackageName::GetAssetPackageExtension()
+    );
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 26
+    UPackage* Package = CreatePackage(nullptr, *PackageName);
+#else
+    UPackage* Package = CreatePackage(*PackageName);
+#endif
+    UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(
+        Package,
+        FName(*AssetName),
+        RF_Public | RF_Standalone | RF_Transactional
+    );
+    UTexture2D* TransientTexture = NewObject<UTexture2D>(GetTransientPackage());
+    if (!Package || !Instance || !TransientTexture)
+    {
+        AddError(TEXT("Failed to create the transient-texture automation inputs."));
+        return false;
+    }
+    Package->MarkPackageDirty();
+    if (!SaveAutomationAsset(Instance, Filename) || Package->IsDirty())
+    {
+        AddError(TEXT("Failed to save the baseline transient-texture Material Instance."));
+        IFileManager::Get().Delete(*Filename, false, true, true);
+        return false;
+    }
+
+    const TMap<FString, float> ScalarParameters;
+    const TMap<FString, FLinearColor> VectorParameters;
+    TMap<FString, UTexture*> TextureParameters;
+    TextureParameters.Add(TEXT("TransientTexture"), TransientTexture);
+    const FString Payload = UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
+        Instance,
+        ScalarParameters,
+        VectorParameters,
+        TextureParameters
+    );
+
+    TSharedPtr<FJsonObject> Result;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Payload);
+    bool bSuccess = true;
+    FString ErrorCode;
+    const bool bValid = FJsonSerializer::Deserialize(Reader, Result) && Result.IsValid()
+        && Result->TryGetBoolField(TEXT("success"), bSuccess)
+        && Result->TryGetStringField(TEXT("error_code"), ErrorCode);
+    TestTrue(TEXT("Transient texture rejection returned valid JSON"), bValid);
+    TestFalse(TEXT("Transient texture is rejected"), bSuccess);
+    TestEqual(TEXT("Transient texture uses the input validation error"), ErrorCode, FString(TEXT("invalid_texture_parameter")));
+    TestFalse(TEXT("Rejected transient texture leaves the package clean"), Package->IsDirty());
+    TestEqual(TEXT("Rejected transient texture leaves no override"), Instance->TextureParameterValues.Num(), 0);
+
+    Package->SetDirtyFlag(false);
+    bool bPassed = bValid && !bSuccess && ErrorCode == TEXT("invalid_texture_parameter")
+        && !Package->IsDirty() && Instance->TextureParameterValues.Num() == 0;
+    if (!IFileManager::Get().Delete(*Filename, false, true, true))
+    {
+        AddError(TEXT("Failed to remove the transient-texture automation package."));
         bPassed = false;
     }
     return bPassed;

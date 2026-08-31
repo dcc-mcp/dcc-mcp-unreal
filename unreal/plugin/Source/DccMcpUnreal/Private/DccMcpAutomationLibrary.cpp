@@ -340,30 +340,30 @@ bool SaveMaterialPackage(UMaterial* Material, const FString& Filename)
     return SaveAssetPackage(Material, Filename);
 }
 
-FName MaterialInstanceParameterName(const FScalarParameterValue& Value)
+bool MaterialInstanceParameterMatches(const FScalarParameterValue& Value, FName Name)
 {
 #if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
-    return Value.ParameterName;
+    return Value.ParameterName == Name;
 #else
-    return Value.ParameterInfo.Name;
+    return Value.ParameterInfo == FMaterialParameterInfo(Name);
 #endif
 }
 
-FName MaterialInstanceParameterName(const FVectorParameterValue& Value)
+bool MaterialInstanceParameterMatches(const FVectorParameterValue& Value, FName Name)
 {
 #if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
-    return Value.ParameterName;
+    return Value.ParameterName == Name;
 #else
-    return Value.ParameterInfo.Name;
+    return Value.ParameterInfo == FMaterialParameterInfo(Name);
 #endif
 }
 
-FName MaterialInstanceParameterName(const FTextureParameterValue& Value)
+bool MaterialInstanceParameterMatches(const FTextureParameterValue& Value, FName Name)
 {
 #if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 18
-    return Value.ParameterName;
+    return Value.ParameterName == Name;
 #else
-    return Value.ParameterInfo.Name;
+    return Value.ParameterInfo == FMaterialParameterInfo(Name);
 #endif
 }
 
@@ -1211,11 +1211,18 @@ FString UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
     }
     for (const TPair<FString, UTexture*>& Pair : TextureParameters)
     {
-        if (Pair.Key.TrimStartAndEnd().IsEmpty() || !IsValid(Pair.Value))
+        UPackage* TexturePackage = IsValid(Pair.Value) ? Pair.Value->GetOutermost() : nullptr;
+        if (Pair.Key.TrimStartAndEnd().IsEmpty()
+            || !IsValid(Pair.Value)
+            || Pair.Value->HasAnyFlags(RF_Transient | RF_ClassDefaultObject | RF_ArchetypeObject)
+            || !Pair.Value->HasAllFlags(RF_Public | RF_Standalone)
+            || !TexturePackage
+            || TexturePackage == GetTransientPackage()
+            || TexturePackage->HasAnyFlags(RF_Transient))
         {
             return MaterialGraphError(
                 TEXT("invalid_texture_parameter"),
-                TEXT("Texture parameter names and assets must be valid")
+                TEXT("Texture parameter names and persistent texture assets must be valid")
             );
         }
     }
@@ -1252,7 +1259,7 @@ FString UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
             const FScalarParameterValue* Match = Instance->ScalarParameterValues.FindByPredicate(
                 [ExpectedName](const FScalarParameterValue& Value)
                 {
-                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                    return MaterialInstanceParameterMatches(Value, ExpectedName);
                 }
             );
             if (!Match || !FMath::IsNearlyEqual(Match->ParameterValue, Pair.Value))
@@ -1266,7 +1273,7 @@ FString UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
             const FVectorParameterValue* Match = Instance->VectorParameterValues.FindByPredicate(
                 [ExpectedName](const FVectorParameterValue& Value)
                 {
-                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                    return MaterialInstanceParameterMatches(Value, ExpectedName);
                 }
             );
             if (!Match || !Match->ParameterValue.Equals(Pair.Value))
@@ -1280,7 +1287,7 @@ FString UDccMcpAutomationLibrary::ConfigureMaterialInstanceParameters(
             const FTextureParameterValue* Match = Instance->TextureParameterValues.FindByPredicate(
                 [ExpectedName](const FTextureParameterValue& Value)
                 {
-                    return MaterialInstanceParameterName(Value) == ExpectedName;
+                    return MaterialInstanceParameterMatches(Value, ExpectedName);
                 }
             );
             if (!Match || Match->ParameterValue != Pair.Value)

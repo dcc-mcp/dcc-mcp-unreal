@@ -28,12 +28,16 @@ def set_material_instance_parameters(
 
     normalized_scalars = {}
     for name, value in scalar_parameters.items():
-        if not isinstance(value, (int, float)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             return skill_error("Invalid scalar parameter", f"'{name}' must be a number")
         normalized_scalars[name] = float(value)
     normalized_vectors = {}
     for name, value in vector_parameters.items():
-        if not isinstance(value, (list, tuple)) or len(value) not in (3, 4):
+        if (
+            not isinstance(value, (list, tuple))
+            or len(value) not in (3, 4)
+            or any(not isinstance(component, (int, float)) or isinstance(component, bool) for component in value)
+        ):
             return skill_error("Invalid vector parameter", f"'{name}' must contain three or four numbers")
         rgba = [float(component) for component in value]
         if len(rgba) == 3:
@@ -54,9 +58,7 @@ def set_material_instance_parameters(
             "Install a DCC-MCP Unreal plugin that exposes configure_material_instance_parameters",
         )
     try:
-        native_result = json.loads(
-            configure(instance, normalized_scalars, normalized_vectors, texture_assets)
-        )
+        native_result = json.loads(configure(instance, normalized_scalars, normalized_vectors, texture_assets))
     except (TypeError, ValueError) as exc:
         return skill_error("Native Material Instance bridge failed", f"invalid result: {exc}")
     if not isinstance(native_result, dict) or not native_result.get("success"):
@@ -65,11 +67,7 @@ def set_material_instance_parameters(
             str((native_result or {}).get("message") or "native operation failed"),
             native_result=native_result,
         )
-    if (
-        not native_result.get("saved")
-        or not native_result.get("verified")
-        or native_result.get("package_dirty")
-    ):
+    if not native_result.get("saved") or not native_result.get("verified") or native_result.get("package_dirty"):
         return skill_error(
             "Native Material Instance verification failed",
             "The native bridge did not verify a clean saved package",
