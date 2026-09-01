@@ -55,10 +55,20 @@ public class DccMcpUnreal : ModuleRules
 
         // UE 4.18 has neither Chaos nor GeometryCollectionEngine.
         var versionProperty = Target.GetType().GetProperty("Version");
-        if (versionProperty != null &&
-            (int)versionProperty.PropertyType.GetProperty("MajorVersion").GetValue(versionProperty.GetValue(Target, null), null) >= 5)
+        object targetVersion = versionProperty == null ? null : versionProperty.GetValue(Target, null);
+        int majorVersion = targetVersion == null
+            ? 4
+            : (int)versionProperty.PropertyType.GetProperty("MajorVersion").GetValue(targetVersion, null);
+        int minorVersion = targetVersion == null
+            ? 0
+            : (int)versionProperty.PropertyType.GetProperty("MinorVersion").GetValue(targetVersion, null);
+        if (majorVersion >= 5)
         {
             PrivateDependencyModuleNames.AddRange(new string[] { "GeometryCollectionEngine", "Chaos" });
+        }
+        if (majorVersion > 5 || (majorVersion == 5 && minorVersion >= 8))
+        {
+            PrivateDependencyModuleNames.AddRange(new string[] { "Niagara", "NiagaraEditor" });
         }
     }
 }

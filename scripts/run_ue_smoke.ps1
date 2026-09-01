@@ -1,7 +1,7 @@
 param(
     [string]$Project = ".",
     [string]$UERoot = "",
-    [ValidateSet("native", "python")]
+    [ValidateSet("native", "python", "niagara", "niagara-commandlet")]
     [string]$Mode = "native"
 )
 
@@ -32,7 +32,8 @@ if ($projectItem.PSIsContainer) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$scriptPath = Join-Path $repoRoot "tests\ue_smoke.py"
+$scriptName = if ($Mode -eq "niagara-commandlet") { "ue_niagara_commandlet.py" } else { "ue_smoke.py" }
+$scriptPath = Join-Path $repoRoot "tests\$scriptName"
 if (-not (Test-Path -LiteralPath $scriptPath)) {
     throw "Smoke test script not found: $scriptPath"
 }
@@ -61,7 +62,8 @@ $env:DCC_MCP_DISABLE_JOB_PERSISTENCE = "1"
 $env:DCC_MCP_DISABLE_FILE_LOGGING = "1"
 $env:DCC_MCP_UNREAL_DISABLE_MENUS = "1"
 
-if ($Mode -eq "native") {
+if ($Mode -eq "native" -or $Mode -eq "niagara") {
+    $testFilter = if ($Mode -eq "niagara") { "DccMcp.Smoke.NiagaraSemanticAuthoring" } else { "DccMcp.Smoke" }
     $ueArgs = @(
         $projectFile,
         "-Unattended",
@@ -73,7 +75,20 @@ if ($Mode -eq "native") {
         "-FullStdOutLogOutput",
         "-TestExit=Automation Test Queue Empty",
         "-ReportExportPath=$report",
-        "-ExecCmds=Automation RunTests DccMcp.Smoke; Quit"
+        "-ExecCmds=Automation RunTests $testFilter; Quit"
+    )
+} elseif ($Mode -eq "niagara-commandlet") {
+    $ueArgs = @(
+        $projectFile,
+        "-run=pythonscript",
+        "-script=$scriptPath",
+        "-Unattended",
+        "-NoSplash",
+        "-NoSound",
+        "-NullRHI",
+        "-nop4",
+        "-stdout",
+        "-FullStdOutLogOutput"
     )
 } else {
     $ueArgs = @(
@@ -99,7 +114,7 @@ if ($exitCode -ne 0) {
     exit $exitCode
 }
 
-if ($Mode -eq "native") {
+if ($Mode -eq "native" -or $Mode -eq "niagara") {
     $nativeReport = Join-Path $report "index.json"
     if (-not (Test-Path -LiteralPath $nativeReport)) {
         Get-Content -Path $log -Tail 120
@@ -128,6 +143,6 @@ if ($Mode -eq "native") {
 }
 
 Write-Output "[ue-smoke] log: $log"
-if ($Mode -eq "native") {
+if ($Mode -eq "native" -or $Mode -eq "niagara") {
     Write-Output "[ue-smoke] automation report: $report"
 }

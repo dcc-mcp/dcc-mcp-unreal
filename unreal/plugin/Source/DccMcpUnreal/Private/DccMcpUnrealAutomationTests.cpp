@@ -13,9 +13,13 @@
 #include "Runtime/Launch/Resources/Version.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
 #if ENGINE_MAJOR_VERSION >= 5
 #include "UObject/SavePackage.h"
+#endif
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+#include "NiagaraSystem.h"
 #endif
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -71,6 +75,166 @@ bool FDccMcpUnrealNativeSmokeTest::RunTest(const FString& Parameters)
     }
     return true;
 }
+
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDccMcpNiagaraSemanticAuthoringTest,
+    "DccMcp.Smoke.NiagaraSemanticAuthoring",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FDccMcpNiagaraSemanticAuthoringTest::RunTest(const FString& Parameters)
+{
+    const FString AssetName = FString::Printf(
+        TEXT("NS_DccMcpChainExplosion_%s"),
+        *FGuid::NewGuid().ToString(EGuidFormats::Digits)
+    );
+    const FString PackagePath = TEXT("/Game/DccMcpAutomation");
+    const FString SystemPath = PackagePath / AssetName;
+
+    const auto NumberInput = [](const FString& Type, double Value)
+    {
+        TSharedRef<FJsonObject> Input = MakeShared<FJsonObject>();
+        Input->SetStringField(TEXT("type"), Type);
+        Input->SetNumberField(TEXT("value"), Value);
+        return MakeShared<FJsonValueObject>(Input);
+    };
+    const auto VectorInput = [](double X, double Y, double Z)
+    {
+        TSharedRef<FJsonObject> Input = MakeShared<FJsonObject>();
+        Input->SetStringField(TEXT("type"), TEXT("vector3"));
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(X));
+        Values.Add(MakeShared<FJsonValueNumber>(Y));
+        Values.Add(MakeShared<FJsonValueNumber>(Z));
+        Input->SetArrayField(TEXT("value"), Values);
+        return MakeShared<FJsonValueObject>(Input);
+    };
+    const auto Module = [](
+        const FString& Name,
+        const FString& Script,
+        const FString& AssetPath,
+        const TSharedRef<FJsonObject>& Inputs
+    )
+    {
+        TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("name"), Name);
+        Result->SetStringField(TEXT("script"), Script);
+        Result->SetStringField(TEXT("asset_path"), AssetPath);
+        Result->SetObjectField(TEXT("inputs"), Inputs);
+        return MakeShared<FJsonValueObject>(Result);
+    };
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("asset_name"), AssetName);
+    Root->SetStringField(TEXT("asset_path"), PackagePath);
+    TArray<TSharedPtr<FJsonValue>> Emitters;
+    const TCHAR* Layers[] = {TEXT("core"), TEXT("plume"), TEXT("sparks")};
+    for (int32 Stage = 1; Stage <= 5; ++Stage)
+    {
+        for (const TCHAR* Layer : Layers)
+        {
+            TSharedRef<FJsonObject> Emitter = MakeShared<FJsonObject>();
+            Emitter->SetStringField(TEXT("name"), FString::Printf(TEXT("Stage%d_%s"), Stage, Layer));
+            TArray<TSharedPtr<FJsonValue>> Modules;
+
+            TSharedRef<FJsonObject> BurstInputs = MakeShared<FJsonObject>();
+            BurstInputs->SetField(TEXT("Spawn Count"), NumberInput(TEXT("int"), Stage * 10));
+            Modules.Add(Module(
+                TEXT("SpawnBurst"),
+                TEXT("emitter_update"),
+                TEXT("/Niagara/Modules/Emitter/SpawnBurst_Instantaneous.SpawnBurst_Instantaneous"),
+                BurstInputs
+            ));
+
+            TSharedRef<FJsonObject> ShapeInputs = MakeShared<FJsonObject>();
+            ShapeInputs->SetField(TEXT("Sphere Radius"), NumberInput(TEXT("float"), 50.0 * Stage));
+            Modules.Add(Module(
+                TEXT("ShapeLocation"),
+                TEXT("particle_spawn"),
+                TEXT("/Niagara/Modules/Spawn/Location/V2/ShapeLocation.ShapeLocation"),
+                ShapeInputs
+            ));
+
+            TSharedRef<FJsonObject> VelocityInputs = MakeShared<FJsonObject>();
+            VelocityInputs->SetField(TEXT("Velocity"), VectorInput(0.0, 0.0, 250.0 * Stage));
+            Modules.Add(Module(
+                TEXT("AddVelocity"),
+                TEXT("particle_spawn"),
+                TEXT("/Niagara/Modules/Spawn/Velocity/AddVelocity.AddVelocity"),
+                VelocityInputs
+            ));
+
+            TSharedRef<FJsonObject> GravityInputs = MakeShared<FJsonObject>();
+            GravityInputs->SetField(TEXT("Gravity"), VectorInput(0.0, 0.0, -980.0));
+            Modules.Add(Module(
+                TEXT("GravityForce"),
+                TEXT("particle_update"),
+                TEXT("/Niagara/Modules/Update/Forces/GravityForce.GravityForce"),
+                GravityInputs
+            ));
+            Emitter->SetArrayField(TEXT("modules"), Modules);
+
+            TSharedRef<FJsonObject> Renderer = MakeShared<FJsonObject>();
+            Renderer->SetStringField(TEXT("name"), TEXT("SpriteRenderer"));
+            Renderer->SetStringField(
+                TEXT("class_path"),
+                TEXT("/Script/Niagara.NiagaraSpriteRendererProperties")
+            );
+            TArray<TSharedPtr<FJsonValue>> Renderers;
+            Renderers.Add(MakeShared<FJsonValueObject>(Renderer));
+            Emitter->SetArrayField(TEXT("renderers"), Renderers);
+            Emitters.Add(MakeShared<FJsonValueObject>(Emitter));
+        }
+    }
+    Root->SetArrayField(TEXT("emitters"), Emitters);
+
+    FString SpecificationJson;
+    const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&SpecificationJson);
+    FJsonSerializer::Serialize(Root, Writer);
+    const FString Payload = UDccMcpAutomationLibrary::AuthorNiagaraSystemJson(SpecificationJson);
+
+    TSharedPtr<FJsonObject> Result;
+    const TSharedRef<TJsonReader<>> ResultReader = TJsonReaderFactory<>::Create(Payload);
+    bool bSuccess = false;
+    bool bSaved = false;
+    bool bVerified = false;
+    double EmitterCount = 0.0;
+    double ModuleCount = 0.0;
+    double RendererCount = 0.0;
+    const bool bValid = FJsonSerializer::Deserialize(ResultReader, Result) && Result.IsValid()
+        && Result->TryGetBoolField(TEXT("success"), bSuccess)
+        && Result->TryGetBoolField(TEXT("saved"), bSaved)
+        && Result->TryGetBoolField(TEXT("verified"), bVerified)
+        && Result->TryGetNumberField(TEXT("emitter_count"), EmitterCount)
+        && Result->TryGetNumberField(TEXT("module_count"), ModuleCount)
+        && Result->TryGetNumberField(TEXT("renderer_count"), RendererCount);
+    TestTrue(TEXT("Niagara authoring returned valid JSON"), bValid);
+    TestTrue(TEXT("Niagara authoring succeeded"), bSuccess);
+    TestTrue(TEXT("Niagara authoring saved the system"), bSaved);
+    TestTrue(TEXT("Niagara authoring verified the saved topology"), bVerified);
+    TestEqual(TEXT("Five stages with core, plume, and sparks emitters"), static_cast<int32>(EmitterCount), 15);
+    TestTrue(TEXT("Every emitter contains the four requested modules"), ModuleCount >= 60.0);
+    TestTrue(TEXT("Every emitter contains a SpriteRenderer"), RendererCount >= 15.0);
+
+    UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *(SystemPath + TEXT(".") + AssetName));
+    bool bCleaned = System != nullptr;
+    if (System)
+    {
+        System->WaitForCompilationComplete(false, false);
+        System->GetOutermost()->SetDirtyFlag(false);
+    }
+    const FString Filename = FPackageName::LongPackageNameToFilename(
+        SystemPath,
+        FPackageName::GetAssetPackageExtension()
+    );
+    bCleaned &= IFileManager::Get().Delete(*Filename, false, true, true);
+    TestTrue(TEXT("Niagara automation asset was cleaned up"), bCleaned);
+    return bValid && bSuccess && bSaved && bVerified
+        && static_cast<int32>(EmitterCount) == 15
+        && ModuleCount >= 60.0 && RendererCount >= 15.0 && bCleaned;
+}
+#endif
 
 namespace
 {

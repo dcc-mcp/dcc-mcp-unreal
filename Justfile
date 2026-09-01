@@ -81,3 +81,11 @@ ue-smoke project=".":
 ue-smoke-python project=".":
     just install-project '{{project}}'
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run_ue_smoke.ps1 -Project '{{project}}' -UERoot '{{ue_root}}' -Mode python
+
+ue-niagara-smoke project=".":
+    just install-project '{{project}}'
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run_ue_smoke.ps1 -Project '{{project}}' -UERoot '{{ue_root}}' -Mode niagara
+
+ue-niagara-commandlet project=".":
+    just install-project '{{project}}'
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run_ue_smoke.ps1 -Project '{{project}}' -UERoot '{{ue_root}}' -Mode niagara-commandlet
