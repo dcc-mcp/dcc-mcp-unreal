@@ -836,6 +836,23 @@ class TestPieCaptureScreenshot:
         assert result["context"]["capture_pending"] is True
         assert "requested" in result["message"].lower()
 
+    def test_screenshot_capture_declares_registered_safe_poll_followup(self):
+        """Core can discover the typed read-only poll contract for adapter-owned jobs."""
+        import yaml
+
+        tools_path = Path(_PIE_SCRIPTS_DIR).parent / "tools.yaml"
+        tools = yaml.safe_load(tools_path.read_text(encoding="utf-8"))["tools"]
+        tools_by_registered_name = {"unreal_pie__{}".format(tool["name"]): tool for tool in tools}
+        capture = next(tool for tool in tools if tool["name"] == "pie_capture_screenshot")
+
+        poll_followups = capture["next-tools"]["on-success"]
+        assert poll_followups == ["unreal_pie__pie_get_screenshot_job"]
+        poll_tool = tools_by_registered_name[poll_followups[0]]
+        assert poll_tool["read_only"] is True
+        assert poll_tool["input_schema"]["required"] == ["job_id"]
+        assert poll_tool["input_schema"]["additionalProperties"] is False
+        assert poll_tool["next-tools"]["on-success"] == poll_followups
+
 
 # ---------------------------------------------------------------------------
 # Tests: SKILL.md and tools.yaml existence
@@ -851,7 +868,7 @@ class TestSkillMetadata:
         assert (skill_dir / "SKILL.md").is_file()
 
     def test_tools_yaml_exists(self):
-        """tools.yaml exists and lists all 8 tools."""
+        """tools.yaml exists and lists all 9 tools."""
         import yaml
 
         skill_dir = Path(_PIE_SCRIPTS_DIR).parent
@@ -878,6 +895,20 @@ class TestSkillMetadata:
         assert tool_names == expected
         screenshot_tool = next(tool for tool in data["tools"] if tool["name"] == "pie_capture_screenshot")
         assert screenshot_tool["enforce_thread_affinity"] is True
+
+    def test_local_next_tools_resolve_to_registered_tools(self):
+        """Every unreal-pie follow-up names a tool the skill actually registers."""
+        import yaml
+
+        tools_path = Path(_PIE_SCRIPTS_DIR).parent / "tools.yaml"
+        tools = yaml.safe_load(tools_path.read_text(encoding="utf-8"))["tools"]
+        registered = {"unreal_pie__{}".format(tool["name"]) for tool in tools}
+
+        for tool in tools:
+            for references in tool.get("next-tools", {}).values():
+                for reference in references:
+                    if reference.startswith("unreal_pie__"):
+                        assert reference in registered, "{} references unknown tool {}".format(tool["name"], reference)
 
     def test_all_scripts_exist(self):
         """Every source_file in tools.yaml points to an existing script."""
