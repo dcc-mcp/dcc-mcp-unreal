@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.5...v0.3.6) (2026-09-01)
+
+
+### Features
+
+* add safe UE 5.8 Niagara authoring ([e2fc80c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/e2fc80cdedc29a9684283c8835ad642675d6cc6e))
+
 ## [0.3.5](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.4...v0.3.5) (2026-08-31)
 
 
