@@ -124,4 +124,13 @@ public:
         const TMap<FString, FLinearColor>& VectorParameters,
         const TMap<FString, UTexture*>& TextureParameters
     );
+
+    /**
+     * Author a Niagara system from a JSON semantic specification.
+     *
+     * UE 5.8+ only. The implementation rejects commandlets and hosts without
+     * initialized Slate before loading the external Niagara editor API.
+     */
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Niagara")
+    static FString AuthorNiagaraSystemJson(const FString& SpecificationJson);
 };

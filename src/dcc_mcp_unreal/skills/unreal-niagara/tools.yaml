@@ -1,4 +1,108 @@
 tools:
+  - name: author_niagara_system
+    description: >-
+      Create and finalize a Niagara system through UE 5.8's public external
+      editor API. Adds emitters, module scripts, typed module inputs, and
+      renderers in one verified operation. Commandlets and hosts without a
+      fully loaded Slate editor fail closed without creating an asset.
+    source_file: scripts/author_niagara_system.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [system_name, emitters]
+      properties:
+        system_name:
+          type: string
+          minLength: 1
+          description: Name for the Niagara system asset.
+        package_path:
+          type: string
+          default: /Game/VFX
+          pattern: ^/Game(?:/.*)?$
+          description: Content Browser folder for the new system.
+        emitters:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, modules, renderers]
+            properties:
+              name:
+                type: string
+                minLength: 1
+              template_path:
+                type: string
+                default: /Niagara/DefaultAssets/Templates/CascadeConversion/CompletelyEmpty.CompletelyEmpty
+                description: Optional Niagara emitter template; defaults to Epic's completely empty emitter.
+              modules:
+                type: array
+                maxItems: 256
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name, script, asset_path]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      description: Stable semantic label returned in diagnostics.
+                    script:
+                      type: string
+                      enum: [emitter_spawn, emitter_update, particle_spawn, particle_update]
+                    asset_path:
+                      type: string
+                      minLength: 1
+                      description: Object path to a Niagara module script asset.
+                    inputs:
+                      type: object
+                      default: {}
+                      maxProperties: 128
+                      additionalProperties:
+                        type: object
+                        additionalProperties: false
+                        required: [type, value]
+                        properties:
+                          type:
+                            type: string
+                            enum: [float, int, bool, vector2, vector3, color, enum]
+                          value:
+                            description: Scalar, boolean, vector array, color array, or enum value name.
+                          enum_path:
+                            type: string
+                            description: Required for enum values; object path to the UEnum.
+              renderers:
+                type: array
+                minItems: 1
+                maxItems: 16
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    class_path:
+                      type: string
+                      default: /Script/Niagara.NiagaraSpriteRendererProperties
+                      description: UObject class path for renderer properties.
+                    properties:
+                      type: object
+                      default: {}
+                      description: Renderer properties accepted by UE 5.8's external editor schema.
+    next-tools:
+      on-success: [unreal_niagara__get_niagara_system_info, unreal_niagara__spawn_niagara_actor]
+      on-failure: [dcc_diagnostics__audit_log]
+
   - name: create_niagara_system
     description: >-
       Create a new empty Niagara system asset. Returns the package path
