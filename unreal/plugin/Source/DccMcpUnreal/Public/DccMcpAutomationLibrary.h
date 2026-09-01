@@ -83,6 +83,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Fab")
     static bool OpenFabListing(const FString& ListingUrl);
 
+    UFUNCTION(BlueprintCallable, Category = "DCC MCP|Editor")
+    static FString FocusLevelEditorViewport();
+
     UFUNCTION(BlueprintCallable, Category = "DCC MCP|Chaos")
     static FString CreateGeometryCollectionFromStaticMesh(
         const FString& StaticMeshPath,

@@ -20,6 +20,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Docking/TabManager.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerInput.h"
@@ -36,6 +37,14 @@
 #include "GeometryCollection/GeometryCollectionObject.h"
 #endif
 #include "Interfaces/IPluginManager.h"
+#include "LevelEditor.h"
+#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION < 20
+#include "ILevelViewport.h"
+#elif ENGINE_MAJOR_VERSION == 4
+#include "IAssetViewport.h"
+#else
+#include "SLevelViewport.h"
+#endif
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialInterface.h"
@@ -58,6 +67,7 @@
 #include "UObject/UObjectIterator.h"
 #include "Engine/Texture.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Docking/SDockTab.h"
 
 namespace
 {
@@ -225,6 +235,53 @@ FString MaterialGraphError(const FString& ErrorCode, const FString& Message, boo
     Root->SetStringField(TEXT("error_code"), ErrorCode);
     Root->SetStringField(TEXT("message"), Message);
     Root->SetBoolField(TEXT("rollback_completed"), bRollbackCompleted);
+    return SerializeJson(Root);
+}
+
+TArray<TSharedPtr<FJsonValue>> JsonStringArray(const TArray<FString>& Values)
+{
+    TArray<TSharedPtr<FJsonValue>> Result;
+    Result.Reserve(Values.Num());
+    for (const FString& Value : Values)
+    {
+        Result.Add(MakeShared<FJsonValueString>(Value));
+    }
+    return Result;
+}
+
+FString EditorViewportFocusResult(
+    const TArray<FString>& CloseRequestedItems,
+    const TArray<FString>& ClosedItems,
+    const TArray<FString>& RemainingLogTabs,
+    bool bLevelEditorActivated,
+    bool bViewportFocused,
+    const FString& ErrorCode = FString(),
+    const FString& Message = FString()
+)
+{
+    const bool bPostconditionMet = ErrorCode.IsEmpty()
+        && RemainingLogTabs.Num() == 0
+        && bLevelEditorActivated
+        && bViewportFocused;
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("success"), bPostconditionMet);
+    Root->SetArrayField(TEXT("close_requested_items"), JsonStringArray(CloseRequestedItems));
+    Root->SetArrayField(TEXT("closed_items"), JsonStringArray(ClosedItems));
+    Root->SetArrayField(TEXT("remaining_log_tabs"), JsonStringArray(RemainingLogTabs));
+    Root->SetBoolField(TEXT("level_editor_activated"), bLevelEditorActivated);
+    Root->SetBoolField(TEXT("viewport_focused"), bViewportFocused);
+    Root->SetBoolField(TEXT("postcondition_met"), bPostconditionMet);
+    if (!bPostconditionMet)
+    {
+        Root->SetStringField(
+            TEXT("error_code"),
+            ErrorCode.IsEmpty() ? TEXT("postcondition_not_met") : ErrorCode
+        );
+        Root->SetStringField(
+            TEXT("message"),
+            Message.IsEmpty() ? TEXT("Level Editor viewport focus was not verified") : Message
+        );
+    }
     return SerializeJson(Root);
 }
 
@@ -1131,6 +1188,126 @@ bool UDccMcpAutomationLibrary::OpenFabListing(const FString& ListingUrl)
         return false;
     }
     return InvokeFabString(NewFabApi(), TEXT("OpenInNewTab"), ListingUrl);
+}
+
+FString UDccMcpAutomationLibrary::FocusLevelEditorViewport()
+{
+    TArray<FString> CloseRequestedItems;
+    TArray<FString> ClosedItems;
+    TArray<FString> RemainingLogTabs;
+    if (!IsInGameThread())
+    {
+        return EditorViewportFocusResult(
+            CloseRequestedItems,
+            ClosedItems,
+            RemainingLogTabs,
+            false,
+            false,
+            TEXT("wrong_thread"),
+            TEXT("Level Editor focus requires the game thread")
+        );
+    }
+    if (!FSlateApplication::IsInitialized())
+    {
+        return EditorViewportFocusResult(
+            CloseRequestedItems,
+            ClosedItems,
+            RemainingLogTabs,
+            false,
+            false,
+            TEXT("slate_unavailable"),
+            TEXT("Slate is not initialized")
+        );
+    }
+
+    const TArray<FName> LogTabIds = {FName(TEXT("OutputLog")), FName(TEXT("MessageLog"))};
+    const TSharedRef<FGlobalTabmanager> TabManager = FGlobalTabmanager::Get();
+    for (const FName& TabId : LogTabIds)
+    {
+        const FTabId LiveTabId(TabId);
+        const TSharedPtr<SDockTab> LiveTab = TabManager->FindExistingLiveTab(LiveTabId);
+        if (!LiveTab.IsValid())
+        {
+            continue;
+        }
+        const FString ItemName = TabId.ToString();
+        CloseRequestedItems.Add(ItemName);
+        LiveTab->RequestCloseTab();
+        if (TabManager->FindExistingLiveTab(LiveTabId).IsValid())
+        {
+            RemainingLogTabs.Add(ItemName);
+        }
+        else
+        {
+            ClosedItems.Add(ItemName);
+        }
+    }
+
+    FLevelEditorModule* LevelEditorModule =
+        FModuleManager::Get().LoadModulePtr<FLevelEditorModule>(TEXT("LevelEditor"));
+    if (!LevelEditorModule)
+    {
+        return EditorViewportFocusResult(
+            CloseRequestedItems,
+            ClosedItems,
+            RemainingLogTabs,
+            false,
+            false,
+            TEXT("level_editor_module_unavailable"),
+            TEXT("The Level Editor module is unavailable")
+        );
+    }
+    const TSharedPtr<ILevelEditor> LevelEditor = LevelEditorModule->GetFirstLevelEditor();
+    const TSharedPtr<SDockTab> LevelEditorTab = LevelEditorModule->GetLevelEditorTab();
+    if (!LevelEditor.IsValid() || !LevelEditorTab.IsValid())
+    {
+        return EditorViewportFocusResult(
+            CloseRequestedItems,
+            ClosedItems,
+            RemainingLogTabs,
+            false,
+            false,
+            TEXT("level_editor_unavailable"),
+            TEXT("No active Level Editor is available")
+        );
+    }
+
+    LevelEditorTab->ActivateInParent(ETabActivationCause::SetDirectly);
+    const bool bLevelEditorActivated = LevelEditorTab->IsForeground();
+    const auto ActiveViewport = LevelEditor->GetActiveViewportInterface();
+    if (!ActiveViewport.IsValid())
+    {
+        return EditorViewportFocusResult(
+            CloseRequestedItems,
+            ClosedItems,
+            RemainingLogTabs,
+            bLevelEditorActivated,
+            false,
+            TEXT("active_viewport_unavailable"),
+            TEXT("The Level Editor has no active viewport")
+        );
+    }
+
+    const TSharedRef<SWidget> ViewportWidget = ActiveViewport->AsWidget();
+    const TSharedPtr<SWindow> ViewportWindow = FSlateApplication::Get().FindWidgetWindow(ViewportWidget);
+    if (ViewportWindow.IsValid())
+    {
+        ViewportWindow->BringToFront(true);
+    }
+    FSlateApplication::Get().SetAllUserFocus(ViewportWidget, EFocusCause::SetDirectly);
+    const bool bFocusAccepted = FSlateApplication::Get().SetKeyboardFocus(
+        ViewportWidget,
+        EFocusCause::SetDirectly
+    );
+    const bool bViewportFocused = bFocusAccepted
+        && (ViewportWidget->HasKeyboardFocus() || ViewportWidget->HasFocusedDescendants());
+    return EditorViewportFocusResult(
+        CloseRequestedItems,
+        ClosedItems,
+        RemainingLogTabs,
+        bLevelEditorActivated,
+        bViewportFocused
+    );
 }
 
 FString UDccMcpAutomationLibrary::GetMaterialCustomizedUvConnection(
