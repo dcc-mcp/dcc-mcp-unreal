@@ -24,7 +24,7 @@ tools:
             the simulation. "resume" continues after pause. "exit" or "stop"
             ends the PIE session and returns to editor mode.
     next-tools:
-      on-success: [unreal_pie__get_status]
+      on-success: [unreal_pie__pie_get_status]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_inject_input
@@ -93,7 +93,7 @@ tools:
           description: Hold duration in seconds for key_tap (0.0 = instant).
           default: 0.0
     next-tools:
-      on-success: [unreal_pie__capture_screenshot]
+      on-success: [unreal_pie__pie_capture_screenshot]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_capture_screenshot
@@ -126,7 +126,7 @@ tools:
           description: Viewport height override (0 = current viewport size).
           default: 0
     next-tools:
-      on-success: [unreal_pie__get_screenshot_job]
+      on-success: [unreal_pie__pie_get_screenshot_job]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_get_screenshot_job
@@ -151,7 +151,7 @@ tools:
           minLength: 1
           description: The job_id returned by pie_capture_screenshot.
     next-tools:
-      on-success: [unreal_pie__get_screenshot_job]
+      on-success: [unreal_pie__pie_get_screenshot_job]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_snapshot_log
@@ -234,7 +234,7 @@ tools:
       type: object
       properties: {}
     next-tools:
-      on-success: [unreal_pie__control, unreal_pie__capture_screenshot]
+      on-success: [unreal_pie__pie_control, unreal_pie__pie_capture_screenshot]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_run_test
@@ -262,7 +262,7 @@ tools:
             Automation test name or filter string, e.g. "DccMcp.Smoke" or
             "Project.Functional.Tests".
     next-tools:
-      on-success: [unreal_pie__poll_test]
+      on-success: [unreal_pie__pie_poll_test]
       on-failure: [dcc_diagnostics__audit_log]
 
   - name: pie_poll_test
