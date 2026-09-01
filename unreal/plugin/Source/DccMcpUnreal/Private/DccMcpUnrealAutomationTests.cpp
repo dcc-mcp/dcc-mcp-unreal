@@ -455,4 +455,67 @@ bool FDccMcpMaterialInstanceTransientTextureTest::RunTest(const FString& Paramet
     return bPassed;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDccMcpEditorViewportFocusTest,
+    "DccMcp.Smoke.EditorViewportFocus",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter
+)
+
+bool FDccMcpEditorViewportFocusTest::RunTest(const FString& Parameters)
+{
+    TSharedPtr<FJsonObject> Result;
+    const FString Payload = UDccMcpAutomationLibrary::FocusLevelEditorViewport();
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Payload);
+    bool bSuccess = false;
+    bool bLevelEditorActivated = false;
+    bool bViewportFocused = false;
+    bool bPostconditionMet = false;
+    const bool bValid = FJsonSerializer::Deserialize(Reader, Result) && Result.IsValid()
+        && Result->TryGetBoolField(TEXT("success"), bSuccess)
+        && Result->TryGetBoolField(TEXT("level_editor_activated"), bLevelEditorActivated)
+        && Result->TryGetBoolField(TEXT("viewport_focused"), bViewportFocused)
+        && Result->TryGetBoolField(TEXT("postcondition_met"), bPostconditionMet)
+        && Result->HasTypedField<EJson::Array>(TEXT("close_requested_items"))
+        && Result->HasTypedField<EJson::Array>(TEXT("closed_items"))
+        && Result->HasTypedField<EJson::Array>(TEXT("remaining_log_tabs"));
+    TestTrue(TEXT("Editor viewport focus returned structured JSON"), bValid);
+    if (!bValid)
+    {
+        AddError(FString::Printf(TEXT("Invalid editor viewport focus payload: %s"), *Payload));
+        return false;
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>& RemainingLogTabs = Result->GetArrayField(TEXT("remaining_log_tabs"));
+    const bool bExpectedPostcondition = RemainingLogTabs.Num() == 0
+        && bLevelEditorActivated
+        && bViewportFocused;
+    TestEqual(TEXT("No requested log tab remains open"), RemainingLogTabs.Num(), 0);
+    TestTrue(TEXT("Level Editor tab is active"), bLevelEditorActivated);
+    TestEqual(
+        TEXT("Success matches the verified editor viewport postcondition"),
+        bSuccess,
+        bExpectedPostcondition
+    );
+    TestEqual(
+        TEXT("Reported postcondition matches observed structured fields"),
+        bPostconditionMet,
+        bExpectedPostcondition
+    );
+    if (!bSuccess)
+    {
+        FString ErrorCode;
+        const bool bHasErrorCode = Result->TryGetStringField(TEXT("error_code"), ErrorCode)
+            && !ErrorCode.IsEmpty();
+        TestTrue(TEXT("A failed focus attempt reports an error code"), bHasErrorCode);
+        return RemainingLogTabs.Num() == 0
+            && bLevelEditorActivated
+            && bHasErrorCode
+            && !bPostconditionMet;
+    }
+    return RemainingLogTabs.Num() == 0
+        && bLevelEditorActivated
+        && bViewportFocused
+        && bPostconditionMet;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

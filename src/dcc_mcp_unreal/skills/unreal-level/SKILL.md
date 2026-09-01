@@ -23,6 +23,12 @@ metadata:
 
 Tools for active level inspection, map loading/saving, and world settings.
 
+`focus_level_editor_viewport` is the structured editor-presentation action. It
+closes existing Output Log and Message Log tabs or standalone tab windows,
+activates the Level Editor, and focuses its active viewport through the native
+Slate/LevelEditor bridge. It never sends keyboard or pointer input and fails
+closed unless the native focus and tab-close postconditions are verified.
+
 When an editor world is unavailable, tools report either
 `reason=editor_not_loaded` or `reason=pie_or_mrq_active`. Active PIE/MRQ
 responses include a typed status-poll action and the exact level-tool retry;
@@ -31,6 +37,7 @@ they do not create another poller or background job.
 ## Scripts
 
 - `create_level`
+- `focus_level_editor_viewport`
 - `get_level_info`
 - `load_level`
 - `save_level`
