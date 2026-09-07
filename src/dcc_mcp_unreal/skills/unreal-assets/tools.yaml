@@ -365,7 +365,7 @@ tools:
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
   - name: get_asset_info
-    description: Get registry metadata, optional dependencies, and Groom curve/guide counts for one asset.
+    description: Get exact asset identity, dependencies, and optional mesh LOD, bounds, collision and material evidence with explicit unavailable fields.
     source_file: scripts/get_asset_info.py
     execution: sync
     affinity: main
@@ -385,6 +385,10 @@ tools:
         include_dependencies:
           type: boolean
           description: Include direct hard package dependencies.
+          default: false
+        include_details:
+          type: boolean
+          description: Read mesh and material details and load requested direct dependencies. Does not save assets or validate animated wind.
           default: false
     next-tools:
       on-success: [unreal_assets__export_asset]

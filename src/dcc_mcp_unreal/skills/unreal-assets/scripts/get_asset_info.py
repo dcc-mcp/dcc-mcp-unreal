@@ -69,6 +69,7 @@ def _extract_groom_asset_info(asset_obj) -> dict:
 def get_asset_info(
     asset_path: str = "",
     include_dependencies: bool = False,
+    include_details: bool = False,
     **kwargs,
 ) -> dict:
     """Get metadata for a Content Browser asset.
@@ -116,6 +117,14 @@ def get_asset_info(
             ],
         )
 
+    if "." in asset_path:
+        asset_data_list = [data for data in asset_data_list if asset_object_path(data) == asset_path]
+    if len(asset_data_list) != 1:
+        return skill_error(
+            "Asset identity is ambiguous or missing",
+            "Use an exact object path",
+            matching_assets=[asset_object_path(data) for data in asset_data_list],
+        )
     asset_data = asset_data_list[0]
     asset_name = str(asset_data.asset_name)
     asset_class = str(asset_data.asset_class_path.asset_name)
@@ -165,6 +174,24 @@ def get_asset_info(
     if include_dependencies:
         info["dependencies"] = dependencies
         info["dependency_count"] = len(dependencies)
+    if include_details:
+        from dcc_mcp_unreal.asset_details import asset_details, observe  # noqa: PLC0415
+
+        info["details"] = observe("loaded_asset", lambda: asset_details(unreal, asset_obj, asset_class))
+        if asset_obj is None:
+            info["details"] = {"status": "unavailable", "reason": "Asset could not be loaded"}
+        if include_dependencies:
+
+            def load_dependency(path):
+                if path.startswith("/Script/"):
+                    return {"package_name": path, "status": "not_applicable", "reason": "script package"}
+                try:
+                    loaded = unreal.load_asset(path)
+                    return {"package_name": path, "status": "loaded" if loaded is not None else "unavailable"}
+                except Exception as exc:
+                    return {"package_name": path, "status": "unavailable", "reason": str(exc)}
+
+            info["dependency_loads"] = [load_dependency(path) for path in dependencies]
 
     return skill_success(
         f"Asset info for '{asset_name}' ({asset_class})",

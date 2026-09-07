@@ -494,6 +494,7 @@ def test_affected_tool_input_schemas_remain_backward_compatible() -> None:
         "static_groom_import",
         "usd_import",
         "movie_render_queue",
+        "speedtree_import",
     ]
 
 

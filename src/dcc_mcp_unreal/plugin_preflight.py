@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, TypedDict
 
 CAPABILITY_PLUGIN_REQUIREMENTS: Mapping[str, Tuple[str, ...]] = {
+    "speedtree_import": ("SpeedTreeImporter",),
     "static_groom_import": ("HairStrands", "AlembicHairImporter"),
     "usd_import": ("USDImporter",),
     "movie_render_queue": ("MovieRenderPipeline",),
