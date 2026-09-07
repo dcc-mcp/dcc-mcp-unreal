@@ -21,6 +21,22 @@ metadata:
 
 # Unreal Assets
 
+## Detailed import verification
+
+Call `get_asset_info` with an exact object path, `include_dependencies: true`
+and `include_details: true` after import. Details report each observation as
+`observed` (including a real zero/empty value) or `unavailable` with a reason.
+Static meshes include per-LOD render vertices/triangles/sections, section-to-slot
+mapping, screen sizes, local bounds in centimeters, collision counts, material
+slots, parent materials, global parameters and package dirty state. Material
+property readbacks and instance overrides are raw evidence, not a synthesized
+effective shader result. Layer parameters are outside the global parameter scope.
+
+Direct dependency load checks exclude script packages explicitly. This is not a
+recursive dependency closure or proof of saved disk state. Native SpeedTree wind
+binding is not reflected by this contract; shader parameters are not dynamic wind
+validation. The tool does not save assets, change the level or render a preview.
+
 Tools for Content Browser asset discovery, import, export, inspection, and deletion.
 
 Static Groom imports require `HairStrands` and `AlembicHairImporter`. Generic
