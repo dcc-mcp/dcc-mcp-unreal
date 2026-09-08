@@ -23,6 +23,14 @@ metadata:
 
 ## Detailed import verification
 
+`import_asset` refuses a destination containing pre-existing unsaved assets.
+After the synchronous import, it explicitly saves returned objects and assets
+newly created or dirtied by that import inside the destination, including
+materials and textures omitted from `AssetImportTask.imported_object_paths`.
+The `persistence` receipt lists successful saves and failures. A partial save
+returns an error while leaving imported assets available for inspection; it is
+not rolled back. Saving is not a fresh-session reload verification.
+
 Call `get_asset_info` with an exact object path, `include_dependencies: true`
 and `include_details: true` after import. Details report each observation as
 `observed` (including a real zero/empty value) or `unavailable` with a reason.

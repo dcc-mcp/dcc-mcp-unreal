@@ -58,6 +58,8 @@ def test_alembic_import_explicitly_selects_geometry_cache(tmp_path: Path) -> Non
     unreal.AlembicImportFactory = AlembicImportFactory
     unreal.AlembicImportType = types.SimpleNamespace(GEOMETRY_CACHE="geometry_cache")
     unreal.AssetToolsHelpers = types.SimpleNamespace(get_asset_tools=lambda: asset_tools)
+    unreal.EditorAssetLibrary = MagicMock()
+    unreal.EditorLoadingAndSavingUtils = MagicMock()
 
     source = tmp_path / "horse.abc"
     source.write_bytes(b"abc")
@@ -130,6 +132,7 @@ def test_texture_import_can_declare_srgb_source_gamut(tmp_path: Path) -> None:
         get_asset_tools=lambda: types.SimpleNamespace(import_asset_tasks=import_asset_tasks)
     )
     unreal.EditorAssetLibrary = editor_assets
+    unreal.EditorLoadingAndSavingUtils = MagicMock()
 
     source = tmp_path / "chart.png"
     source.write_bytes(b"png")

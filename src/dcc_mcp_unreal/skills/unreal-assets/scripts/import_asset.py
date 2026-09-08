@@ -7,6 +7,7 @@ import os
 from _asset_import import configure_alembic_geometry_cache_options, configure_fbx_options, primary_object_path
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
+from dcc_mcp_unreal.import_persistence import import_snapshot, persist_import
 from dcc_mcp_unreal.plugin_preflight import require_plugins
 
 
@@ -105,6 +106,11 @@ def import_asset(
         if preflight_error is not None:
             return preflight_error
 
+    try:
+        before = import_snapshot(unreal, destination_path)
+    except Exception as exc:
+        return skill_error("Import destination cannot be safely prepared", str(exc))
+
     # --- build import task ---
     task = unreal.AssetImportTask()
     task.set_editor_property("filename", source_path)
@@ -165,11 +171,22 @@ def import_asset(
         )
         asset.set_editor_property("source_color_settings", settings)
         asset.set_editor_property("srgb", not non_color_texture)
-        if not unreal.EditorAssetLibrary.save_loaded_asset(asset, only_if_is_dirty=False):
-            return skill_error(
-                f"Failed to save texture color settings: {object_path}",
-                "EditorAssetLibrary.save_loaded_asset returned False",
-            )
+
+    try:
+        persistence = persist_import(unreal, destination_path, before, imported_paths)
+    except Exception as exc:
+        return skill_error(
+            "Assets imported but persistence could not be verified",
+            str(exc),
+            imported_object_paths=imported_paths,
+        )
+    if persistence["status"] != "saved":
+        return skill_error(
+            "Assets imported but some packages could not be saved",
+            "Inspect persistence failures; imported assets remain in the editor",
+            imported_object_paths=imported_paths,
+            persistence=persistence,
+        )
 
     return skill_success(
         f"Imported '{asset_name}' to {destination_path}",
@@ -179,6 +196,7 @@ def import_asset(
         destination_path=destination_path,
         source_path=source_path,
         imported_object_paths=imported_paths,
+        persistence=persistence,
         source_color_space=source_color_space or None,
         non_color_texture=non_color_texture,
     )
