@@ -75,6 +75,32 @@ jobs:
       - name: Lint SKILL.md files
         run: python tools/lint_skills.py --error-only
 
+  agent-quickstart-contract:
+    name: Agent quickstart contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: dcc-mcp/dcc-mcp-agent-plugins
+          ref: 54b9d46a9fcefab1ed3a6aafc18da6ab4198ad25
+          path: _agent_plugins
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify generated Agent quickstart
+        run: >-
+          python _agent_plugins/scripts/sync_adapter_readme.py
+          --repository dcc-mcp-unreal
+          --readme README.md
+          --registry _agent_plugins/.github/adapter-readme-quickstarts.json
+          --template _agent_plugins/templates/adapter-readme-agent-quickstart.md
+          --check
+
   install-sop-smoke:
     name: Install SOP lifecycle smoke
     runs-on: ubuntu-latest
