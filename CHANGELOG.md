@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.7](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.6...v0.3.7) (2026-09-10)
+
+
+### Features
+
+* add consent-gated plugin configuration and asset readback ([87b3423](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/87b3423fe042c1cb1e062907f5f8490419356c6c))
+
+
+### Bug Fixes
+
+* persist imported asset dependencies ([a425ee9](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a425ee9c4d7a1e3fcf86893d71600a30baddfef4))
+
+
+### Documentation
+
+* add canonical agent quickstart ([#212](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/212)) ([a826a15](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a826a1508b9ece897111ab07e0fbe1abedefcbc6))
+
 ## [0.3.6](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.5...v0.3.6) (2026-09-01)
 
 
