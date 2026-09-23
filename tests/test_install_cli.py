@@ -39,7 +39,7 @@ def _assert_sop_v1(result: dict) -> None:
         "receipt_path",
         "verify",
     } <= result.keys()
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == install_cli.report_schema_version()
     assert result["status"] in {"planned", "running", "ok", "failed", "partial", "requires_restart"}
     assert set(result["verify"]) >= {"directly_usable", "failure_stage", "failure_reason"}
     for next_step in result["next_steps"]:
@@ -219,7 +219,7 @@ def test_install_dry_run_emits_sop_plan_without_writing(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
     _assert_sop_v1(result)
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == install_cli.report_schema_version()
     assert result["status"] == "planned"
     assert result["dcc_type"] == "unreal"
     assert result["host"]["version"] == "5.7.0"
@@ -2268,3 +2268,116 @@ def test_uninstall_delete_failure_restores_every_owned_byte(monkeypatch, tmp_pat
     assert install_cli._file_manifest(plugin_root) == prior_files
     assert project.read_bytes() == prior_project
     assert receipt_path.read_bytes() == prior_receipt
+
+
+def _schema_document(const: object) -> dict:
+    """A minimal Core schema document enforcing one ``schema_version`` const."""
+    return {"properties": {"schema_version": {"const": const, "type": "integer"}}}
+
+
+def test_report_schema_version_follows_published_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The report field comes from the ``const`` Core's validator enforces, not a literal."""
+    monkeypatch.setattr(install_cli, "_published_schema", lambda: _schema_document(7))
+
+    assert install_cli.report_schema_version() == 7
+
+
+def test_report_schema_version_ignores_cores_artifact_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Core's exported constant is the artifact revision, not the report field.
+
+    Core 0.20.34 exports ``INSTALL_SOP_SCHEMA_VERSION = 2`` (the ``-v2`` artifact revision)
+    while the report field must stay at the document's ``const`` of 1, because v2 only adds an
+    optional ``catalog`` object. These are separate quantities that merely agreed while both
+    were 1, so the constant must never reach the report.
+    """
+    monkeypatch.setattr(install_cli, "_published_schema", lambda: _schema_document(1))
+
+    assert install_cli.report_schema_version() == 1
+
+
+def test_report_schema_version_falls_back_when_document_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Core with no readable schema document still yields a usable report."""
+    monkeypatch.setattr(install_cli, "_published_schema", lambda: None)
+
+    assert install_cli.report_schema_version() == install_cli.FALLBACK_REPORT_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Install SOP schema integrity error: schema_digest_mismatch"),
+        OSError("schema file unreadable"),
+        ValueError("schema document is not valid JSON"),
+    ],
+)
+def test_report_schema_version_survives_schema_read_failure(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """An unhealthy Core must not stop the CLI from emitting a report.
+
+    Core verifies its schema document with a SHA-256 digest and raises on a missing, tampered,
+    or unparsable document. Broken installs are exactly the situation this CLI exists to
+    report on, so the read failure has to degrade to the fallback instead of propagating.
+    """
+    monkeypatch.setattr(install_cli, "_published_schema", _raise(error))
+
+    assert install_cli.report_schema_version() == install_cli.FALLBACK_REPORT_SCHEMA_VERSION
+
+
+def _raise(error: Exception):
+    def _raiser():
+        raise error
+
+    return _raiser
+
+
+def test_emitted_report_carries_the_version_core_validates(tmp_path: Path) -> None:
+    """End-to-end: the emitted report's field equals what Core's schema enforces."""
+    schema = verified_install_sop_schema()
+    declared = schema["properties"]["schema_version"]["const"]
+
+    engine, project = _synthetic_host(tmp_path)
+    args = install_cli._parser().parse_args(
+        [
+            "install",
+            "--json",
+            "--dry-run",
+            "--dcc-path",
+            str(engine),
+            "--python",
+            sys.executable,
+            "--project",
+            str(project),
+        ]
+    )
+    _exit_code, result = install_cli._execute(args)
+
+    assert result["schema_version"] == declared
+    Draft202012Validator(schema).validate(result)
+
+
+def _ci_workflow() -> dict:
+    """Parsed ``.github/workflows/ci.yml`` for the repository under test."""
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    return yaml.safe_load((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+
+
+def test_ci_core_latest_job_resolves_a_real_core_version() -> None:
+    """The early-warning job must fail loudly rather than test an empty pin."""
+    workflow = _ci_workflow()
+    job = workflow["jobs"]["core-latest"]
+    resolve = [step for step in job["steps"] if step.get("id") == "core"]
+    assert resolve, "core-latest job has no version resolution step"
+
+    script = resolve[0]["run"]
+    assert "exit 1" in script, "empty version resolution must fail the job"
+    assert "::error::" in script
+
+
+def test_core_dependency_stays_pinned_below_the_next_minor() -> None:
+    """``<1.0.0`` admits any future Core minor, which is how 0.20.34 shipped unannounced."""
+    root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    core = next(item for item in pyproject["project"]["dependencies"] if item.startswith("dcc-mcp-core"))
+
+    assert "<0.21.0" in core, f"dcc-mcp-core pin drifted: {core}"
