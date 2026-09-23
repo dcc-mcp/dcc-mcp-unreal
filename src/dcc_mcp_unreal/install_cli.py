@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import hashlib
 import inspect
 import json
@@ -19,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from importlib import metadata
@@ -71,10 +73,11 @@ _VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1
 class LifecycleError(RuntimeError):
     """Failure with a stable Install SOP exit/stage classification."""
 
-    def __init__(self, message: str, *, exit_code: int, stage: str) -> None:
+    def __init__(self, message: str, *, exit_code: int, stage: str, failure_stage: Optional[str] = None) -> None:
         super().__init__(message)
         self.exit_code = exit_code
         self.stage = stage
+        self.failure_stage = failure_stage or stage
 
 
 def _core_version() -> str:
@@ -1607,6 +1610,54 @@ def _inspect_locks(path: Path) -> Optional[str]:
     return None
 
 
+def _locked_artifact_reason(*paths: Optional[Path]) -> Optional[str]:
+    """Return a restart reason only when a running host really holds one of `paths`.
+
+    A missing path holds nothing, so it is skipped: an empty destination cannot be the
+    artifact a host loaded. Diagnostics are best effort -- a probe that cannot run must not
+    turn a plain access failure into a restart request.
+    """
+    for path in paths:
+        if path is None or not path.exists():
+            continue
+        try:
+            reason = _inspect_locks(path)
+        except Exception:  # a failing probe must not change the failure classification
+            continue
+        if reason:
+            return reason
+    return None
+
+
+def _is_access_denied(exc: BaseException) -> bool:
+    """True for the generic access/sharing denials Windows reports as WinError 5 or 32."""
+    if isinstance(exc, PermissionError):
+        return True
+    return getattr(exc, "winerror", None) in (5, 32) or getattr(exc, "errno", None) == errno.EACCES
+
+
+# Bounded retry the publish rename uses when a transient access denial is reported.
+REPLACE_ATTEMPTS = 4
+REPLACE_RETRY_BACKOFF = 0.05
+
+
+def _replace_with_access_retry(source: Path, destination: Path) -> None:
+    """Rename `source` onto `destination`, retrying a transient access denial.
+
+    A freshly written staging tree can be held for a moment by antivirus scanning or content
+    indexing, which surfaces as WinError 5 even though no host ever loaded the plugin. The
+    rename is retried with a short bounded backoff before the failure is classified.
+    """
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as exc:
+            if not _is_access_denied(exc) or attempt + 1 >= REPLACE_ATTEMPTS:
+                raise
+            time.sleep(REPLACE_RETRY_BACKOFF * (2**attempt))
+
+
 def _install(
     args: argparse.Namespace, context: dict[str, Any], state: str, receipt: Optional[dict[str, Any]]
 ) -> tuple[int, dict[str, Any]]:
@@ -1694,7 +1745,7 @@ def _install(
             moved_previous = True
             backup_owner = _transaction_tree_owner(backup, manifest=True)
         _assert_bound_runtime(context["runtime"])
-        os.replace(staging, plugin_root)
+        _replace_with_access_retry(staging, plugin_root)
         published_owner = _transaction_tree_owner(plugin_root, manifest=True)
         _set_plugin_entry(project, installed_entry)
         _assert_bound_runtime(context["runtime"])
@@ -1727,10 +1778,19 @@ def _install(
     except LifecycleError:
         raise
     except PermissionError as exc:
+        locked_reason = _locked_artifact_reason(plugin_root, backup)
+        if locked_reason is not None:
+            raise LifecycleError(
+                f"A loaded Unreal plugin artifact requires restart: {locked_reason}",
+                exit_code=INSTALL_EXIT_REQUIRES_RESTART,
+                stage="install",
+            ) from exc
         raise LifecycleError(
-            f"A loaded Unreal plugin artifact requires restart: {exc}",
-            exit_code=INSTALL_EXIT_REQUIRES_RESTART,
+            f"Plugin transaction was denied access to the plugin directory: {exc} "
+            "(no loaded Unreal artifact explains it; check permissions, antivirus scanning, or indexing)",
+            exit_code=INSTALL_EXIT_INSTALL,
             stage="install",
+            failure_stage="install-access-denied",
         ) from exc
     except OSError as exc:
         raise LifecycleError(
@@ -2014,10 +2074,19 @@ def _uninstall(
         _remove_tree(backup)
         committed = True
     except PermissionError as exc:
+        locked_reason = _locked_artifact_reason(plugin_root, backup, recovery)
+        if locked_reason is not None:
+            raise LifecycleError(
+                f"A loaded Unreal plugin artifact requires restart: {locked_reason}",
+                exit_code=INSTALL_EXIT_REQUIRES_RESTART,
+                stage="uninstall",
+            ) from exc
         raise LifecycleError(
-            f"A loaded Unreal plugin artifact requires restart: {exc}",
-            exit_code=INSTALL_EXIT_REQUIRES_RESTART,
+            f"Uninstall was denied access to the plugin directory: {exc} "
+            "(no loaded Unreal artifact explains it; check permissions, antivirus scanning, or indexing)",
+            exit_code=INSTALL_EXIT_INSTALL,
             stage="uninstall",
+            failure_stage="uninstall-access-denied",
         ) from exc
     except OSError as exc:
         raise LifecycleError(
@@ -2085,7 +2154,7 @@ def _execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             steps=[{"id": exc.stage, "status": "failed", "message": str(exc)}],
             next_steps=[_failure_next_step(args, exc.stage)],
             receipt_path=context["receipt_path"] if context["receipt_path"].is_file() else None,
-            verify={"directly_usable": False, "failure_stage": exc.stage, "failure_reason": str(exc)},
+            verify={"directly_usable": False, "failure_stage": exc.failure_stage, "failure_reason": str(exc)},
             **_context_fields(context, state),
         )
 
