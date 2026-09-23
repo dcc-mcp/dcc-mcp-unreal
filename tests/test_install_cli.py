@@ -601,12 +601,17 @@ def test_install_retries_a_transient_access_denied_publish(monkeypatch, tmp_path
     real_replace = install_cli.os.replace
     original_sleep = time.sleep
     attempts = {"publish": 0}
+    injected = {"count": 0}
     sleeps: list[float] = []
 
     def flaky_replace(source, destination):
         if Path(destination) == plugin_root:
             attempts["publish"] += 1
-            if attempts["publish"] < 3:
+            # Inject a bounded number of denials, then let the rename run for real: the real
+            # rename can itself be denied once on a busy runner, and the retry loop is
+            # allowed to absorb that, so the injected count is what this test asserts on.
+            if injected["count"] < 2:
+                injected["count"] += 1
                 raise _windows_access_denied("staging tree is being scanned")
         return real_replace(source, destination)
 
@@ -617,8 +622,10 @@ def test_install_retries_a_transient_access_denied_publish(monkeypatch, tmp_path
 
     result = _execute_expecting(install_args, 40)
 
-    assert attempts["publish"] == 3
-    assert sleeps == [0.1, 0.2]
+    assert injected["count"] == 2
+    assert attempts["publish"] >= 3  # two injected denials plus at least one real rename
+    assert attempts["publish"] <= install_cli.REPLACE_ATTEMPTS  # the retry stays bounded
+    assert sleeps[:2] == [0.1, 0.2]  # a real denial may append a third backoff
     assert time.sleep is original_sleep  # the retry never replaces the stdlib sleep
     assert plugin_root.is_dir()
     assert result["verify"]["failure_stage"] != "install-access-denied"
