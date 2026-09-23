@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -535,6 +536,51 @@ def test_uninstall_keeps_requires_restart_when_an_artifact_is_actually_loaded(mo
     assert plugin_root.is_dir()
 
 
+def test_uninstall_probes_the_recovery_copy_when_the_plugin_root_is_already_moved(monkeypatch, tmp_path: Path) -> None:
+    # The classifier must keep looking past a path that no longer exists; here the only
+    # artifact left on disk when the failure lands is the recovery copy.
+    engine, project = _synthetic_host(tmp_path)
+    common = [
+        "--json",
+        "--dcc-path",
+        str(engine),
+        "--python",
+        sys.executable,
+        "--project",
+        str(project),
+        "--timeout",
+        "0",
+    ]
+    install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
+    _execute_expecting(install_args, 40)
+    plugin_root = project.parent / "Plugins" / "DccMcpUnreal"
+    prior_files = install_cli._file_manifest(plugin_root)
+    real_remove_tree = install_cli._remove_tree
+    probed: list[Path] = []
+
+    def denied_remove(path, *_args, **_kwargs):
+        if Path(path) != plugin_root:
+            raise _windows_access_denied("staged removal is held by another process")
+        return real_remove_tree(path, *_args, **_kwargs)
+
+    def unlocked(path: Path) -> Optional[str]:
+        probed.append(Path(path))
+        return None
+
+    monkeypatch.setattr(install_cli, "_remove_tree", denied_remove)
+    monkeypatch.setattr(install_cli, "_inspect_locks", unlocked)
+    uninstall_args = install_cli._parser().parse_args(["uninstall", *common, "--yes"])
+
+    exit_code, result = install_cli._execute(uninstall_args)
+
+    assert exit_code == 30
+    assert result["verify"]["failure_stage"] == "uninstall-access-denied"
+    assert any(Path(path).name.startswith(f".{install_cli.PLUGIN_NAME}.recovery-") for path in probed)
+    _assert_sop_v1(result)
+    assert plugin_root.is_dir()
+    assert install_cli._file_manifest(plugin_root) == prior_files
+
+
 def test_install_retries_a_transient_access_denied_publish(monkeypatch, tmp_path: Path) -> None:
     # A freshly written staging tree can be held briefly by antivirus scanning or indexing,
     # which Windows reports as WinError 5. The rename is retried before it is classified.
@@ -553,6 +599,7 @@ def test_install_retries_a_transient_access_denied_publish(monkeypatch, tmp_path
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
     plugin_root = install_cli._resolve_context(install_args)["plugin_root"]
     real_replace = install_cli.os.replace
+    original_sleep = time.sleep
     attempts = {"publish": 0}
     sleeps: list[float] = []
 
@@ -564,13 +611,15 @@ def test_install_retries_a_transient_access_denied_publish(monkeypatch, tmp_path
         return real_replace(source, destination)
 
     monkeypatch.setattr(install_cli.os, "replace", flaky_replace)
-    monkeypatch.setattr(install_cli.time, "sleep", sleeps.append)
+    # Patch the retry seam only: replacing the stdlib sleep would busy-wait every other
+    # polling loop the CLI runs during this invocation.
+    monkeypatch.setattr(install_cli, "_RETRY_SLEEP", sleeps.append)
 
     result = _execute_expecting(install_args, 40)
 
     assert attempts["publish"] == 3
-    assert len(sleeps) == 2
-    assert sleeps[0] < sleeps[1]
+    assert sleeps == [0.1, 0.2]
+    assert time.sleep is original_sleep  # the retry never replaces the stdlib sleep
     assert plugin_root.is_dir()
     assert result["verify"]["failure_stage"] != "install-access-denied"
 
@@ -607,8 +656,15 @@ def test_install_reports_an_access_denied_publish_as_an_install_failure(monkeypa
             raise _windows_access_denied("staging tree is held by another process")
         return real_replace(source, destination)
 
+    probed: list[Path] = []
+
+    def unlocked(path: Path) -> Optional[str]:
+        probed.append(Path(path))
+        return None
+
     monkeypatch.setattr(install_cli.os, "replace", denied_replace)
-    monkeypatch.setattr(install_cli, "_inspect_locks", lambda path: None)
+    monkeypatch.setattr(install_cli, "_inspect_locks", unlocked)
+    monkeypatch.setattr(install_cli, "_RETRY_SLEEP", lambda _delay: None)
     upgrade_args = install_cli._parser().parse_args(["upgrade", *common, "--yes"])
 
     exit_code, result = install_cli._execute(upgrade_args)
@@ -617,6 +673,11 @@ def test_install_reports_an_access_denied_publish_as_an_install_failure(monkeypa
     assert result["status"] == "failed"
     assert result["verify"]["failure_stage"] == "install-access-denied"
     assert "requires restart" not in result["verify"]["failure_reason"]
+    assert result["next_steps"][0]["id"] == "retry-install-access-denied"
+    # The publish rename failed with the destination still empty, so the classifier had to
+    # fall through to the backup the upgrade had already moved aside: that backup is the last
+    # path probed, after the preflight probe of the plugin root.
+    assert probed[-1].name.startswith(f".{install_cli.PLUGIN_NAME}.backup-")
     _assert_sop_v1(result)
     assert install_cli._file_manifest(plugin_root) == prior_files
     assert not list(plugin_root.parent.glob(".DccMcpUnreal.*-*"))

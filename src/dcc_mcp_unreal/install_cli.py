@@ -1629,16 +1629,28 @@ def _locked_artifact_reason(*paths: Optional[Path]) -> Optional[str]:
     return None
 
 
-def _is_access_denied(exc: BaseException) -> bool:
-    """True for the generic access/sharing denials Windows reports as WinError 5 or 32."""
-    if isinstance(exc, PermissionError):
-        return True
-    return getattr(exc, "winerror", None) in (5, 32) or getattr(exc, "errno", None) == errno.EACCES
+def _is_transient_access_denied(exc: BaseException) -> bool:
+    """True only for the access denials a retry can clear.
+
+    Windows reports a held directory as WinError 5 (access denied) or 32 (sharing violation),
+    both of which Python maps to EACCES. EPERM is a permanent condition rather than a lease
+    some other process will release, so it is deliberately not retried.
+    """
+    winerror = getattr(exc, "winerror", None)
+    if winerror is not None:
+        return winerror in (5, 32)
+    return getattr(exc, "errno", None) == errno.EACCES
 
 
-# Bounded retry the publish rename uses when a transient access denial is reported.
-REPLACE_ATTEMPTS = 4
-REPLACE_RETRY_BACKOFF = 0.05
+# Bounded retry the publish rename uses when a transient access denial is reported. Six
+# attempts over ~3.1s is the shortest window that outlasts a real-time antivirus scan of the
+# freshly written staging tree; the cost is only paid on the failure path.
+REPLACE_ATTEMPTS = 6
+REPLACE_RETRY_BACKOFF = 0.1
+
+# Test seam for the retry delay. Patching the stdlib sleep would busy-wait every other
+# polling loop that runs during a CLI invocation, so the delay is swapped here instead.
+_RETRY_SLEEP = time.sleep
 
 
 def _replace_with_access_retry(source: Path, destination: Path) -> None:
@@ -1653,9 +1665,9 @@ def _replace_with_access_retry(source: Path, destination: Path) -> None:
             os.replace(source, destination)
             return
         except PermissionError as exc:
-            if not _is_access_denied(exc) or attempt + 1 >= REPLACE_ATTEMPTS:
+            if not _is_transient_access_denied(exc) or attempt + 1 >= REPLACE_ATTEMPTS:
                 raise
-            time.sleep(REPLACE_RETRY_BACKOFF * (2**attempt))
+            _RETRY_SLEEP(REPLACE_RETRY_BACKOFF * (2**attempt))
 
 
 def _install(
@@ -2152,7 +2164,7 @@ def _execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         return exc.exit_code, _result(
             status="requires_restart" if exc.exit_code == INSTALL_EXIT_REQUIRES_RESTART else "failed",
             steps=[{"id": exc.stage, "status": "failed", "message": str(exc)}],
-            next_steps=[_failure_next_step(args, exc.stage)],
+            next_steps=[_failure_next_step(args, exc.failure_stage)],
             receipt_path=context["receipt_path"] if context["receipt_path"].is_file() else None,
             verify={"directly_usable": False, "failure_stage": exc.failure_stage, "failure_reason": str(exc)},
             **_context_fields(context, state),
