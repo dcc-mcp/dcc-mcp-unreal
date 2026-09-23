@@ -97,6 +97,29 @@ def _synthetic_host(tmp_path: Path) -> tuple[Path, Path]:
     return engine, project
 
 
+# A preparatory install is allowed this many attempts before its exit code is accepted.
+SETUP_INSTALL_ATTEMPTS = 3
+
+
+def _setup_install(args, expected: int = install_cli.INSTALL_EXIT_VERIFY) -> int:
+    """Run a preparatory install and return its exit code.
+
+    Setup installs only need the plugin tree and receipt to exist; the tests that follow
+    exercise the behaviour under test themselves. On a self-hosted Windows runner an
+    antivirus scanner or a search indexer can briefly hold a handle on the tree the
+    transaction just wrote, which makes its ``os.replace`` raise ``PermissionError``. The
+    CLI maps every such error to exit 50 (requires_restart) even though nothing is actually
+    locked, so a setup step must retry instead of recording that transient code -- the
+    transaction rolls back on failure, so retrying starts from a clean state.
+    """
+    exit_code = -1
+    for _ in range(SETUP_INSTALL_ATTEMPTS):
+        exit_code, _ = install_cli._execute(args)
+        if exit_code == expected:
+            return exit_code
+    return exit_code
+
+
 def test_core_schema_anchor_is_keyed_by_the_core_release() -> None:
     from tests.install_sop_anchors import CORE_SCHEMA_ANCHOR_MEASURED_THROUGH, core_schema_anchor
 
@@ -443,7 +466,7 @@ def test_uninstall_classifies_windows_style_plugin_lock(monkeypatch, tmp_path: P
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    assert _setup_install(install_args) == 40
     plugin_root = project.parent / "Plugins" / "DccMcpUnreal"
     real_replace = install_cli.os.replace
 
@@ -477,7 +500,7 @@ def test_failed_upgrade_receipt_commit_restores_previous_install(monkeypatch, tm
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    assert _setup_install(install_args) == 40
     plugin_root = project.parent / "Plugins" / "DccMcpUnreal"
     receipt_path = project.parent / ".dcc-mcp" / "receipts" / "unreal.json"
     previous_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -1768,7 +1791,7 @@ def test_pending_resolution_preserves_evidence_when_bound_identity_drifts_during
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    assert _setup_install(install_args) == 40
     context = install_cli._resolve_context(install_args)
     receipt_path = context["receipt_path"]
     prior = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -1837,7 +1860,7 @@ def test_upgrade_source_drift_before_backup_preserves_prior_install(monkeypatch,
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    assert _setup_install(install_args) == 40
     context = install_cli._resolve_context(install_args)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
@@ -1908,7 +1931,7 @@ def test_install_failure_window_preserves_only_preexisting_state(
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     if install_state == "upgrade":
-        assert install_cli._execute(install_args)[0] == 40
+        assert _setup_install(install_args) == 40
         prior = json.loads(receipt_path.read_text(encoding="utf-8"))
         prior["adapter_version"] = "0.2.9"
         receipt_path.write_text(json.dumps(prior), encoding="utf-8")
@@ -2130,7 +2153,7 @@ def test_upgrade_keeps_prior_install_until_bound_verify_succeeds(monkeypatch, tm
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
     context = install_cli._resolve_context(install_args)
     monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
-    assert install_cli._execute(install_args)[0] == 0
+    assert _setup_install(install_args, install_cli.INSTALL_EXIT_OK) == 0
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     prior_files = install_cli._file_manifest(plugin_root)
@@ -2170,7 +2193,7 @@ def test_upgrade_without_live_selector_keeps_rollback_until_later_bound_verify(m
         "0",
     ]
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
-    assert install_cli._execute(install_args)[0] == 40
+    assert _setup_install(install_args) == 40
     context = install_cli._resolve_context(install_args)
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
@@ -2243,7 +2266,7 @@ def test_uninstall_delete_failure_restores_every_owned_byte(monkeypatch, tmp_pat
     install_args = install_cli._parser().parse_args(["install", *common, "--yes"])
     context = install_cli._resolve_context(install_args)
     monkeypatch.setattr(dcc_mcp_core, "wait_for_sidecar_ready", lambda **_kwargs: _bound_readiness(context))
-    assert install_cli._execute(install_args)[0] == 0
+    assert _setup_install(install_args, install_cli.INSTALL_EXIT_OK) == 0
     plugin_root = context["plugin_root"]
     receipt_path = context["receipt_path"]
     prior_files = install_cli._file_manifest(plugin_root)
