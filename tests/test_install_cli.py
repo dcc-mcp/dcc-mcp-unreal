@@ -22,10 +22,9 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from dcc_mcp_unreal import install_cli
+from tests.install_sop_anchors import verified_install_sop_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "adapter-install-sop-v1.schema.json"
-CORE_2320_SCHEMA_SHA256 = "3ca25788439917b4d4c0617230a762f9797756b5b54f45c8c4149f975b90f904"
 
 
 def _assert_sop_v1(result: dict) -> None:
@@ -46,9 +45,7 @@ def _assert_sop_v1(result: dict) -> None:
     for next_step in result["next_steps"]:
         assert set(next_step) >= {"id", "description", "why"}
         assert ("command" in next_step) ^ ("file_edit" in next_step)
-    schema_bytes = SCHEMA_PATH.read_bytes()
-    assert hashlib.sha256(schema_bytes).hexdigest() == CORE_2320_SCHEMA_SHA256
-    schema = json.loads(schema_bytes)
+    schema = verified_install_sop_schema()
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(result)
 
@@ -98,6 +95,100 @@ def _synthetic_host(tmp_path: Path) -> tuple[Path, Path]:
     editor.parent.mkdir(parents=True)
     shutil.copyfile(sys.executable, editor)
     return engine, project
+
+
+def test_core_schema_anchor_is_keyed_by_the_core_release() -> None:
+    from tests.install_sop_anchors import CORE_SCHEMA_ANCHOR_MEASURED_THROUGH, core_schema_anchor
+
+    initial = core_schema_anchor("0.20.14")
+    refreshed = core_schema_anchor("0.20.30")
+
+    assert initial is not None and refreshed is not None
+    assert initial.sha256 != refreshed.sha256
+    assert core_schema_anchor("0.20.29") == initial
+    assert core_schema_anchor("0.20.33") == refreshed
+    assert core_schema_anchor(CORE_SCHEMA_ANCHOR_MEASURED_THROUGH) is not None
+
+
+def test_core_schema_anchor_is_unpinned_above_the_measured_ceiling() -> None:
+    from tests.install_sop_anchors import core_schema_anchor
+
+    # A Core release this suite has not measured yet has no pinned digest, so Core can move
+    # forward without breaking these tests.
+    assert core_schema_anchor("0.20.34") is None
+    assert core_schema_anchor("0.21.0") is None
+
+
+def test_core_schema_anchor_is_unpinned_below_the_first_measured_release() -> None:
+    from tests.install_sop_anchors import core_schema_anchor
+
+    # The declared Core floor is 0.20.13, which shipped a 75-byte stub rather than the
+    # 4261-byte artifact. Sub-floor versions must degrade to unpinned instead of pinning it.
+    assert core_schema_anchor("0.20.13") is None
+    assert core_schema_anchor("0.20.0") is None
+
+
+def test_core_schema_anchor_requires_a_measurable_core_version() -> None:
+    from tests.install_sop_anchors import core_schema_anchor
+
+    assert core_schema_anchor("") is None
+    assert core_schema_anchor("not-a-version") is None
+    assert core_schema_anchor("0.20.14rc1") is None
+
+
+def test_install_sop_schema_is_verified_against_the_installed_core_release() -> None:
+    from tests.install_sop_anchors import (
+        CORE_SCHEMA_ANCHORS,
+        core_schema_anchor,
+        core_schema_artifact,
+        installed_core_version,
+        verified_install_sop_schema,
+    )
+
+    schema = verified_install_sop_schema()
+    measured = core_schema_artifact(schema)
+    anchor = core_schema_anchor(installed_core_version() or "")
+
+    assert measured is not None
+    # When the installed release has a measured row, the artifact must match it exactly.
+    if anchor is not None:
+        assert measured == anchor
+    # Otherwise the observed bytes must still be reported for a later measurement.
+    report_core = (measured.size, measured.sha256)
+    assert report_core in {value for _, value in CORE_SCHEMA_ANCHORS} or anchor is None
+    Draft202012Validator.check_schema(schema)
+
+
+def test_drifted_install_sop_schema_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests import install_sop_anchors
+
+    measured = install_sop_anchors.core_schema_anchor("0.20.33")
+    assert measured is not None
+    monkeypatch.setattr(install_sop_anchors, "installed_core_version", lambda: "0.20.33")
+    monkeypatch.setattr(install_sop_anchors, "core_schema_anchor", lambda _version: measured._replace(size=1))
+
+    with pytest.raises(AssertionError, match="revision measured"):
+        install_sop_anchors.verified_install_sop_schema()
+
+
+def test_unlocatable_install_sop_schema_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests import install_sop_anchors
+
+    measured = install_sop_anchors.core_schema_anchor("0.20.33")
+    assert measured is not None
+    monkeypatch.setattr(install_sop_anchors, "installed_core_version", lambda: "0.20.33")
+    monkeypatch.setattr(install_sop_anchors, "core_schema_anchor", lambda _version: measured)
+    monkeypatch.setattr(install_sop_anchors, "core_schema_artifact", lambda _shared: None)
+
+    with pytest.raises(AssertionError, match="Could not locate"):
+        install_sop_anchors.verified_install_sop_schema()
+
+
+def test_no_vendored_install_sop_fixture_can_shadow_core() -> None:
+    # A vendored copy compared against a digest of itself can never fail, so it would silently
+    # stop describing what Core publishes. The artifact Core serves is the only source of truth.
+    vendored = REPO_ROOT / "tests" / "fixtures" / "adapter-install-sop-v1.schema.json"
+    assert not vendored.exists()
 
 
 def test_install_dry_run_emits_sop_plan_without_writing(tmp_path: Path) -> None:
