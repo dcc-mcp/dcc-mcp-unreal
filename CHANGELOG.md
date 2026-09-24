@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.7](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.6...v0.3.7) (2026-09-24)
+
+
+### Features
+
+* add consent-gated plugin configuration and asset readback ([87b3423](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/87b3423fe042c1cb1e062907f5f8490419356c6c))
+
+
+### Bug Fixes
+
+* **ci:** install package in editable mode before release tests ([1a17b94](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1a17b9411deba6cd6b3d4c10ef944db7ed18295e))
+* **ci:** install package in editable mode before release tests ([d28f41d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d28f41da252afd5b5ac6d045461e7d5ef2a88e6a))
+* **ci:** install package in editable mode before release tests ([#217](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/217)) ([1a17b94](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/1a17b9411deba6cd6b3d4c10ef944db7ed18295e))
+* **install:** read the report schema version from Core's published document ([a7c872b](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a7c872bb770b682069cfcd4cbf684b7b8695e515))
+* persist imported asset dependencies ([a425ee9](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a425ee9c4d7a1e3fcf86893d71600a30baddfef4))
+* stop reporting generic access denials as requires_restart ([#216](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/216)) ([f0451b8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f0451b8b46ac4fb17fd2450b784b1e970b576a4f))
+* validate CLI output against the Core schema Core serves ([#213](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/213)) ([3922438](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/392243831430a370409cd8cb66b8771a26f3380e))
+
+
+### Documentation
+
+* add canonical agent quickstart ([#212](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/212)) ([a826a15](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a826a1508b9ece897111ab07e0fbe1abedefcbc6))
+
 ## [0.3.6](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.5...v0.3.6) (2026-09-01)
 
 
