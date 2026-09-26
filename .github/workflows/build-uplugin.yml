@@ -68,7 +68,6 @@ jobs:
       UE_VERSION: ${{ matrix.ue_version }}
       UE_ROOT: ${{ matrix.ue_root }}
       DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
-      CORE_REPO: loonghao/dcc-mcp-core
       CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}
 
     steps:
