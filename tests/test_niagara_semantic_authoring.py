@@ -19,7 +19,7 @@ IMPLEMENTATION = ROOT / "unreal/plugin/Source/DccMcpUnreal/Private/DccMcpAutomat
 BUILD_RULES = ROOT / "unreal/plugin/Source/DccMcpUnreal/DccMcpUnreal.Build.cs"
 COMMANDLET_PROBE = ROOT / "tests/ue_niagara_commandlet.py"
 SMOKE_RUNNER = ROOT / "scripts/run_ue_smoke.ps1"
-JUSTFILE = ROOT / "Justfile"
+JUSTFILE = ROOT / "justfile"
 
 
 def _load_authoring_script():
