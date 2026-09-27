@@ -177,7 +177,7 @@ jobs:
         run: |
           base="dcc-mcp-unreal-${RELEASE_TAG}-${ASSET_SUFFIX}"
           if [ "$RUNNER_OS_NAME" = Windows ]; then
-            powershell -NoProfile -Command "Compress-Archive -Path 'dist/standalone/*' -DestinationPath '${base}.zip'"
+            ARCHIVE_PATH="${base}.zip" powershell -NoProfile -Command 'Compress-Archive -Path "dist/standalone/*" -DestinationPath $env:ARCHIVE_PATH'
             echo "ASSET=${base}.zip" >> "$GITHUB_ENV"
           else
             tar -czf "${base}.tar.gz" -C dist/standalone .
