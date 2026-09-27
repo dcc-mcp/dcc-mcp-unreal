@@ -140,9 +140,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DCC_MCP_CORE_READ_TOKEN || secrets.GITHUB_TOKEN }}
           CORE_VERSION: ${{ github.event.inputs.core_version || 'latest' }}
+          CORE_ASSET: ${{ matrix.core_asset }}
+          SERVER_NAME: ${{ matrix.server_name }}
         shell: bash
         run: |
-          args=(--repo dcc-mcp/dcc-mcp-core --pattern '${{ matrix.core_asset }}' --dir core-bin)
+          args=(--repo dcc-mcp/dcc-mcp-core --pattern "$CORE_ASSET" --dir core-bin)
           if [ "$CORE_VERSION" = latest ]; then
             found=false
             while read -r tag; do
@@ -153,22 +155,28 @@ jobs:
               fi
             done < <(gh release list --repo dcc-mcp/dcc-mcp-core --limit 20 --json tagName --jq '.[].tagName')
             if [ "$found" != true ]; then
-              echo "::error::No recent dcc-mcp-core release contains ${{ matrix.core_asset }}"
+              echo "::error::No recent dcc-mcp-core release contains $CORE_ASSET"
               exit 1
             fi
           else
             gh release download "$CORE_VERSION" "${args[@]}"
           fi
-          mv 'core-bin/${{ matrix.core_asset }}' 'core-bin/${{ matrix.server_name }}'
-          chmod +x 'core-bin/${{ matrix.server_name }}' || true
+          mv "core-bin/$CORE_ASSET" "core-bin/$SERVER_NAME"
+          chmod +x "core-bin/$SERVER_NAME" || true
       - name: Build standalone sidecar
-        run: python tools/build_binary.py --server "core-bin/${{ matrix.server_name }}"
+        env:
+          SERVER_NAME: ${{ matrix.server_name }}
+        shell: bash
+        run: python tools/build_binary.py --server "core-bin/$SERVER_NAME"
       - name: Archive standalone
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || github.event.inputs.tag_name || github.ref_name }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+          RUNNER_OS_NAME: ${{ runner.os }}
         shell: bash
         run: |
-          tag='${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || github.event.inputs.tag_name || github.ref_name }}'
-          base="dcc-mcp-unreal-${tag}-${{ matrix.asset_suffix }}"
-          if [ '${{ runner.os }}' = Windows ]; then
+          base="dcc-mcp-unreal-${RELEASE_TAG}-${ASSET_SUFFIX}"
+          if [ "$RUNNER_OS_NAME" = Windows ]; then
             powershell -NoProfile -Command "Compress-Archive -Path 'dist/standalone/*' -DestinationPath '${base}.zip'"
             echo "ASSET=${base}.zip" >> "$GITHUB_ENV"
           else
