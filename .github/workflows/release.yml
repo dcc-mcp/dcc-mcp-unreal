@@ -317,6 +317,17 @@ jobs:
   # producer — or a skipped attach step — as fatal, and names the assets that
   # are therefore missing. `build-unreal-plugin` is intentionally still not a
   # required status check, so this is the only place the signal is enforced.
+  #
+  # The gate covers only the two triggers on which `attach-release-assets` can
+  # run at all. On a tag push or a `release: published` event release-please is
+  # skipped, so `release_created` is empty, `publish` is skipped, and
+  # `attach-release-assets` — which needs either a successful `publish` or a
+  # manual dispatch with an explicit tag — can never satisfy its own `if`.
+  # Nothing fails on those paths and nothing is attached by design, so a guard
+  # there would only produce a red run with no failure behind it; a guard that
+  # cries wolf is a guard people learn to ignore. Those triggers still build
+  # and upload their artifacts as workflow artifacts. Widening them to attach
+  # for real is a behaviour change, and belongs in its own change.
   release-summary:
     name: Release summary (fail visible)
     needs:
@@ -325,9 +336,7 @@ jobs:
       always() && !cancelled() &&
       (
         needs.release-please.outputs.release_created == 'true' ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '') ||
-        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-        github.event_name == 'release'
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
       )
     runs-on: ubuntu-latest
     env:

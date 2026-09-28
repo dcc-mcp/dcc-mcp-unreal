@@ -23,10 +23,60 @@ The behavioural half is proven by running the real `run:` block under bash with
 cannot tell "fails on skip" from a regex that happens to match. Those cases are
 skipped where bash is unavailable; the shape assertions run everywhere.
 
+The gate the summary job runs under is part of that contract, not an
+implementation detail. It admits exactly the two triggers on which
+`attach-release-assets` can run at all: a release-please release, and a manual
+dispatch with an explicit tag. A tag push or a `release: published` event is
+admitted by the *release* gate but not by this one, because there
+`release-please` is skipped, so `release_created` is empty, `publish` is
+skipped, and `attach-release-assets` — which needs a successful `publish` or a
+dispatch with a tag — can never satisfy its own `if`. Nothing fails on those
+paths and nothing is attached by design, so guarding them would only produce a
+red run with no failure behind it. `test_the_summary_gate_*` pins that
+admission list as a whitelist.
+
 This file is **not** part of the shared kit (`tests/test_release_workflow_integrity.py`
 is the byte-identical copy and carries no repository-specific policy). PyYAML is
 requested through `pytest.importorskip`, matching the kit copy, so a test
 environment without PyYAML skips this module instead of failing collection.
+
+Verifying the guard end to end
+------------------------------
+
+Simulating a failing lane, and checking that the workflow turns red:
+
+1. Locally, no Unreal host needed — the behavioural tests execute the real
+   `run:` block under bash: `pytest tests/test_release_workflow_fail_visible.py -v`.
+
+2. On-host: on a scratch branch make the Unreal build fail, then dispatch the
+   Release workflow with an explicit `tag_name`:
+
+   .. code-block:: yaml
+
+       # .github/workflows/build-uplugin.yml, first step of the build-uplugin job
+       - name: Simulate a lane failure
+         run: exit 1
+
+   .. code-block:: bash
+
+       gh workflow run release.yml --ref <scratch-branch> -f tag_name=v0.3.8 -f core_version=latest
+
+   Expected: `build-unreal-plugin` red, `attach-release-assets` skipped,
+   `build` and `standalone` green, `publish` skipped (it only runs when
+   release-please cuts a tag, so nothing reaches PyPI), and `release-summary`
+   red with the run conclusion **failure** and a log naming the missing assets.
+
+3. Confirm the healthy path is untouched: revert the simulated failure and
+   re-run the same dispatch — every job green and the summary prints
+   ``Release <tag> is complete: ...``.
+
+Use a throwaway or already-published tag for step 2: with an explicit
+`tag_name` the attach step would re-upload to that Release if it did run, and
+no new tag or PyPI upload is created because release-please does not run.
+
+Recovery after a real lane failure: re-running the same workflow run does not
+cut a new tag. Re-run with `workflow_dispatch` and `tag_name` set to the
+released tag to attach the missing assets once the runner or lane is healthy.
 """
 
 from __future__ import annotations
@@ -37,7 +87,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -73,6 +123,22 @@ EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
 # below assert on a real skip instead of a real failure.
 IGNORES_SKIPS = 'test "$RESULT_BUILD_UNREAL_PLUGIN" = failure && exit 1\nexit 0\n'
 
+# The only triggers the summary is allowed to guard, as the alternatives of the
+# top-level `||` in its `if`. Everything outside this set is admitted by the
+# release gate but cannot attach anything, so guarding it would report a red
+# run with no failure behind it. Adding a trigger here requires proving that
+# `attach-release-assets` can actually succeed on it.
+ADMITTED_TRIGGERS = (
+    "needs.release-please.outputs.release_created == 'true'",
+    "(github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')",
+)
+
+# Trigger branches that belong to the release gate but must stay out of the
+# summary: on both, `release-please` is skipped, so `publish` is skipped, so
+# `attach-release-assets` can never satisfy its own `if`. Guarding them produced
+# a false red run on a path that produces nothing.
+EXCLUDED_TRIGGER_MARKERS = ("refs/tags/v", "github.event_name == 'release'")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,6 +165,48 @@ def _summary_script() -> str:
 def _result_env(name: str) -> str:
     """The env var `needs.<name>.result` is passed to the summary script as."""
     return "RESULT_{}".format(name.upper().replace("-", "_"))
+
+
+def _split_top_level(text: str, separator: str) -> List[str]:
+    """Split `text` on `separator`, ignoring anything nested inside parentheses.
+
+    A GitHub `if` nests `&&` inside a `||` group and the other way round, so a
+    plain `str.split` would cut a trigger group in half.
+    """
+    parts: List[str] = []
+    depth, current = 0, ""
+    index = 0
+    while index < len(text):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+        elif depth == 0 and text.startswith(separator, index):
+            parts.append(current)
+            current = ""
+            index += len(separator)
+            continue
+        current += text[index]
+        index += 1
+    parts.append(current)
+    return [re.sub(r"\s+", " ", part).strip() for part in parts if part.strip()]
+
+
+def _gate_alternatives(condition: str) -> List[str]:
+    """Return the trigger alternatives of the release gate inside a job `if`.
+
+    Every release job gates on `always() && <release gate>`, and
+    `release-summary` adds `!cancelled()`. The gate is the one operand carrying
+    `release_created`; unwrapping it leaves the alternatives the whitelist test
+    compares.
+    """
+    stripped = re.sub(r"\s+", " ", condition.replace("always()", "").replace("!cancelled()", ""))
+    candidates = [operand for operand in _split_top_level(stripped, "&&") if "release_created" in operand]
+    assert len(candidates) == 1, "expected one release gate in the condition, got {}".format(candidates)
+    group = candidates[0]
+    if group.startswith("(") and group.endswith(")"):
+        group = group[1:-1]
+    return _split_top_level(group, "||")
 
 
 def _green_env(**overrides: str) -> Dict[str, str]:
@@ -158,6 +266,39 @@ def test_the_summary_stays_quiet_outside_a_release_run() -> None:
     """A push to `main` that cuts no release skips every job; the summary must skip too."""
     condition = _job(SUMMARY_JOB)["if"]
     assert "needs.release-please.outputs.release_created == 'true'" in condition
+
+
+def test_the_summary_gate_admits_exactly_the_triggers_that_can_attach() -> None:
+    """Whitelist, not a blacklist: the release gate is wider than the attach gate.
+
+    The four jobs share a release gate that also admits a tag push and a
+    `release: published` event. On both, `release-please` is skipped, so
+    `publish` is skipped, so `attach-release-assets` can never satisfy its own
+    `if` — it is skipped with nothing failing. A guard admitted on those paths
+    reports a red run with no failure behind it, which trains people to ignore
+    the guard. Asserting the exact alternative list also means a new trigger
+    cannot slip in without a test change.
+    """
+    assert _gate_alternatives(_job(SUMMARY_JOB)["if"]) == list(ADMITTED_TRIGGERS)
+
+
+def test_the_summary_gate_excludes_the_triggers_that_cannot_attach() -> None:
+    """The regression anchor for the false positive, named per excluded trigger."""
+    condition = _job(SUMMARY_JOB)["if"]
+    for marker in EXCLUDED_TRIGGER_MARKERS:
+        assert marker not in condition, "guarding {} reports a red run where nothing failed".format(marker)
+
+
+def test_the_release_gate_is_still_wider_than_the_summary_gate() -> None:
+    """Teeth for the two tests above: the excluded triggers really are in the release gate.
+
+    Without this, the whitelist could be satisfied by a gate that nobody wanted
+    to widen in the first place.
+    """
+    release_gate = _gate_alternatives(_job("attach-release-assets")["if"])
+    assert len(release_gate) > len(ADMITTED_TRIGGERS)
+    for marker in EXCLUDED_TRIGGER_MARKERS:
+        assert any(marker in alternative for alternative in release_gate)
 
 
 def test_publish_is_not_chained_to_the_unreal_runner() -> None:
@@ -261,6 +402,35 @@ def test_a_manual_dispatch_with_an_explicit_tag_still_passes(tmp_path) -> None:
     result = _run_under_bash(_summary_script(), tmp_path, env)
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
+def test_both_admitted_triggers_pass_end_to_end_and_fail_on_their_producers(tmp_path) -> None:
+    """The two triggers the gate admits, each green and each red on a producer.
+
+    Per-trigger coverage rather than per-job: what matters is that every path
+    the guard actually runs on is both passable and still fatal when the Unreal
+    lanes fail. The manual dispatch is the documented recovery path for a real
+    lane failure, so it has to fail loudly too.
+    """
+    admitted = {
+        "release-please": {"RELEASE_CREATED": "true", "RESULT_RELEASE_PLEASE": "success", "RESULT_PUBLISH": "success"},
+        "dispatch-with-tag": {"RELEASE_CREATED": "", "RESULT_RELEASE_PLEASE": "skipped", "RESULT_PUBLISH": "skipped"},
+    }
+    for index, (name, base_env) in enumerate(sorted(admitted.items())):
+        scratch = tmp_path / name
+        scratch.mkdir()
+
+        green = _run_under_bash(_summary_script(), scratch, _green_env(**base_env))
+        assert green.returncode == 0, "{} must pass when every job succeeded:\n{}".format(name, green.stdout)
+
+        red = _run_under_bash(
+            _summary_script(),
+            scratch,
+            _green_env(RESULT_BUILD_UNREAL_PLUGIN="failure", RESULT_ATTACH_RELEASE_ASSETS="skipped", **base_env),
+        )
+        assert red.returncode != 0, "{} must fail when the Unreal lanes failed:\n{}".format(name, red.stdout)
+        assert "build-unreal-plugin" in red.stdout
 
 
 @pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
