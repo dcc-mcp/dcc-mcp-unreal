@@ -67,6 +67,12 @@ GITHUB_ENV_ASSIGNMENT = re.compile(r"""^\s*echo\s+["']?\w+=""")
 # `NAME<<DELIMITER` being written to the env file, which opens a delimited record.
 GITHUB_ENV_MARKER = re.compile(r"\w+<<")
 
+# `upload-artifact` reads its `path:` as a newline-separated glob list, so the tag is
+# held to a charset that cannot smuggle a second pattern or a path separator.
+SAFE_TAG_CHARSET = "A-Za-z0-9._+-"
+TAG_CHARSET_GUARD = re.compile(r"case \"\$RELEASE_TAG\" in")
+ARCHIVE_NAME_ASSIGNMENT = 'base="dcc-mcp-unreal-${RELEASE_TAG}-${ASSET_SUFFIX}"'
+
 CLEAN_RUN_BLOCK = "echo nothing to see here\n"
 
 # A `run:` block that interpolates an Actions expression directly into shell source.
@@ -261,6 +267,27 @@ def test_no_undelimited_github_env_assignment() -> None:
     )
 
 
+def test_the_release_tag_is_checked_before_it_reaches_the_archive_name() -> None:
+    """The other half of the newline defence, and the only one that reaches `path:`.
+
+    The delimiter write keeps newlines inside the ASSET value by design, and
+    `upload-artifact` reads its `path:` as a newline-separated glob list. So the value
+    must be constrained to a safe filename charset before it is allowed to become an
+    archive name at all; the delimiter alone cannot stop that step from matching the
+    wrong files.
+    """
+    script = _step_run_block(_release_workflow(), ARCHIVE_STEP)
+
+    assert TAG_CHARSET_GUARD.search(script), (
+        "the archive step must reject a RELEASE_TAG outside {!r} before building the archive name".format(
+            SAFE_TAG_CHARSET
+        )
+    )
+    # The check has to come first: validating after the archive exists is too late.
+    assert script.index(ARCHIVE_NAME_ASSIGNMENT) > TAG_CHARSET_GUARD.search(script).start()
+    assert "exit 1" in script
+
+
 def test_every_github_env_write_opens_a_delimited_record() -> None:
     """Companion to the check above: every write that exists is delimited.
 
@@ -284,8 +311,8 @@ def test_every_github_env_write_opens_a_delimited_record() -> None:
 _E2E_REASON = "the end-to-end proof needs bash and a filesystem that allows newlines in filenames"
 
 
-def _run_under_bash(script: str, workdir: pathlib.Path, env: Dict[str, str]) -> Dict[str, str]:
-    """Run `script` under bash with `GITHUB_ENV` pointed at a file in `workdir`."""
+def _run_under_bash(script: str, workdir: pathlib.Path, env: Dict[str, str]) -> Tuple[int, Dict[str, str], str]:
+    """Run `script` under bash; return its exit code, parsed env entries and stderr."""
     script_path = workdir / "step.sh"
     script_path.write_bytes(script.replace("\r\n", "\n").encode("utf-8"))
     env_path = workdir / "github_env"
@@ -299,31 +326,48 @@ def _run_under_bash(script: str, workdir: pathlib.Path, env: Dict[str, str]) -> 
         env={**environment, "GITHUB_ENV": env_path.name},
         capture_output=True,
     )
-    assert result.returncode == 0, "step failed: {}".format(result.stderr.decode("utf-8", "replace"))
-    return parse_github_env(env_path.read_text(encoding="utf-8"))
+    entries = parse_github_env(env_path.read_text(encoding="utf-8"))
+    return result.returncode, entries, result.stderr.decode("utf-8", "replace")
+
+
+def _run_archive_step(tmp_path: pathlib.Path, tag: str) -> Tuple[int, Dict[str, str], str]:
+    (tmp_path / "dist" / "standalone").mkdir(parents=True)
+    (tmp_path / "dist" / "standalone" / "server").write_text("binary", encoding="utf-8")
+    return _run_under_bash(
+        _step_run_block(_release_workflow(), ARCHIVE_STEP),
+        tmp_path,
+        {"RELEASE_TAG": tag, "ASSET_SUFFIX": "linux-X64", "RUNNER_OS_NAME": "Linux"},
+    )
 
 
 @pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
-def test_a_newline_in_the_release_tag_cannot_add_extra_env_entries(tmp_path) -> None:
-    """The property the static rules above can only approximate.
+def test_a_valid_tag_still_produces_exactly_one_asset_entry(tmp_path) -> None:
+    """The archive step keeps working for the tags it is meant to receive."""
+    code, entries, stderr = _run_archive_step(tmp_path, "v0.3.7")
 
-    Runs the real `Archive standalone` script with a crafted tag and parses the
-    resulting env file the way the runner does. This is what distinguishes a real
-    delimited write from a shell heredoc: both look safe, only one is.
+    assert code == 0, stderr
+    assert list(entries) == ["ASSET"], entries
+    assert entries["ASSET"] == "dcc-mcp-unreal-v0.3.7-linux-X64.tar.gz"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
+def test_a_tag_outside_the_safe_charset_is_rejected_before_any_write(tmp_path) -> None:
+    """The guard the P2 finding asked for, proven by running the real step.
+
+    `upload-artifact` reads `path:` as a newline-separated glob list, so a tag
+    carrying a newline would upload whatever the extra lines match. The step must
+    refuse the tag instead of building an archive or writing ASSET at all.
     """
-    script = _step_run_block(_release_workflow(), ARCHIVE_STEP)
-    (tmp_path / "dist" / "standalone").mkdir(parents=True)
-    (tmp_path / "dist" / "standalone" / "server").write_text("binary", encoding="utf-8")
+    for index, tag in enumerate((CRAFTED_TAG, "v0\npyproject.toml", "release/v1.0.0", "../escape", "", "v1;rm -rf /")):
+        # One scratch tree per tag: the assertion is that nothing is created at all.
+        scratch = tmp_path / "case{}".format(index)
+        scratch.mkdir()
 
-    entries = _run_under_bash(
-        script,
-        tmp_path,
-        {"RELEASE_TAG": CRAFTED_TAG, "ASSET_SUFFIX": "linux-X64", "RUNNER_OS_NAME": "Linux"},
-    )
+        code, entries, _ = _run_archive_step(scratch, tag)
 
-    assert list(entries) == ["ASSET"], "the crafted tag leaked extra entries: {}".format(entries)
-    assert "INJECTED" not in entries
-    assert entries["ASSET"].startswith("dcc-mcp-unreal-")
+        assert code != 0, "the step accepted the unsafe tag {!r}".format(tag)
+        assert "ASSET" not in entries, "the step wrote ASSET for the unsafe tag {!r}".format(tag)
+        assert not list(scratch.glob("*.tar.gz")), "the step archived the unsafe tag {!r}".format(tag)
 
 
 @pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
@@ -347,9 +391,9 @@ def test_the_end_to_end_proof_distinguishes_delimited_from_plain_writes(tmp_path
         setup + 'asset="${base}.tar.gz"\n' + 'cat >> "$GITHUB_ENV" <<ASSET_EOF\n' + "ASSET=${asset}\n" + "ASSET_EOF\n"
     )
 
-    plain_entries = _run_under_bash(plain, tmp_path, {})
-    delimited_entries = _run_under_bash(delimited, tmp_path, {})
-    heredoc_entries = _run_under_bash(heredoc, tmp_path, {})
+    _, plain_entries, _ = _run_under_bash(plain, tmp_path, {})
+    _, delimited_entries, _ = _run_under_bash(delimited, tmp_path, {})
+    _, heredoc_entries, _ = _run_under_bash(heredoc, tmp_path, {})
 
     assert "INJECTED" in plain_entries
     assert "INJECTED" in heredoc_entries, "a shell heredoc is not a delimiter: it leaks like a plain echo"
