@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.8](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.7...v0.3.8) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** pass release workflow values through env instead of run interpolation ([#222](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/222)) ([94b9825](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/94b98251fe6e1d3734ac3fcf065c3c11002dc8bb))
+* **ci:** write GITHUB_ENV with a delimiter and guard release run blocks ([#229](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/229)) ([152e2e3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/152e2e311e749d687b22247aeffb0d8949f74d69))
+
+
+### Documentation
+
+* add AGENTS.md as the single agent contract ([#225](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/225)) ([3c869f7](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/3c869f79b2331cff689e8f31da2719d458fc35a6))
+
 ## [0.3.7](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.6...v0.3.7) (2026-09-24)
 
 
