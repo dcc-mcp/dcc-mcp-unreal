@@ -303,3 +303,143 @@ jobs:
             unreal-plugin/*.zip
             standalone/*
             scripts/install-standalone.ps1
+
+  # ── Fail-visible summary — a half-published release must not look green ───
+  #
+  # `publish` deliberately does NOT depend on `build-unreal-plugin`: the PyPI
+  # upload must not be held hostage by the availability of the self-hosted
+  # Unreal runner. The cost of that asymmetry is that `attach-release-assets`
+  # can be *skipped* while the tag is already public and PyPI already updated.
+  # A skip is not a failure to GitHub, so the run used to end green with a
+  # GitHub Release that carries no assets at all.
+  #
+  # This job is the closing bracket. It always runs, treats a skipped or failed
+  # producer — or a skipped attach step — as fatal, and names the assets that
+  # are therefore missing. `build-unreal-plugin` is intentionally still not a
+  # required status check, so this is the only place the signal is enforced.
+  #
+  # The gate covers only the two triggers on which `attach-release-assets` can
+  # run at all. On a tag push or a `release: published` event release-please is
+  # skipped, so `release_created` is empty, `publish` is skipped, and
+  # `attach-release-assets` — which needs either a successful `publish` or a
+  # manual dispatch with an explicit tag — can never satisfy its own `if`.
+  # Nothing fails on those paths and nothing is attached by design, so a guard
+  # there would only produce a red run with no failure behind it; a guard that
+  # cries wolf is a guard people learn to ignore. Those triggers still build
+  # and upload their artifacts as workflow artifacts. Widening them to attach
+  # for real is a behaviour change, and belongs in its own change.
+  release-summary:
+    name: Release summary (fail visible)
+    needs:
+      [release-please, build, build-unreal-plugin, standalone, publish, attach-release-assets]
+    if: |
+      always() && !cancelled() &&
+      (
+        needs.release-please.outputs.release_created == 'true' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
+      )
+    runs-on: ubuntu-latest
+    env:
+      # Every job result reaches the script through `env:`, never through
+      # `${{ }}` interpolation: an Actions expression is expanded before the
+      # shell parses the script, which would turn workflow data into shell
+      # source. `needs.<job>.result` is empty for a job that never ran, which is
+      # exactly the silent case this job exists to catch.
+      RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+      RELEASE_TAG: ${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || github.event.inputs.tag_name || github.ref_name }}
+      RESULT_ATTACH_RELEASE_ASSETS: ${{ needs.attach-release-assets.result }}
+      RESULT_BUILD: ${{ needs.build.result }}
+      RESULT_BUILD_UNREAL_PLUGIN: ${{ needs.build-unreal-plugin.result }}
+      RESULT_PUBLISH: ${{ needs.publish.result }}
+      RESULT_RELEASE_PLEASE: ${{ needs.release-please.result }}
+      RESULT_STANDALONE: ${{ needs.standalone.result }}
+    steps:
+      - name: Fail the run when a release asset was never produced or attached
+        run: |
+          set -u
+
+          missing=0
+
+          fail() {
+            printf '::error::%s\n' "$1"
+            missing=1
+          }
+
+          # require_success <job> <result> [asset ...] — report the job and the
+          # assets only it produces when it did not succeed.
+          require_success() {
+            job="$1"
+            result="$2"
+            shift 2
+            if [ "$result" != success ]; then
+              fail "release job $job did not succeed (result: ${result:-empty})"
+              printf '  assets only %s produces, now missing:\n' "$job"
+              for asset in "$@"; do
+                printf '    - %s\n' "$asset"
+              done
+            fi
+          }
+
+          echo 'Release job results:'
+          printf '  %-22s %s\n' release-please "$RESULT_RELEASE_PLEASE"
+          printf '  %-22s %s\n' build "$RESULT_BUILD"
+          printf '  %-22s %s\n' build-unreal-plugin "$RESULT_BUILD_UNREAL_PLUGIN"
+          printf '  %-22s %s\n' standalone "$RESULT_STANDALONE"
+          printf '  %-22s %s\n' publish "$RESULT_PUBLISH"
+          printf '  %-22s %s\n' attach-release-assets "$RESULT_ATTACH_RELEASE_ASSETS"
+
+          # release-please is legitimately skipped for a tag push, a published
+          # Release event, or a manual dispatch with an explicit tag, so only a
+          # real failure is fatal here.
+          case "$RESULT_RELEASE_PLEASE" in
+            success | skipped) ;;
+            *)
+              fail "release job release-please did not succeed (result: ${RESULT_RELEASE_PLEASE:-empty})"
+              printf '  missing: the GitHub Release object and its tag\n'
+              ;;
+          esac
+
+          require_success build "$RESULT_BUILD" \
+            'dist/*.whl (Python wheel)' \
+            'dist/*.tar.gz (Python sdist)'
+
+          require_success build-unreal-plugin "$RESULT_BUILD_UNREAL_PLUGIN" \
+            'DccMcpUnreal-*-ue5.5-win64.zip' \
+            'DccMcpUnreal-*-ue5.7-win64.zip' \
+            'DccMcpUnreal-*-ue5.8-win64.zip' \
+            'DccMcpUnreal-*-ue4.18-win64.zip' \
+            'DccMcpUnreal-*-ue4.26-win64.zip'
+
+          require_success standalone "$RESULT_STANDALONE" \
+            'dcc-mcp-unreal-<tag>-linux-X64.tar.gz' \
+            'dcc-mcp-unreal-<tag>-windows-X64.zip' \
+            'dcc-mcp-unreal-<tag>-macOS-Universal2.tar.gz'
+
+          # attach-release-assets is the only job that uploads the artifacts to
+          # the GitHub Release: when it does not run the tag is public and empty
+          # even if every producer succeeded.
+          require_success attach-release-assets "$RESULT_ATTACH_RELEASE_ASSETS" \
+            'dist/* (wheel + sdist)' \
+            'unreal-plugin/*.zip (5 Unreal plugin packages)' \
+            'standalone/* (3 standalone sidecar archives)' \
+            'scripts/install-standalone.ps1'
+
+          # PyPI is published only when release-please cut the tag; on a manual
+          # dispatch with an explicit tag `publish` is skipped by design.
+          if [ "$RELEASE_CREATED" = true ]; then
+            require_success publish "$RESULT_PUBLISH" 'dcc-mcp-unreal on PyPI (Trusted Publishing)'
+          else
+            case "$RESULT_PUBLISH" in
+              success | skipped) ;;
+              *) fail "release job publish did not succeed (result: ${RESULT_PUBLISH:-empty})" ;;
+            esac
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            printf '\nRelease %s is incomplete: the assets listed above were never attached.\n' "$RELEASE_TAG"
+            printf 'Fix the failing job and re-run the workflow; until then the tag is public with missing assets.\n'
+            printf 'For build-unreal-plugin: check the self-hosted Unreal runner and the 5 build-uplugin lanes.\n'
+            exit 1
+          fi
+
+          printf '\nRelease %s is complete: every expected asset was produced and attached.\n' "$RELEASE_TAG"
