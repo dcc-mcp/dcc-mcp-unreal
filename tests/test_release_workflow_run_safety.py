@@ -3,21 +3,26 @@
 This file is **not** part of the shared kit. `tests/test_release_workflow_integrity.py`
 is the byte-identical kit copy and only binds the workflow to an approved digest; it
 deliberately carries no repository-specific policy. These assertions are the ones we
-own here, and they exist to stop two regressions from coming back:
+own here, and they stop two regressions from coming back:
 
 * `${{ }}` inside a `run:` block. An Actions expression is expanded by the runner
   *before* the shell parses the script, so an attacker-influenced value such as a
   `workflow_dispatch` input becomes literal shell source. Passing the same value
   through `env:` and reading it as `"$VAR"` keeps it as data.
 
-* A single-line `echo "NAME=$VALUE" >> "$GITHUB_ENV"`. A value containing a newline
-  appends extra `GITHUB_ENV` entries. The delimiter form
-  (`NAME<<EOF` / value / `EOF`) bounds the value, so a newline inside it stays part
-  of the value instead of starting a new entry.
+* An un-delimited `GITHUB_ENV` write. GitHub's env-file parser turns
 
-Both guards are fail-closed: they walk the parsed document rather than grepping, so
-they cover `run:` blocks anywhere in the structure, including ones added later to a
-new job, a composite step, or a reusable-workflow call.
+      ASSET=one
+      INJECTED=yes
+
+  into two entries whenever the value contains a newline. Writing the
+  `NAME<<DELIMITER` marker into the file instead keeps the newline inside the value.
+
+  Note what does **not** help: a shell heredoc (`cat >> "$GITHUB_ENV" <<EOF`) bounds
+  the shell command, not the env-file record. It produces byte-identical output to a
+  plain `echo`, so it defends nothing. Only the marker reaching the file counts, which
+  is why the end-to-end test below is the authority here and the static checks are
+  only a tripwire.
 
 PyYAML is requested through `pytest.importorskip`, matching the kit copy: a test
 environment without PyYAML skips this module instead of failing collection. PyYAML is
@@ -26,9 +31,13 @@ a declared dev dependency (`pyyaml>=5.0`), so in CI every assertion below runs.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
-from typing import Any, Iterator, List, Tuple
+import shutil
+import subprocess
+import sys
+from typing import Any, Dict, Iterator, List, Tuple
 
 import pytest
 
@@ -37,6 +46,9 @@ yaml = pytest.importorskip("yaml", reason="the release workflow run-safety guard
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 
+# The step whose GITHUB_ENV write carries a workflow_dispatch-supplied value.
+ARCHIVE_STEP = "Archive standalone"
+
 # An Actions expression, as the runner recognises it: `${{ ... }}`, non-greedy so two
 # expressions on one line are reported as two hits rather than one spanning range.
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
@@ -44,16 +56,16 @@ EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
 # `$GITHUB_ENV` or `${GITHUB_ENV}`, with or without surrounding quotes.
 GITHUB_ENV_TARGET = r"\"?(?:\$\{GITHUB_ENV\}|\$GITHUB_ENV)\"?"
 
-# `echo ... >> "$GITHUB_ENV"` on a single line, i.e. the un-delimited append form.
-# Any quoting of the echoed text matches.
-GITHUB_ENV_APPEND = re.compile(r"(?:^|\n)\s*echo\s+[^\n]*>>\s*" + GITHUB_ENV_TARGET)
+# One statement that appends to GITHUB_ENV. `payload` is everything before the
+# redirection, i.e. the text that lands in the env file.
+GITHUB_ENV_WRITE = re.compile(r"(?P<payload>.*?)>>\s*" + GITHUB_ENV_TARGET)
 
-# The form this repository requires instead: one heredoc statement that opens the
-# delimiter and writes the value in a single step, e.g. `cat >> "$GITHUB_ENV" <<EOF`.
-# The echo-per-line spelling GitHub also documents is deliberately not accepted: it is
-# safe only as a complete opening/value/terminator triple, which no per-line rule can
-# verify, so this repository standardises on the single-statement form.
-GITHUB_ENV_HEREDOC = re.compile(r">>\s*" + GITHUB_ENV_TARGET + r"\s*<<\s*\w+")
+# `echo "NAME=value" >> "$GITHUB_ENV"`: the payload is a complete assignment, so a
+# value containing a newline appends further entries.
+GITHUB_ENV_ASSIGNMENT = re.compile(r"""^\s*echo\s+["']?\w+=""")
+
+# `NAME<<DELIMITER` being written to the env file, which opens a delimited record.
+GITHUB_ENV_MARKER = re.compile(r"\w+<<")
 
 CLEAN_RUN_BLOCK = "echo nothing to see here\n"
 
@@ -63,9 +75,13 @@ INTERPOLATED_RUN_BLOCK = 'echo "tag=${{ github.event.inputs.tag_name }}"\n'
 # A `run:` block that appends an untrusted value to GITHUB_ENV on a single line.
 UNQUOTED_ENV_RUN_BLOCK = 'echo "ASSET=${base}.zip" >> "$GITHUB_ENV"\n'
 
-# The form the release workflow is required to use.
-REQUIRED_ENV_RUN_BLOCK = (
-    'asset="dcc-mcp-unreal-v0.0.0-linux-X64.zip"\ncat >> "$GITHUB_ENV" <<ASSET_EOF\nASSET=${asset}\nASSET_EOF\n'
+# The delimited form, i.e. the shape the workflow is required to use.
+DELIMITED_ENV_RUN_BLOCK = (
+    'asset="dcc-mcp-unreal-v0.0.0-linux-X64.zip"\n'
+    'delimiter="ASSET_EOF_$$_${RANDOM}${RANDOM}"\n'
+    'echo "ASSET<<$delimiter" >> "$GITHUB_ENV"\n'
+    'printf \'%s\\n\' "$asset" >> "$GITHUB_ENV"\n'
+    'echo "$delimiter" >> "$GITHUB_ENV"\n'
 )
 
 WORKFLOW_WITH_RUN_BLOCK = """name: Release
@@ -78,6 +94,15 @@ jobs:
     steps:
       - run: |
 {block}"""
+
+# A tag carrying a newline and a second assignment, as a crafted workflow_dispatch
+# `tag_name` could supply. `INJECTED` must never become an entry of its own.
+CRAFTED_TAG = "v0.0.0\nINJECTED=yes"
+
+
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
 
 
 def _run_blocks(document: Any, path: str = "root") -> Iterator[Tuple[str, str]]:
@@ -107,10 +132,6 @@ def _offending(document: Any, pattern: Any) -> List[str]:
     return hits
 
 
-def _uses_heredoc_form(script: str) -> bool:
-    return bool(GITHUB_ENV_HEREDOC.search(script))
-
-
 def _workflow(run_block: str) -> str:
     indented = "".join("          {}\n".format(line) for line in run_block.splitlines())
     return WORKFLOW_WITH_RUN_BLOCK.format(block=indented)
@@ -123,6 +144,76 @@ def _run_block_in(run_block: str) -> str:
 
 def _release_workflow() -> Any:
     return yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _step_run_block(document: Any, step_name: str) -> str:
+    """Return the `run:` block of the named step, whichever job holds it."""
+    for job in document["jobs"].values():
+        for step in job.get("steps", []):
+            if step.get("name") == step_name and "run" in step:
+                return step["run"]
+    raise AssertionError("no run: block found for step {!r}".format(step_name))
+
+
+# ---------------------------------------------------------------------------
+# GITHUB_ENV helpers
+# ---------------------------------------------------------------------------
+
+
+def _env_writes(script: str) -> List[str]:
+    """Return the payload of every statement in `script` that appends to GITHUB_ENV."""
+    payloads = []
+    for line in script.splitlines():
+        match = GITHUB_ENV_WRITE.search(line)
+        if match:
+            payloads.append(match.group("payload"))
+    return payloads
+
+
+def _undelimited_assignments(script: str) -> List[str]:
+    """Return `echo NAME=value` payloads written to GITHUB_ENV without a marker."""
+    return [
+        payload
+        for payload in _env_writes(script)
+        if GITHUB_ENV_ASSIGNMENT.search(payload) and not GITHUB_ENV_MARKER.search(payload)
+    ]
+
+
+def _opens_a_delimited_record(script: str) -> bool:
+    return any(GITHUB_ENV_MARKER.search(payload) for payload in _env_writes(script))
+
+
+def parse_github_env(raw: str) -> Dict[str, str]:
+    """Parse a GITHUB_ENV file the way the Actions runner does.
+
+    A line `NAME<<DELIMITER` opens a multi-line value that ends at a line equal to
+    DELIMITER; any other `NAME=value` line is a single entry. This is the behaviour
+    the whole guard rests on, so it is implemented here rather than assumed.
+    """
+    entries: Dict[str, str] = {}
+    lines = raw.split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index].rstrip("\r")
+        marker = re.match(r"^(\w+)<<(.*)$", line)
+        if marker:
+            name, delimiter = marker.group(1), marker.group(2)
+            body = []
+            index += 1
+            while index < len(lines) and lines[index].rstrip("\r") != delimiter:
+                body.append(lines[index].rstrip("\r"))
+                index += 1
+            entries[name] = "\n".join(body)
+        elif "=" in line:
+            name, _, value = line.partition("=")
+            entries[name] = value
+        index += 1
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# The workflow itself
+# ---------------------------------------------------------------------------
 
 
 def test_release_workflow_exists_and_parses() -> None:
@@ -151,36 +242,127 @@ def test_no_actions_expression_is_interpolated_into_a_run_block() -> None:
     )
 
 
-def test_no_single_line_github_env_append() -> None:
-    hits = _offending(_release_workflow(), GITHUB_ENV_APPEND)
+def test_no_undelimited_github_env_assignment() -> None:
+    document = _release_workflow()
+    offenders = [
+        "{}: {!r}".format(location, payload)
+        for location, script in _run_blocks(document)
+        for payload in _undelimited_assignments(script)
+    ]
 
-    assert not hits, "\n".join(
+    assert not offenders, "\n".join(
         [
-            'run: blocks must write GITHUB_ENV with one heredoc (cat >> "$GITHUB_ENV" <<EOF).',
-            "A single-line echo lets a value containing a newline append extra entries.",
+            'run: blocks must not write `echo "NAME=$VALUE" >> "$GITHUB_ENV"`.',
+            "A value containing a newline then appends further entries. Write the",
+            "`NAME<<DELIMITER` marker into the env file instead.",
             "",
         ]
-        + hits
+        + offenders
     )
 
 
-def test_every_github_env_write_uses_the_heredoc_form() -> None:
+def test_every_github_env_write_opens_a_delimited_record() -> None:
     """Companion to the check above: every write that exists is delimited.
 
-    Without this the append guard could be satisfied by deleting the write
+    Without this the assignment guard could be satisfied by deleting the write
     altogether, which would silently drop the ASSET output the next step reads.
     """
-    writes = [(location, script) for location, script in _run_blocks(_release_workflow()) if "GITHUB_ENV" in script]
+    document = _release_workflow()
+    writes = [(location, script) for location, script in _run_blocks(document) if "GITHUB_ENV" in script]
 
-    assert writes, "no run: block writes GITHUB_ENV, so the append guard above is vacuous"
+    assert writes, "no run: block writes GITHUB_ENV, so the guards above are vacuous"
 
-    undelimited = [location for location, script in writes if not _uses_heredoc_form(script)]
+    undelimited = [location for location, script in writes if not _opens_a_delimited_record(script)]
 
-    assert not undelimited, "GITHUB_ENV written without a delimiter at: " + ", ".join(undelimited)
+    assert not undelimited, "GITHUB_ENV written without a NAME<<DELIMITER marker at: " + ", ".join(undelimited)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: the semantic authority for the GITHUB_ENV guard
+# ---------------------------------------------------------------------------
+
+_E2E_REASON = "the end-to-end proof needs bash and a filesystem that allows newlines in filenames"
+
+
+def _run_under_bash(script: str, workdir: pathlib.Path, env: Dict[str, str]) -> Dict[str, str]:
+    """Run `script` under bash with `GITHUB_ENV` pointed at a file in `workdir`."""
+    script_path = workdir / "step.sh"
+    script_path.write_bytes(script.replace("\r\n", "\n").encode("utf-8"))
+    env_path = workdir / "github_env"
+    env_path.write_bytes(b"")
+
+    environment = {"PATH": os.environ.get("PATH", ""), "GITHUB_ENV": env_path.name}
+    environment.update(env)
+    result = subprocess.run(
+        [shutil.which("bash"), script_path.name],
+        cwd=str(workdir),
+        env={**environment, "GITHUB_ENV": env_path.name},
+        capture_output=True,
+    )
+    assert result.returncode == 0, "step failed: {}".format(result.stderr.decode("utf-8", "replace"))
+    return parse_github_env(env_path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
+def test_a_newline_in_the_release_tag_cannot_add_extra_env_entries(tmp_path) -> None:
+    """The property the static rules above can only approximate.
+
+    Runs the real `Archive standalone` script with a crafted tag and parses the
+    resulting env file the way the runner does. This is what distinguishes a real
+    delimited write from a shell heredoc: both look safe, only one is.
+    """
+    script = _step_run_block(_release_workflow(), ARCHIVE_STEP)
+    (tmp_path / "dist" / "standalone").mkdir(parents=True)
+    (tmp_path / "dist" / "standalone" / "server").write_text("binary", encoding="utf-8")
+
+    entries = _run_under_bash(
+        script,
+        tmp_path,
+        {"RELEASE_TAG": CRAFTED_TAG, "ASSET_SUFFIX": "linux-X64", "RUNNER_OS_NAME": "Linux"},
+    )
+
+    assert list(entries) == ["ASSET"], "the crafted tag leaked extra entries: {}".format(entries)
+    assert "INJECTED" not in entries
+    assert entries["ASSET"].startswith("dcc-mcp-unreal-")
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason=_E2E_REASON)
+def test_the_end_to_end_proof_distinguishes_delimited_from_plain_writes(tmp_path) -> None:
+    """Teeth for the test above: it must fail for the un-delimited form.
+
+    Without this the end-to-end test could pass for a reason unrelated to the
+    delimiter, which is exactly how a shell heredoc slipped through.
+    """
+    setup = 'base="dcc-mcp-unreal-{}-linux-X64"\n'.format(CRAFTED_TAG)
+    plain = setup + 'echo "ASSET=${base}.tar.gz" >> "$GITHUB_ENV"\n'
+    delimited = (
+        setup
+        + 'asset="${base}.tar.gz"\n'
+        + 'echo "ASSET<<ASSET_EOF" >> "$GITHUB_ENV"\n'
+        + 'printf \'%s\\n\' "$asset" >> "$GITHUB_ENV"\n'
+        + 'echo "ASSET_EOF" >> "$GITHUB_ENV"\n'
+    )
+    # The shell heredoc that looks like a fix but is not: it must behave like `plain`.
+    heredoc = (
+        setup + 'asset="${base}.tar.gz"\n' + 'cat >> "$GITHUB_ENV" <<ASSET_EOF\n' + "ASSET=${asset}\n" + "ASSET_EOF\n"
+    )
+
+    plain_entries = _run_under_bash(plain, tmp_path, {})
+    delimited_entries = _run_under_bash(delimited, tmp_path, {})
+    heredoc_entries = _run_under_bash(heredoc, tmp_path, {})
+
+    assert "INJECTED" in plain_entries
+    assert "INJECTED" in heredoc_entries, "a shell heredoc is not a delimiter: it leaks like a plain echo"
+    assert list(delimited_entries) == ["ASSET"]
+    assert "INJECTED" not in delimited_entries
+
+
+# ---------------------------------------------------------------------------
+# Teeth for the static rules
+# ---------------------------------------------------------------------------
 
 
 def test_the_interpolation_guard_fires_on_a_real_expression() -> None:
-    """Proof the guard is not vacuous: an interpolated block must be caught."""
     assert _run_block_in(CLEAN_RUN_BLOCK) == CLEAN_RUN_BLOCK, "fixture setup broke"
     assert _run_block_in(INTERPOLATED_RUN_BLOCK) == INTERPOLATED_RUN_BLOCK, "fixture setup broke"
 
@@ -192,34 +374,38 @@ def test_the_interpolation_guard_fires_on_a_real_expression() -> None:
     assert "${{ github.event.inputs.tag_name }}" in interpolated[0]
 
 
-def test_the_github_env_guard_fires_on_a_single_line_append() -> None:
-    """Proof the guard is not vacuous: an un-delimited append must be caught."""
-    clean = _offending(yaml.safe_load(_workflow(CLEAN_RUN_BLOCK)), GITHUB_ENV_APPEND)
-    appended = _offending(yaml.safe_load(_workflow(UNQUOTED_ENV_RUN_BLOCK)), GITHUB_ENV_APPEND)
+def test_the_github_env_guard_fires_on_an_undelimited_assignment() -> None:
+    clean = _undelimited_assignments(CLEAN_RUN_BLOCK)
+    appended = _undelimited_assignments(UNQUOTED_ENV_RUN_BLOCK)
+    delimited = _undelimited_assignments(DELIMITED_ENV_RUN_BLOCK)
 
     assert clean == []
     assert len(appended) == 1
+    assert delimited == []
 
 
-def test_the_required_heredoc_form_passes_both_github_env_guards() -> None:
-    """The form the workflow uses must satisfy the guard that enforces it."""
-    document = yaml.safe_load(_workflow(REQUIRED_ENV_RUN_BLOCK))
-
-    assert _offending(document, GITHUB_ENV_APPEND) == []
-    assert _uses_heredoc_form(REQUIRED_ENV_RUN_BLOCK)
+def test_the_delimited_form_opens_a_record_and_the_old_form_does_not() -> None:
+    assert _opens_a_delimited_record(DELIMITED_ENV_RUN_BLOCK)
+    assert not _opens_a_delimited_record(UNQUOTED_ENV_RUN_BLOCK)
+    assert not _opens_a_delimited_record(CLEAN_RUN_BLOCK)
 
 
-def test_the_echo_per_line_form_is_rejected_by_policy() -> None:
-    """The other documented spelling is refused, so the policy stays one statement.
+def test_a_shell_heredoc_is_not_accepted_as_a_delimited_write() -> None:
+    """Regression anchor for the mistake this guard was written to prevent.
 
-    Its safety depends on the opening, value and terminator lines all being present,
-    which a per-line rule cannot verify, so it is not accepted here.
+    `cat >> "$GITHUB_ENV" <<EOF` never puts a marker in the env file, so it must not
+    satisfy the delimiter rule.
     """
-    echo_form = (
-        'echo "ASSET<<ASSET_EOF" >> "$GITHUB_ENV"\n'
-        'echo "${asset}" >> "$GITHUB_ENV"\n'
-        'echo "ASSET_EOF" >> "$GITHUB_ENV"\n'
+    heredoc = (
+        'asset="dcc-mcp-unreal-v0.0.0-linux-X64.zip"\ncat >> "$GITHUB_ENV" <<ASSET_EOF\nASSET=${asset}\nASSET_EOF\n'
     )
 
-    assert _offending(yaml.safe_load(_workflow(echo_form)), GITHUB_ENV_APPEND)
-    assert not _uses_heredoc_form(echo_form)
+    assert not _opens_a_delimited_record(heredoc)
+
+
+def test_parse_github_env_matches_the_documented_behaviour() -> None:
+    """The parser the end-to-end assertions rest on, pinned against the spec."""
+    assert parse_github_env("A=1\nB=2\n") == {"A": "1", "B": "2"}
+    assert parse_github_env("A<<EOF\nline1\nline2\nEOF\nB=3\n") == {"A": "line1\nline2", "B": "3"}
+    # An un-delimited value with a newline splits into a second entry.
+    assert parse_github_env("A=one\nB=two\n") == {"A": "one", "B": "two"}
