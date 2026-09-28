@@ -178,11 +178,18 @@ jobs:
           base="dcc-mcp-unreal-${RELEASE_TAG}-${ASSET_SUFFIX}"
           if [ "$RUNNER_OS_NAME" = Windows ]; then
             ARCHIVE_PATH="${base}.zip" powershell -NoProfile -Command 'Compress-Archive -Path "dist/standalone/*" -DestinationPath $env:ARCHIVE_PATH'
-            echo "ASSET=${base}.zip" >> "$GITHUB_ENV"
+            asset="${base}.zip"
           else
             tar -czf "${base}.tar.gz" -C dist/standalone .
-            echo "ASSET=${base}.tar.gz" >> "$GITHUB_ENV"
+            asset="${base}.tar.gz"
           fi
+          # Write the asset name in the delimiter form so a value that contains a
+          # newline cannot append extra GITHUB_ENV entries, which the previous
+          # single-line `echo "ASSET=..." >> "$GITHUB_ENV"` could. The terminator
+          # must sit at column 0, so this heredoc is not nested in the if above.
+          cat >> "$GITHUB_ENV" <<ASSET_EOF
+          ASSET=${asset}
+          ASSET_EOF
       - uses: actions/upload-artifact@v4
         with:
           name: standalone-${{ matrix.asset_suffix }}
