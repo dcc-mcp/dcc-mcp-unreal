@@ -175,14 +175,41 @@ jobs:
           RUNNER_OS_NAME: ${{ runner.os }}
         shell: bash
         run: |
+          # RELEASE_TAG feeds the archive name and, through ASSET, the
+          # upload-artifact `path:`. That path is a newline-separated glob list, and
+          # the delimiter write below deliberately keeps newlines inside the value, so
+          # a tag containing one would upload whatever the extra lines match instead of
+          # the archive. Reject anything outside a safe filename charset first: a bad
+          # tag must fail loudly, not silently pick different files. `%q` keeps the
+          # echoed value on one line so it cannot forge a workflow command.
+          case "$RELEASE_TAG" in
+            "")
+              echo "::error::RELEASE_TAG is empty"
+              exit 1
+              ;;
+            *[!A-Za-z0-9._+-]*)
+              echo "::error::RELEASE_TAG may only contain [A-Za-z0-9._+-]"
+              printf '  got: %q\n' "$RELEASE_TAG"
+              exit 1
+              ;;
+          esac
           base="dcc-mcp-unreal-${RELEASE_TAG}-${ASSET_SUFFIX}"
           if [ "$RUNNER_OS_NAME" = Windows ]; then
             ARCHIVE_PATH="${base}.zip" powershell -NoProfile -Command 'Compress-Archive -Path "dist/standalone/*" -DestinationPath $env:ARCHIVE_PATH'
-            echo "ASSET=${base}.zip" >> "$GITHUB_ENV"
+            asset="${base}.zip"
           else
             tar -czf "${base}.tar.gz" -C dist/standalone .
-            echo "ASSET=${base}.tar.gz" >> "$GITHUB_ENV"
+            asset="${base}.tar.gz"
           fi
+          # Write ASSET with the GITHUB_ENV delimiter form: the `NAME<<DELIMITER`
+          # marker has to reach the env file itself, so a value containing a newline
+          # stays inside the value instead of becoming extra entries. A shell heredoc
+          # does not do that -- it bounds the shell command, not the env-file record.
+          # The delimiter is randomised so a crafted value cannot close it early.
+          delimiter="ASSET_EOF_$$_${RANDOM}${RANDOM}"
+          echo "ASSET<<$delimiter" >> "$GITHUB_ENV"
+          printf '%s\n' "$asset" >> "$GITHUB_ENV"
+          echo "$delimiter" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: standalone-${{ matrix.asset_suffix }}
