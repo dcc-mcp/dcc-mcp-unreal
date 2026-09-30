@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.8...v0.3.9) (2026-09-30)
+
+
+### Features
+
+* add DynamicMesh vertex skin weight tools ([#231](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/231)) ([cf25363](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/cf25363997c902e7f66b742b00012ea3eb4517f0))
+
 ## [0.3.8](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.7...v0.3.8) (2026-09-28)
 
 
