@@ -1,0 +1,135 @@
+tools:
+  - name: get_vertex_bone_weights
+    description: Read skin weights for one vertex of an existing DynamicMesh and profile.
+    source_file: scripts/get_vertex_bone_weights.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    output_schema: &weight_result
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        error:
+          type: [string, 'null']
+        prompt:
+          type: [string, 'null']
+        context:
+          type: [object, 'null']
+          properties:
+            mesh_path:
+              type: string
+            vertex_id:
+              type: integer
+            profile_name:
+              type: string
+            bone_weights:
+              type: array
+              description: >-
+                Host readback with zero-weight native padding slots removed.
+                Values are reported as the host stores them, so they can be
+                unnormalized after native quantization.
+              items:
+                type: object
+                required: [bone_index, weight]
+                properties:
+                  bone_index:
+                    type: integer
+                  weight:
+                    type: number
+            influence_count:
+              type: integer
+            weight_sum:
+              type: number
+            normalized:
+              type: boolean
+              description: >-
+                Whether weight_sum is 1 within sum_abs_tol. Native 16 bit
+                quantization can leave a valid readback just below 1.
+            sum_abs_tol:
+              type: number
+            readback_error:
+              type: [string, 'null']
+              description: >-
+                Set only by the write tool: the vertex was written, but the
+                host readback could not be represented in this result.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [mesh_path, vertex_id]
+      properties:
+        mesh_path:
+          type: string
+          minLength: 1
+          description: Exact get_path_name() of an existing DynamicMesh object in the editor session.
+        vertex_id:
+          type: integer
+          minimum: 0
+        profile_name:
+          type: string
+          minLength: 1
+          pattern: '^(?![nN][oO][nN][eE]$)\S+$'
+          description: >-
+            Optional profile name. Omit to use the native SDK default. The
+            reserved name None is rejected, so it cannot shadow the default.
+    next-tools:
+      on-success: [unreal_geometry_script__set_vertex_bone_weights]
+
+  - name: set_vertex_bone_weights
+    description: Write normalized DynamicMesh vertex skin weights, preserve existing profiles, and return native SDK readback.
+    source_file: scripts/set_vertex_bone_weights.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: true
+    output_schema: *weight_result
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [mesh_path, vertex_id, bone_weights]
+      properties:
+        mesh_path:
+          type: string
+          minLength: 1
+          description: Exact get_path_name() of an existing DynamicMesh object in the editor session.
+        vertex_id:
+          type: integer
+          minimum: 0
+        profile_name:
+          type: string
+          minLength: 1
+          pattern: '^(?![nN][oO][nN][eE]$)\S+$'
+          description: >-
+            Optional profile name; a missing profile is created without
+            resetting other weights. The reserved name None is rejected, so it
+            cannot shadow the default.
+        bone_weights:
+          type: array
+          minItems: 1
+          maxItems: 12
+          description: Unique native uint16 bone indices with finite nonnegative weights summing to one.
+          items:
+            type: object
+            additionalProperties: false
+            required: [bone_index, weight]
+            properties:
+              bone_index:
+                type: integer
+                minimum: 0
+                maximum: 65535
+              weight:
+                type: number
+                minimum: 0
+                maximum: 1
+    next-tools:
+      on-success: [unreal_geometry_script__get_vertex_bone_weights]
