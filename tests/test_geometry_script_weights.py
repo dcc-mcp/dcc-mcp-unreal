@@ -143,6 +143,53 @@ def test_missing_plugin_fails_without_mutation(runtime):
     api.mesh_create_bone_weights.assert_not_called()
 
 
+def test_native_zero_weight_padding_is_removed_from_read_and_write_results(runtime):
+    module, unreal, api = runtime
+    weight = unreal.GeometryScriptBoneWeight
+    api.get_vertex_bone_weights.return_value = (
+        None,
+        [weight(0, 0), weight(0, 0), weight(0, 0.7499961853027344), weight(1, 0.2500038146972656)],
+        True,
+    )
+    expected = [
+        {"bone_index": 0, "weight": 0.7499961853027344},
+        {"bone_index": 1, "weight": 0.2500038146972656},
+    ]
+    read = module.get_vertex_bone_weights(mesh_path="/Engine/Transient.Mesh", vertex_id=0)
+    write = module.set_vertex_bone_weights(
+        mesh_path="/Engine/Transient.Mesh",
+        vertex_id=0,
+        bone_weights=[{"bone_index": 0, "weight": 0.75}, {"bone_index": 1, "weight": 0.25}],
+    )
+    assert read["context"]["bone_weights"] == expected
+    assert write["context"]["bone_weights"] == expected
+
+
+@pytest.mark.parametrize(
+    "native_weights",
+    [
+        [(0, 0.5), (0, 0.5)],
+        [(0, float("nan"))],
+        [(0, float("inf"))],
+        [(0, 0.5)],
+        [(65536, 1)],
+        [(-1, 1)],
+        [(0, -1)],
+        [(0, 0)],
+    ],
+)
+def test_invalid_native_readback_is_not_reported_as_success(runtime, native_weights):
+    module, unreal, api = runtime
+    api.get_vertex_bone_weights.return_value = (
+        None,
+        [unreal.GeometryScriptBoneWeight(index, value) for index, value in native_weights],
+        True,
+    )
+    result = module.get_vertex_bone_weights(mesh_path="/Engine/Transient.Mesh", vertex_id=0)
+    assert result["success"] is False
+    api.set_vertex_bone_weights.assert_not_called()
+
+
 def test_manifest_declares_closed_schemas_and_editor_affinity():
     tools = yaml.safe_load((SKILL / "tools.yaml").read_text())["tools"]
     assert [tool["name"] for tool in tools] == ["get_vertex_bone_weights", "set_vertex_bone_weights"]

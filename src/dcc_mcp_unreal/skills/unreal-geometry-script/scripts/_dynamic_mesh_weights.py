@@ -40,7 +40,13 @@ def _read(api, mesh, vertex_id, profile):
     _, weights, valid = api.get_vertex_bone_weights(mesh, vertex_id, profile=profile)
     if not valid:
         raise ValueError("The vertex has no bone weights in the requested profile")
-    return [{"bone_index": int(item.bone_index), "weight": float(item.weight)} for item in weights]
+    # Unreal pads native storage with zero-weight slots (often bone index 0).
+    # Expose only actual influences, then verify the native data contract.
+    stored = [
+        {"bone_index": int(item.bone_index), "weight": float(item.weight)} for item in weights if item.weight != 0
+    ]
+    _validate_weights(stored)
+    return stored
 
 
 def _validate_weights(bone_weights):

@@ -28,7 +28,8 @@ nonempty name with no whitespace. Reads fail if the vertex or profile is
 missing. Writes create a missing profile without resetting other profiles.
 Input weights must be finite, nonnegative, normalized, use unique bone
 indices in the native uint16 range, and contain at most 12 influences.
-Results contain the SDK readback, including native quantization/pruning.
+Results contain validated SDK readback, including native quantization/pruning;
+zero-weight native padding slots are omitted.
 
 These tools edit DynamicMesh attributes. They do not create skeletons,
 bind a SkeletalMesh, deform geometry, save assets, or write animation.
