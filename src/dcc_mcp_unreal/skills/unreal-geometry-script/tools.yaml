@@ -32,6 +32,10 @@ tools:
               type: string
             bone_weights:
               type: array
+              description: >-
+                Host readback with zero-weight native padding slots removed.
+                Values are reported as the host stores them, so they can be
+                unnormalized after native quantization.
               items:
                 type: object
                 required: [bone_index, weight]
@@ -40,6 +44,22 @@ tools:
                     type: integer
                   weight:
                     type: number
+            influence_count:
+              type: integer
+            weight_sum:
+              type: number
+            normalized:
+              type: boolean
+              description: >-
+                Whether weight_sum is 1 within sum_abs_tol. Native 16 bit
+                quantization can leave a valid readback just below 1.
+            sum_abs_tol:
+              type: number
+            readback_error:
+              type: [string, 'null']
+              description: >-
+                Set only by the write tool: the vertex was written, but the
+                host readback could not be represented in this result.
     input_schema:
       type: object
       additionalProperties: false
@@ -55,8 +75,10 @@ tools:
         profile_name:
           type: string
           minLength: 1
-          pattern: '^\S+$'
-          description: Optional profile name. Omit to use the native SDK default.
+          pattern: '^(?![nN][oO][nN][eE]$)\S+$'
+          description: >-
+            Optional profile name. Omit to use the native SDK default. The
+            reserved name None is rejected, so it cannot shadow the default.
     next-tools:
       on-success: [unreal_geometry_script__set_vertex_bone_weights]
 
@@ -86,8 +108,11 @@ tools:
         profile_name:
           type: string
           minLength: 1
-          pattern: '^\S+$'
-          description: Optional profile name; a missing profile is created without resetting other weights.
+          pattern: '^(?![nN][oO][nN][eE]$)\S+$'
+          description: >-
+            Optional profile name; a missing profile is created without
+            resetting other weights. The reserved name None is rejected, so it
+            cannot shadow the default.
         bone_weights:
           type: array
           minItems: 1
