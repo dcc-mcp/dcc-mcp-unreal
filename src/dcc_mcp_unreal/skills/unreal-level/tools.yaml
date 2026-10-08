@@ -1,4 +1,155 @@
 tools:
+  - name: line_trace
+    description: Read the first native blocking collision along a world-space segment in centimeters, including distance, point, normal and object identities. Explicit editor or PIE world; no scene changes or debug drawing.
+    source_file: scripts/line_trace.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [start, end, world]
+      additionalProperties: false
+      properties:
+        start: &trace_point
+          type: object
+          description: Unreal world coordinates in cm (X forward, Y right, Z up).
+          required: [x, y, z]
+          additionalProperties: false
+          properties:
+            x: {type: number, minimum: -10000000, maximum: 10000000}
+            y: {type: number, minimum: -10000000, maximum: 10000000}
+            z: {type: number, minimum: -10000000, maximum: 10000000}
+        end: *trace_point
+        world:
+          type: string
+          enum: [editor, pie]
+          description: Explicit world selection. PIE requires an active game world; never falls back to editor.
+        expected_world_path:
+          type: string
+          default: ""
+          description: Optional exact world object path guard. Copy context.world.path from an earlier query to reject a changed world.
+        collision_channel:
+          type: string
+          enum: [visibility, camera]
+          default: visibility
+          description: Built-in native trace channel. Only components blocking this channel produce hits. Object channels such as pawn are not trace-query indices.
+        trace_complex:
+          type: boolean
+          default: false
+          description: False requests simple collision; true requests complex collision as supported by each component. This line query does not perform a player capsule sweep.
+        ignored_actor_paths:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          default: []
+          items: {type: string, minLength: 1}
+          description: Exact actor object paths in the selected world, for example the possessed pawn. Missing or cross-world paths fail.
+    output_schema:
+      type: object
+      required: [success, message, context]
+      allOf:
+        - if:
+            properties: {success: {const: true}}
+          then:
+            properties:
+              context:
+                required: [status, blocking_hit, start_penetrating, distance_cm, trace_length_cm, time, unit, coordinate_space, start, end, collision_channel, trace_complex, ignored_actor_paths, world, location, impact_point, normal, impact_normal, actor, component]
+        - if:
+            properties:
+              success: {const: true}
+              context:
+                required: [status]
+                properties: {status: {const: no_hit}}
+          then:
+            properties:
+              context:
+                properties:
+                  blocking_hit: {const: false}
+                  start_penetrating: {const: false}
+                  distance_cm: {type: "null"}
+                  time: {type: "null"}
+                  location: {type: "null"}
+                  impact_point: {type: "null"}
+                  normal: {type: "null"}
+                  impact_normal: {type: "null"}
+                  actor: {type: "null"}
+                  component: {type: "null"}
+        - if:
+            properties:
+              success: {const: true}
+              context:
+                required: [status]
+                properties: {status: {const: hit}}
+          then:
+            properties:
+              context:
+                properties:
+                  blocking_hit: {const: true}
+                  distance_cm: {type: number}
+                  time: {type: number}
+                  location: {type: object}
+                  impact_point: {type: object}
+                  normal: {type: object}
+                  impact_normal: {type: object}
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, "null"]}
+        context:
+          type: object
+          properties:
+            reason: {type: string}
+            status: {type: string, enum: [hit, no_hit]}
+            blocking_hit: {type: boolean}
+            start_penetrating: {type: boolean}
+            distance_cm: {type: [number, "null"], minimum: 0}
+            trace_length_cm: {type: number, minimum: 0}
+            time: {type: [number, "null"], minimum: 0, maximum: 1}
+            unit: {type: string, enum: [cm]}
+            coordinate_space: {type: string, enum: [world]}
+            start: *trace_point
+            end: *trace_point
+            collision_channel: {type: string}
+            trace_complex: {type: boolean}
+            ignored_actor_paths: {type: array, items: {type: string}}
+            world:
+              type: object
+              required: [name, path, type]
+              properties:
+                name: {type: string}
+                path: {type: string}
+                type: {type: string}
+            location: &nullable_trace_vector
+              type: [object, "null"]
+              required: [x, y, z]
+              properties:
+                x: {type: number}
+                y: {type: number}
+                z: {type: number}
+            impact_point: *nullable_trace_vector
+            normal: *nullable_trace_vector
+            impact_normal: *nullable_trace_vector
+            actor: &nullable_trace_identity
+              type: [object, "null"]
+              required: [name, path, class]
+              properties:
+                name: {type: string}
+                path: {type: string}
+                class: {type: string}
+            component: *nullable_trace_identity
+    call_examples:
+      - arguments:
+          world: pie
+          start: {x: 100, y: 100, z: 300}
+          end: {x: 100, y: 100, z: -700}
+          collision_channel: visibility
+          trace_complex: false
+        note: Sample floor collision below a point. Ignore the exact pawn path when it intersects the ray.
+
   - name: create_level
     description: Create, open, and save a new empty level at a /Game asset path.
     source_file: scripts/create_level.py

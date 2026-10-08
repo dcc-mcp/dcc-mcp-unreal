@@ -11,6 +11,7 @@ from collections import Counter
 from typing import Any, Optional
 
 import dcc_mcp_unreal as _adapter_package
+from dcc_mcp_unreal.hit_result import read_hit_result
 from dcc_mcp_unreal.pie_session import require_pie_context
 from dcc_mcp_unreal.playtest_telemetry import (
     COMBAT_ACTIONS,
@@ -368,17 +369,15 @@ def _line_of_fire(unreal: Any, controller: Any, player: Any, actor: Any):
             player,
             start,
             end,
-            unreal.TraceTypeQuery.TRACE_TYPE_QUERY1,
+            unreal.TraceTypeQuery.cast(0),
             True,
             [player],
             unreal.DrawDebugTrace.NONE,
             True,
         )
-        if hit is None:
-            return True
-        blocking = bool(hit.get_editor_property("blocking_hit"))
-        hit_actor = hit.get_editor_property("hit_actor")
-        return not blocking or hit_actor is actor or _actor_name(hit_actor) == _actor_name(actor)
+        result = read_hit_result(hit)
+        hit_actor = result["actor"]
+        return not result["blocking_hit"] or (hit_actor is not None and hit_actor["path"] == actor.get_path_name())
     except Exception:
         return None
 
