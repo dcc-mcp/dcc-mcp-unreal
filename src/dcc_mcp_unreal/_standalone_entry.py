@@ -51,15 +51,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     server = str(_server_binary(Path(resolved[0]), Path(sys.executable)))
     arguments = resolved[1:]
+    # The native plugin hides this wrapper, but Windows does not propagate that
+    # policy to the nested console executable. Keep sidecars console-free while
+    # preserving foreground commands and inherited protocol/diagnostic streams.
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if _is_unreal_sidecar(arguments) else 0
     if not _is_unreal_sidecar(arguments) or "--discovery-mcp-url" in arguments:
-        return subprocess.call([server, *arguments])
+        return subprocess.call([server, *arguments], creationflags=creationflags)
 
     try:
         with _native_discovery() as discovery_url:
-            return subprocess.call([server, *arguments, "--discovery-mcp-url", discovery_url])
+            return subprocess.call(
+                [server, *arguments, "--discovery-mcp-url", discovery_url], creationflags=creationflags
+            )
     except Exception as exc:
         print("Native tool discovery failed; starting dispatch-only sidecar: {}".format(exc), file=sys.stderr)
-        return subprocess.call([server, *arguments])
+        return subprocess.call([server, *arguments], creationflags=creationflags)
 
 
 if __name__ == "__main__":
