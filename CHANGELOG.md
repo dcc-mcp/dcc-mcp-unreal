@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.8...v0.3.9) (2026-10-08)
+
+
+### Features
+
+* add DynamicMesh vertex skin weight tools ([#231](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/231)) ([cf25363](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/cf25363997c902e7f66b742b00012ea3eb4517f0))
+
+
+### Bug Fixes
+
+* expose native collision measurements ([683733c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/683733c77ba45297c588a6c50d23a40851de26bf))
+* hide nested Windows standalone sidecars ([#237](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/237)) ([9f6dc4a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/9f6dc4afc9b729bab01c3de166fae74abca74d77))
+
+
+### Documentation
+
+* **readme:** add the generated DCC-MCP host matrix pointer ([#234](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/234)) ([b857321](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b85732128eff5ae63ad8d9d22a804a3621db1ca9))
+
 ## [0.3.8](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.7...v0.3.8) (2026-09-28)
 
 
