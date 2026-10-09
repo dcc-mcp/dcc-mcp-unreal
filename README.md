@@ -438,6 +438,9 @@ Or use the environment variable:
 set DCC_MCP_UNREAL_SKILL_PATHS=C:\my\studio\unreal-skills;C:\shared\skills
 ```
 
+For trusted embedded-host bootstrap, see [owner-selected UI Control runtime](docs/owned-ui-control.md)
+to connect Core's typed native-pixels runtime option without changing shared Host defaults.
+
 ### Verifying mutation effects
 
 Calling an Unreal event only proves that dispatch was accepted. Project-local

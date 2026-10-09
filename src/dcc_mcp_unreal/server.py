@@ -14,9 +14,12 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from dcc_mcp_core import ChunkedRunner, HostUiDispatcherBase
+
+if TYPE_CHECKING:
+    from dcc_mcp_core.server import UiControlRuntimeOptions
 
 try:
     from dcc_mcp_core import DccServerBase
@@ -276,11 +279,22 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
         enable_file_logging: bool = True,
         enable_job_persistence: bool = True,
         enable_telemetry: bool = True,
+        ui_control: Optional[UiControlRuntimeOptions] = None,
     ) -> None:
         if DccServerBase is object:  # pragma: no cover - defensive install error
             raise ImportError("dcc-mcp-core is required to create UnrealMcpServer")
 
         from dcc_mcp_core import DccServerOptions  # noqa: PLC0415
+
+        runtime_options: Dict[str, Any] = {}
+        if ui_control is not None:
+            try:
+                from dcc_mcp_core.server import UiControlRuntimeOptions  # noqa: PLC0415
+            except ImportError as exc:
+                raise ImportError("Owned UI Control requires Core with UiControlRuntimeOptions support") from exc
+            if not isinstance(ui_control, UiControlRuntimeOptions):
+                raise TypeError("ui_control must be UiControlRuntimeOptions or None")
+            runtime_options["ui_control"] = ui_control
 
         _configure_ui_control_for_process()
         self._main_thread_dispatcher, bridge = _make_execution_bridge(execution_timeout_secs)
@@ -297,8 +311,10 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
             enable_job_persistence=enable_job_persistence,
             enable_telemetry=enable_telemetry,
             execution_bridge=bridge,
+            **runtime_options,
         )
         super().__init__(options=options)
+        self._ui_control_runtime = ui_control
         self._last_scene_snapshot: Optional[Dict[str, Any]] = None
 
     @property
@@ -455,10 +471,22 @@ def start_server(
     eager_load: bool = True,
     gateway_port: Optional[int] = None,
     registry_dir: Optional[str] = None,
+    ui_control: Optional[UiControlRuntimeOptions] = None,
 ) -> Any:
-    """Start, or return, the module-level Unreal MCP server handle."""
+    """Start, or return, the module-level Unreal MCP server handle.
+
+    ``ui_control`` is a trusted bootstrap option, never a tool parameter.
+    Stop the existing server before selecting a different runtime.
+    """
     global _server_instance
     with _lock:
+        if (
+            _server_instance is not None
+            and _server_instance.is_running
+            and ui_control is not None
+            and ui_control != _server_instance._ui_control_runtime
+        ):
+            raise ValueError("Stop the running Unreal server before changing its UI Control runtime")
         if _server_instance is None or not _server_instance.is_running:
             _server_instance = UnrealMcpServer(
                 port=port,
@@ -466,6 +494,7 @@ def start_server(
                 server_version=server_version,
                 gateway_port=gateway_port,
                 registry_dir=registry_dir,
+                ui_control=ui_control,
             )
             if register_builtins:
                 _server_instance.register_builtin_actions(
