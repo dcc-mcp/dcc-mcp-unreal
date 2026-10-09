@@ -4,9 +4,9 @@
 This script creates a package suitable for users to drop into a project's
 ``Plugins/`` directory. It supports three modes:
 
-* ``native``: vendors Python for UE5, runs Unreal AutomationTool
-  ``BuildPlugin``, and writes
-  ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``. UE4 native packages
+* ``native``: runs Unreal AutomationTool ``BuildPlugin``, builds an adapter
+  wheel containing the complete native payload, then vendors that wheel and
+  writes ``dist/DccMcpUnreal-<version>-<ue-version>-win64.zip``. UE4 native packages
   use the standalone sidecar and omit the incompatible embedded dependencies.
 * ``source``: vendors Python and keeps the C++ source module for engines that
   should compile the plugin locally.
@@ -17,7 +17,11 @@ This script creates a package suitable for users to drop into a project's
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
+import csv
+import hashlib
+import io
 import json
 import os
 import re
@@ -25,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -203,7 +208,7 @@ def temporarily_clear_legacy_ubt_user_config(work_dir: Path):
         print("[build-uplugin] Restored UBT config: {}".format(config_path))
 
 
-def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
+def build_python_payload(args: argparse.Namespace, payload_dir: Path, adapter_wheel: Optional[Path] = None) -> None:
     core_wheel = args.core_wheel
     if not core_wheel and args.core_wheel_url:
         filename = args.core_wheel_url.rstrip("/").rsplit("/", 1)[-1] or "dcc_mcp_core.whl"
@@ -226,6 +231,8 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
         cmd.append("--skip-python-deps")
     if args.python:
         cmd += ["--python", str(args.python)]
+    if adapter_wheel is not None:
+        cmd += ["--adapter-wheel", str(adapter_wheel)]
     if core_wheel:
         cmd += ["--core-wheel", str(core_wheel)]
     elif args.skip_core:
@@ -301,6 +308,15 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         "-TargetPlatforms=Win64",
     ]
     ubtargs = []
+    max_parallel_actions = getattr(args, "max_parallel_actions", None)
+    if max_parallel_actions is not None:
+        if (
+            isinstance(max_parallel_actions, bool)
+            or not isinstance(max_parallel_actions, int)
+            or max_parallel_actions <= 0
+        ):
+            raise ValueError("max_parallel_actions must be a positive integer")
+        ubtargs.append("-MaxParallelActions={}".format(max_parallel_actions))
     if args.vctoolchain_version:
         ubtargs.append("-VCToolchainVersion={}".format(args.vctoolchain_version))
     if args.patched_headers_dir:
@@ -378,6 +394,164 @@ def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> N
         shutil.copy2(str(build_info), str(final_plugin_dir / "BUILD_INFO.txt"))
 
 
+def tree_hashes(root: Path) -> dict:
+    """Capture build inputs, excluding only ordinary Python runtime caches."""
+    result = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"}:
+            continue
+        details = path.lstat()
+        if path.is_symlink() or getattr(details, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Build input crosses a link: {}".format(path))
+        if path.is_file():
+            result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def native_source_lock() -> dict:
+    for name in ("Binaries", "Intermediate", "python"):
+        if (PLUGIN_SOURCE.parent / name).exists():
+            raise RuntimeError("Native build requires canonical source without generated {}".format(name))
+    if (REPO_ROOT / "src" / "dcc_mcp_unreal" / "_plugin").exists():
+        raise RuntimeError("Native build cannot use a previously packaged adapter as source")
+    return {
+        "src": tree_hashes(REPO_ROOT / "src"),
+        "plugin": tree_hashes(PLUGIN_SOURCE.parent),
+        "metadata": {
+            name: hashlib.sha256((REPO_ROOT / name).read_bytes()).hexdigest()
+            for name in ("pyproject.toml", "README.md", "LICENSE")
+            if name != "LICENSE" or (REPO_ROOT / name).exists()
+        },
+    }
+
+
+def validate_native_output(args: argparse.Namespace, uat_dir: Path, source_lock: dict) -> dict:
+    if native_source_lock() != source_lock:
+        raise RuntimeError("Native build source changed during UAT")
+    expected_source = {
+        path[len("Source/") :]: digest for path, digest in source_lock["plugin"].items() if path.startswith("Source/")
+    }
+    if not expected_source or tree_hashes(uat_dir / "Source") != expected_source:
+        raise RuntimeError("UAT output Source does not match the locked native source")
+    editor = "UE4Editor" if read_engine_version(args.ue_root)[0] == 4 else "UnrealEditor"
+    modules_name = editor + ".modules"
+    engine_modules = args.ue_root / "Engine" / "Binaries" / "Win64" / modules_name
+    engine_build_id = json.loads(engine_modules.read_text(encoding="utf-8"))["BuildId"]
+    modules = json.loads((uat_dir / "Binaries" / "Win64" / modules_name).read_text(encoding="utf-8"))
+    dll_name = editor + "-DccMcpUnreal.dll"
+    if (
+        not engine_build_id
+        or modules.get("BuildId") != engine_build_id
+        or modules.get("Modules", {}).get("DccMcpUnreal") != dll_name
+    ):
+        raise RuntimeError("UAT native module does not match the selected engine BuildId")
+    dll = uat_dir / "Binaries" / "Win64" / dll_name
+    if not dll.is_file() or not dll.stat().st_size:
+        raise RuntimeError("UAT did not produce the native editor DLL")
+    return {
+        "engine_build_id": engine_build_id,
+        "dll": dll.relative_to(uat_dir).as_posix(),
+        "dll_sha256": hashlib.sha256(dll.read_bytes()).hexdigest(),
+        "payload": tree_hashes(uat_dir),
+    }
+
+
+def verify_native_wheel(wheel: Path, plugin_dir: Path) -> None:
+    """Verify Hatch's complete RECORD and exact native payload, without modifying it."""
+    prefix = "dcc_mcp_unreal/_plugin/"
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        records = [
+            name for name in names if name.endswith(".dist-info/RECORD") and "/" not in name.split(".dist-info/")[0]
+        ]
+        if len(names) != len(set(names)) or len(records) != 1:
+            raise RuntimeError("Native wheel has duplicate members or invalid RECORD")
+        rows = list(csv.reader(io.StringIO(archive.read(records[0]).decode("utf-8"))))
+        if len(rows) != len(names) or {row[0] for row in rows} != set(names):
+            raise RuntimeError("Native wheel RECORD does not cover every member exactly")
+        for name, digest, size in rows:
+            data = archive.read(name)
+            expected = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
+            if name == records[0]:
+                if digest or size:
+                    raise RuntimeError("Native wheel RECORD self-entry must be unhashed")
+            elif digest != expected or size != str(len(data)):
+                raise RuntimeError("Native wheel RECORD hash mismatch: {}".format(name))
+        payload = {
+            name[len(prefix) :]: hashlib.sha256(archive.read(name)).hexdigest()
+            for name in names
+            if name.startswith(prefix)
+        }
+        if payload != tree_hashes(plugin_dir):
+            raise RuntimeError("Native wheel payload does not equal the complete staged plugin")
+
+
+def build_native_wheel(args: argparse.Namespace, plugin_dir: Path, source_lock: dict) -> Path:
+    """Use a disposable source stage and the ordinary pip/Hatch wheel backend."""
+    if native_source_lock() != source_lock:
+        raise RuntimeError("Native build source changed before wheel construction")
+    if not read_engine_tag(args.ue_root).startswith("ue4."):
+        adapter = plugin_dir / "python" / "dcc_mcp_unreal"
+        actual_adapter = tree_hashes(adapter)
+        expected_adapter = {
+            path[len("dcc_mcp_unreal/") :]: digest
+            for path, digest in source_lock["src"].items()
+            if path.startswith("dcc_mcp_unreal/")
+        }
+        actual_source = {path: digest for path, digest in actual_adapter.items() if not path.startswith("_plugin/")}
+        if not expected_adapter or actual_source != expected_adapter:
+            raise RuntimeError("Bootstrap adapter does not match the locked Python source")
+        if tree_hashes(adapter / "_plugin") != source_lock["plugin"]:
+            raise RuntimeError("Bootstrap adapter must contain only the canonical source plugin")
+    stage = args.work_dir / "native-wheel-source"
+    stage.mkdir()
+    shutil.copytree(
+        str(REPO_ROOT / "src"), str(stage / "src"), ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+    )
+    for name in source_lock["metadata"]:
+        shutil.copy2(str(REPO_ROOT / name), str(stage / name))
+    if tree_hashes(stage / "src") != source_lock["src"] or any(
+        hashlib.sha256((stage / name).read_bytes()).hexdigest() != digest
+        for name, digest in source_lock["metadata"].items()
+    ):
+        raise RuntimeError("Native wheel source stage differs from the locked source")
+    shutil.copytree(
+        str(plugin_dir),
+        str(stage / "unreal" / "plugin"),
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+    # Keep the repository's default wheel configuration intact. Only this
+    # native build stage uses Hatch's standard platform-tag build hook.
+    with (stage / "pyproject.toml").open("a", encoding="utf-8") as config:
+        config.write('\n[tool.hatch.build.targets.wheel.hooks.custom]\npath = "_native_wheel_hook.py"\n')
+    (stage / "_native_wheel_hook.py").write_text(
+        "from hatchling.builders.hooks.plugin.interface import BuildHookInterface\n"
+        "class CustomBuildHook(BuildHookInterface):\n"
+        "    def initialize(self, version, build_data):\n"
+        "        build_data['tag'] = 'py3-none-win_amd64'\n"
+        "        build_data['pure_python'] = False\n",
+        encoding="utf-8",
+    )
+    wheels = args.out_dir / "native-wheels"
+    remove_tree(wheels)
+    wheels.parent.mkdir(parents=True, exist_ok=True)
+    wheels.mkdir()
+    run([str(args.python or sys.executable), "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheels), str(stage)])
+    built = list(wheels.glob("dcc_mcp_unreal-*-py3-none-win_amd64.whl"))
+    if len(built) != 1 or native_source_lock() != source_lock:
+        raise RuntimeError("Native wheel output is ambiguous or build source changed")
+    verify_native_wheel(built[0], plugin_dir)
+    return built[0]
+
+
+def positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def zip_final(final_plugin_dir: Path, ue_root: Path, mode: str) -> Path:
     version = read_plugin_version(final_plugin_dir)
     suffix = "win64" if mode == "native" else mode
@@ -435,6 +609,12 @@ def main() -> None:
         help="MSVC toolchain version passed to UBT via -VCToolchainVersion=",
     )
     parser.add_argument(
+        "--max-parallel-actions",
+        type=positive_integer,
+        default=None,
+        help="Optional UBT action concurrency limit; defaults to engine behavior",
+    )
+    parser.add_argument(
         "--patched-headers-dir",
         default=os.environ.get("PATCHED_HEADERS_DIR", ""),
         help="Directory where a force-include header is written; path is passed to UBT via -AdditionalCompilerArguments /FI",
@@ -477,11 +657,30 @@ def main() -> None:
     remove_tree(args.work_dir)
     args.work_dir.mkdir(parents=True, exist_ok=True)
 
-    build_python_payload(args, payload_dir)
     if args.mode == "native":
+        source_lock = native_source_lock()
         build_precompiled_plugin(args, uat_dir)
+        native_info = validate_native_output(args, uat_dir, source_lock)
+        # A finite bootstrap payload makes the native wheel independently
+        # installable: its _plugin already includes the host's Python runtime.
+        build_python_payload(args, payload_dir)
+        wheel_plugin_dir = args.work_dir / "wheel-payload" / "DccMcpUnreal"
+        merge_payload(payload_dir, uat_dir, wheel_plugin_dir)
+        rewrite_distribution_build_info(wheel_plugin_dir, args.mode)
+        native_wheel = build_native_wheel(args, wheel_plugin_dir, source_lock)
+        build_python_payload(args, payload_dir, native_wheel)
         merge_payload(payload_dir, uat_dir, final_plugin_dir)
+        vendored_plugin = final_plugin_dir / "python" / "dcc_mcp_unreal" / "_plugin"
+        if not read_engine_tag(args.ue_root).startswith("ue4.") and tree_hashes(vendored_plugin) != tree_hashes(
+            wheel_plugin_dir
+        ):
+            raise RuntimeError("Vendored adapter did not consume the new native wheel")
+        if not read_engine_tag(args.ue_root).startswith("ue4.") and not args.skip_core:
+            bootstrap_core = tree_hashes(wheel_plugin_dir / "python" / "dcc_mcp_core")
+            if not bootstrap_core or tree_hashes(final_plugin_dir / "python" / "dcc_mcp_core") != bootstrap_core:
+                raise RuntimeError("Final vendoring changed the bootstrap Core package")
     else:
+        build_python_payload(args, payload_dir)
         remove_tree(final_plugin_dir)
         final_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(
@@ -491,8 +690,34 @@ def main() -> None:
     verify(final_plugin_dir)
     archive = zip_final(final_plugin_dir, args.ue_root, args.mode)
 
+    if args.mode == "native":
+        if validate_native_output(args, uat_dir, source_lock) != native_info:
+            raise RuntimeError("UAT payload changed during native wheel packaging")
+        final_files = tree_hashes(final_plugin_dir)
+        if any(final_files.get(path) != digest for path, digest in native_info["payload"].items()):
+            raise RuntimeError("Final plugin does not preserve the complete UAT payload")
+        (args.out_dir / "native-wheel-build.json").write_text(
+            json.dumps(
+                {
+                    "source_lock": source_lock,
+                    "native": native_info,
+                    "wheel": str(native_wheel),
+                    "wheel_sha256": hashlib.sha256(native_wheel.read_bytes()).hexdigest(),
+                    "core_wheel": str(args.core_wheel) if args.core_wheel else None,
+                    "core_wheel_sha256": hashlib.sha256(args.core_wheel.read_bytes()).hexdigest()
+                    if args.core_wheel
+                    else None,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     print("[build-uplugin] package: {}".format(final_plugin_dir))
     print("[build-uplugin] zip: {}".format(archive))
+    if args.mode == "native":
+        print("[build-uplugin] installer wheel: {}".format(native_wheel))
 
 
 if __name__ == "__main__":

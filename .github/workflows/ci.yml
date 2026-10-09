@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, agent/owned-ui-runtime-20261009]
+    branches: [main, agent/owned-ui-runtime-20261009, agent/owned-editor-bootstrap-20261010]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -94,10 +94,10 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff check
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ packaging/build_distributable.py packaging/build_plugin.py
 
       - name: Run ruff format check
-        run: ruff format --check src/ tests/
+        run: ruff format --check src/ tests/ packaging/build_distributable.py packaging/build_plugin.py
 
   lint-skills:
     name: Lint Skills
