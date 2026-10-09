@@ -1918,17 +1918,19 @@ def _verify(
         receipt is not None and receipt.get("transaction") is not None and bool(context["instance_id"])
     )
     if failure_stage is None:
+        readiness: dict[str, Any] = {}
         try:
-            from dcc_mcp_core import wait_for_sidecar_ready
+            if context["instance_id"]:
+                from dcc_mcp_core import wait_for_sidecar_ready
 
-            if pending_requires_resolution:
-                pending_guard = _capture_pending_guard(context, receipt)
-            readiness = wait_for_sidecar_ready(
-                dcc_type=DCC_TYPE,
-                instance_id=context["instance_id"],
-                timeout_secs=args.timeout,
-                probe_tool="unreal_automation__mcp_self_check",
-            )
+                if pending_requires_resolution:
+                    pending_guard = _capture_pending_guard(context, receipt)
+                readiness = wait_for_sidecar_ready(
+                    dcc_type=DCC_TYPE,
+                    instance_id=context["instance_id"],
+                    timeout_secs=args.timeout,
+                    probe_tool="unreal_automation__mcp_self_check",
+                )
         except (ImportError, OSError, ValueError) as exc:
             readiness = {"success": False, "message": str(exc)}
         identity, readiness_reason = _readiness_identity(args, context, receipt or {}, readiness)
