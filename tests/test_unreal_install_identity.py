@@ -28,7 +28,10 @@ def test_runtime_engine_version_is_canonical(value: str) -> None:
         _helpers()["_canonical_engine_version"](value)
 
 
-def test_runtime_identity_binds_live_process_project_plugin_and_origins(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("engine_bootstrap", ["cached_foreign", "raises_on_import"])
+def test_runtime_identity_binds_live_process_project_plugin_and_origins(
+    monkeypatch, tmp_path: Path, engine_bootstrap: str
+) -> None:
     helpers = _helpers()
     editor = tmp_path / "UnrealEditor"
     editor.write_bytes(b"native-editor")
@@ -46,7 +49,6 @@ def test_runtime_identity_binds_live_process_project_plugin_and_origins(monkeypa
     core_origin.write_text("# core\n", encoding="utf-8")
     adapter_module = types.SimpleNamespace(__file__=str(adapter_origin))
     core_module = types.SimpleNamespace(__file__=str(core_origin))
-    init_module = types.SimpleNamespace(PROCESS_START_TOKEN="a" * 32)
     unreal_module = types.SimpleNamespace(
         Paths=types.SimpleNamespace(get_project_file_path=lambda: str(project)),
         PluginBlueprintLibrary=types.SimpleNamespace(get_plugin_base_dir=lambda _name: str(plugin)),
@@ -54,7 +56,14 @@ def test_runtime_identity_binds_live_process_project_plugin_and_origins(monkeypa
     )
     monkeypatch.setitem(sys.modules, "dcc_mcp_unreal", adapter_module)
     monkeypatch.setitem(sys.modules, "dcc_mcp_core", core_module)
-    monkeypatch.setitem(sys.modules, "init_unreal", init_module)
+    if engine_bootstrap == "cached_foreign":
+        monkeypatch.setitem(sys.modules, "init_unreal", types.SimpleNamespace(PROCESS_START_TOKEN="b" * 32))
+    else:
+        engine = tmp_path / "Engine" / "Plugins" / "IKRig" / "Content" / "Python"
+        engine.mkdir(parents=True)
+        (engine / "init_unreal.py").write_text("raise NameError(\"name 'unreal' is not defined\")\n", encoding="utf-8")
+        monkeypatch.syspath_prepend(str(engine))
+        monkeypatch.delitem(sys.modules, "init_unreal", raising=False)
     monkeypatch.setitem(sys.modules, "unreal", unreal_module)
     monkeypatch.setattr(sys, "executable", str(editor))
     monkeypatch.setattr(
@@ -62,7 +71,7 @@ def test_runtime_identity_binds_live_process_project_plugin_and_origins(monkeypa
         "version",
         lambda name: {"dcc-mcp-unreal": "0.3.0", "dcc-mcp-core": "0.20.13"}[name],
     )
-    server = types.SimpleNamespace(instance_id="11111111-1111-1111-1111-111111111111")
+    server = types.SimpleNamespace(instance_id="11111111-1111-1111-1111-111111111111", process_start_token="a" * 32)
 
     identity = helpers["_install_identity"](server)
 
@@ -79,3 +88,38 @@ def test_runtime_identity_binds_live_process_project_plugin_and_origins(monkeypa
         "adapter_origin": str(adapter_origin.resolve()),
         "core_origin": str(core_origin.resolve()),
     }
+
+
+@pytest.mark.parametrize("token", [None, "", True, "not-a-process-token"])
+def test_identity_refuses_missing_server_token_even_with_valid_foreign_bootstrap(monkeypatch, token):
+    helpers = _helpers()
+    monkeypatch.setitem(sys.modules, "init_unreal", types.SimpleNamespace(PROCESS_START_TOKEN="b" * 32))
+    monkeypatch.setitem(sys.modules, "unreal", types.SimpleNamespace())
+    server = types.SimpleNamespace(instance_id="11111111-1111-1111-1111-111111111111", process_start_token=token)
+    with pytest.raises(ValueError, match="process token"):
+        helpers["_install_identity"](server)
+
+
+def test_server_owns_read_only_process_identity_across_instances(monkeypatch, tmp_path):
+    from dcc_mcp_unreal.server import UnrealMcpServer
+
+    monkeypatch.delitem(sys.modules, "unreal", raising=False)
+    options = dict(
+        gateway_port=0,
+        registry_dir=str(tmp_path),
+        enable_gateway_failover=False,
+        enable_telemetry=False,
+        enable_job_persistence=False,
+        enable_file_logging=False,
+    )
+    first = UnrealMcpServer(**options)
+    second = UnrealMcpServer(**options)
+    try:
+        token = first.process_start_token
+        assert len(token) == 32 and int(token, 16) >= 0
+        assert token == second.process_start_token
+        with pytest.raises(AttributeError):
+            first.process_start_token = "b" * 32
+    finally:
+        first.stop()
+        second.stop()
