@@ -1,0 +1,84 @@
+tools:
+  - name: inspect_editor_close
+    description: Inspect native close readiness and the actual owned test-host binding without closing or saving.
+    source_file: scripts/inspect_editor_close.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 5
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties: {}
+    next-tools:
+      on-success: [unreal_lifecycle__request_editor_close]
+      on-failure: []
+  - name: request_editor_close
+    description: >-
+      Request one bounded normal Editor close for an opted-in host using an
+      expiring HMAC proof. Scheduled means neither ACK flush nor process exit.
+    source_file: scripts/request_editor_close.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 5
+    read_only: false
+    destructive: true
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [instance_id, owner, session, host_pid, creation_filetime, project_file, request_id, expires_unix_ms, proof]
+      properties:
+        instance_id:
+          type: string
+          format: uuid
+        owner:
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{1,128}$'
+        session:
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{1,128}$'
+        host_pid:
+          type: integer
+          minimum: 1
+          maximum: 4294967295
+        creation_filetime:
+          type: string
+          pattern: '^[0-9]{1,20}$'
+        project_file:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        request_id:
+          type: string
+          format: uuid
+        expires_unix_ms:
+          type: string
+          pattern: '^[0-9]{13}$'
+        proof:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+    next-tools:
+      on-success: [unreal_lifecycle__get_editor_close_status]
+      on-failure: [unreal_lifecycle__inspect_editor_close]
+  - name: get_editor_close_status
+    description: Read the last native close state. The launcher must independently prove original process exit and registry cleanup.
+    source_file: scripts/get_editor_close_status.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 5
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties: {}
+    next-tools:
+      on-success: []
+      on-failure: []

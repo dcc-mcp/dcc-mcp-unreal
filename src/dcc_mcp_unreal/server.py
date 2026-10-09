@@ -53,6 +53,41 @@ def _configure_ui_control_for_process() -> None:
         os.environ.pop(legacy_name, None)
 
 
+def _assert_current_process_window(window_handle: int) -> None:
+    """Validate an owner-supplied exact HWND without enumeration or activation."""
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    if not _IS_WINDOWS:
+        raise ValueError("An exact Unreal HWND requires Windows")
+    if type(window_handle) is not int or not 0 < window_handle < 1 << (8 * ctypes.sizeof(ctypes.c_void_p)):
+        raise ValueError("dcc_window_handle must be an exact positive HWND integer")
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    get_pid = user32.GetWindowThreadProcessId
+    get_pid.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    get_pid.restype = wintypes.DWORD
+    owner_pid = wintypes.DWORD()
+    if not get_pid(window_handle, ctypes.byref(owner_pid)) or owner_pid.value != os.getpid():
+        raise ValueError("dcc_window_handle must belong to the current Unreal process")
+
+
+def _validate_ui_control_binding(ui_control: Any, dcc_window_handle: Optional[int]) -> None:
+    if ui_control is not None:
+        try:
+            from dcc_mcp_core.server import UiControlRuntimeOptions  # noqa: PLC0415
+        except ImportError as exc:
+            raise RuntimeError("This Core does not support typed owned UI Control") from exc
+
+        if not isinstance(ui_control, UiControlRuntimeOptions):
+            raise TypeError("ui_control must be UiControlRuntimeOptions or None")
+        if dcc_window_handle is None:
+            raise ValueError("Owned UI Control requires an exact current Editor HWND")
+    elif dcc_window_handle is not None:
+        raise ValueError("An exact HWND requires typed owner UI Control configuration")
+    if dcc_window_handle is not None:
+        _assert_current_process_window(dcc_window_handle)
+
+
 class UnrealMainThreadDispatcher:
     """Dispatch in-process skill calls onto Unreal's editor tick when needed.
 
@@ -229,23 +264,17 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
         enable_file_logging: bool = True,
         enable_job_persistence: bool = True,
         enable_telemetry: bool = True,
-        ui_control: Optional[UiControlRuntimeOptions] = None,
+        ui_control: Optional["UiControlRuntimeOptions"] = None,
+        dcc_window_handle: Optional[int] = None,
     ) -> None:
         if DccServerBase is object:  # pragma: no cover - defensive install error
             raise ImportError("dcc-mcp-core is required to create UnrealMcpServer")
 
         from dcc_mcp_core import DccServerOptions  # noqa: PLC0415
 
-        runtime_options: Dict[str, Any] = {}
-        if ui_control is not None:
-            try:
-                from dcc_mcp_core.server import UiControlRuntimeOptions  # noqa: PLC0415
-            except ImportError as exc:
-                raise ImportError("Owned UI Control requires Core with UiControlRuntimeOptions support") from exc
-            if not isinstance(ui_control, UiControlRuntimeOptions):
-                raise TypeError("ui_control must be UiControlRuntimeOptions or None")
-            runtime_options["ui_control"] = ui_control
-
+        _validate_ui_control_binding(ui_control, dcc_window_handle)
+        self._ui_control_binding = (ui_control, dcc_window_handle)
+        self._ui_control_runtime = ui_control
         _configure_ui_control_for_process()
         self._main_thread_dispatcher, bridge = _make_execution_bridge(execution_timeout_secs)
         options = DccServerOptions.from_env(
@@ -261,14 +290,18 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
             enable_job_persistence=enable_job_persistence,
             enable_telemetry=enable_telemetry,
             execution_bridge=bridge,
-            **runtime_options,
+            **(
+                {"ui_control": ui_control, "dcc_pid": os.getpid(), "dcc_window_handle": dcc_window_handle}
+                if ui_control is not None
+                else {}
+            ),
         )
         super().__init__(options=options)
-        self._ui_control_runtime = ui_control
         self._last_scene_snapshot: Optional[Dict[str, Any]] = None
 
     def start(self, *, install_atexit_hook: bool = True) -> Any:
         """Start with UI Control scoped to the current Unreal process."""
+        _validate_ui_control_binding(*self._ui_control_binding)
         _configure_ui_control_for_process()
         handle = super().start(install_atexit_hook=install_atexit_hook)
         self._main_thread_dispatcher.attach_scene_publisher(self._publish_scene_context)
@@ -416,22 +449,16 @@ def start_server(
     eager_load: bool = True,
     gateway_port: Optional[int] = None,
     registry_dir: Optional[str] = None,
-    ui_control: Optional[UiControlRuntimeOptions] = None,
+    ui_control: Optional["UiControlRuntimeOptions"] = None,
+    dcc_window_handle: Optional[int] = None,
 ) -> Any:
-    """Start, or return, the module-level Unreal MCP server handle.
-
-    ``ui_control`` is a trusted bootstrap option, never a tool parameter.
-    Stop the existing server before selecting a different runtime.
-    """
+    """Start, or return, the module-level Unreal MCP server handle."""
     global _server_instance
     with _lock:
-        if (
-            _server_instance is not None
-            and _server_instance.is_running
-            and ui_control is not None
-            and ui_control != _server_instance._ui_control_runtime
-        ):
-            raise ValueError("Stop the running Unreal server before changing its UI Control runtime")
+        _validate_ui_control_binding(ui_control, dcc_window_handle)
+        if _server_instance is not None and _server_instance.is_running:
+            if _server_instance._ui_control_binding != (ui_control, dcc_window_handle):
+                raise ValueError("UI Control configuration changed; stop the server before rebinding")
         if _server_instance is None or not _server_instance.is_running:
             _server_instance = UnrealMcpServer(
                 port=port,
@@ -440,6 +467,7 @@ def start_server(
                 gateway_port=gateway_port,
                 registry_dir=registry_dir,
                 ui_control=ui_control,
+                dcc_window_handle=dcc_window_handle,
             )
             if register_builtins:
                 _server_instance.register_builtin_actions(

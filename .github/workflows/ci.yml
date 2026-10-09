@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, agent/owned-ui-runtime-20261009]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -205,6 +205,15 @@ jobs:
             'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "wheel" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
           PYTHONPATH="$PWD/src" .source-smoke/bin/python -c \
             'from pathlib import Path; import sys; from dcc_mcp_unreal.install_cli import _target_runtime; r = _target_runtime(Path(sys.executable)); assert r["core_version"] == "0.20.21" and r["plugin_payload"]["provenance"] == "source-checkout" and not any("__pycache__" in item["path"] for item in r["plugin_payload"]["snapshot"]["manifest"])'
+
+      - name: Upload normally built adapter distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-python-distributions
+          path: |
+            dist/dcc_mcp_unreal-*.whl
+            dist/dcc_mcp_unreal-*.tar.gz
+          if-no-files-found: error
 
   package-unreal-plugin:
     name: Package Unreal Plugin
