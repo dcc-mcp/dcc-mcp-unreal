@@ -32,6 +32,9 @@ _DEFAULT_SERVER_VERSION = "0.1.0"
 _IS_WINDOWS = os.name == "nt"
 _SCENE_REFRESH_SECS = 1.0
 _DISPATCH_BUDGET_MS = 4.0
+# Own this identity in the package, shared by embedded startup paths and server
+# restarts. Unreal executes multiple unrelated scripts named init_unreal.py.
+_PROCESS_START_TOKEN = globals().get("_PROCESS_START_TOKEN") or uuid.uuid4().hex
 
 
 def _configure_ui_control_for_process() -> None:
@@ -297,6 +300,11 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
         )
         super().__init__(options=options)
         self._last_scene_snapshot: Optional[Dict[str, Any]] = None
+
+    @property
+    def process_start_token(self) -> str:
+        """Opaque process-scoped identity, independent of Engine startup modules."""
+        return _PROCESS_START_TOKEN
 
     def start(self, *, install_atexit_hook: bool = True) -> Any:
         """Start with UI Control scoped to the current Unreal process."""
