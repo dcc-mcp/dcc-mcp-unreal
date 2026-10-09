@@ -28,9 +28,7 @@ def test_readiness_checks_exact_installed_module_origins(tmp_path, vendored):
     if vendored:
         for field, module in (("adapter_origin", "dcc_mcp_unreal"), ("core_origin", "dcc_mcp_core")):
             relative = f"python/{module}/__init__.py"
-            context["runtime"]["plugin_payload"]["snapshot"]["manifest"].append(
-                {"path": relative, "type": "file"}
-            )
+            context["runtime"]["plugin_payload"]["snapshot"]["manifest"].append({"path": relative, "type": "file"})
             identity[field] = str(context["plugin_root"] / relative)
     accepted, reason = install_cli._readiness_identity(argparse.Namespace(), context, {}, readiness)
     assert accepted == identity and reason is None
