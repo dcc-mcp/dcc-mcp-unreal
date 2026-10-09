@@ -72,7 +72,11 @@ def bootstrap(monkeypatch, tmp_path):
     }
     calls = []
     fake_unreal = SimpleNamespace(
-        Paths=SimpleNamespace(project_file_path=lambda: str(project), project_dir=lambda: str(tmp_path)),
+        Paths=SimpleNamespace(
+            get_project_file_path=lambda: str(project),
+            convert_relative_path_to_full=lambda path: str((tmp_path / path).resolve()),
+            project_dir=lambda: str(tmp_path),
+        ),
         DccMcpEditorWindowLibrary=SimpleNamespace(get_main_frame_identity_json=lambda: json.dumps(identity)),
         is_editor=lambda: True,
         register_slate_post_tick_callback=lambda _callback: "mock-tick",
@@ -302,6 +306,32 @@ def test_exact_window_binding_checks_actual_process_without_enumeration(server, 
     with pytest.raises(ValueError, match="current Unreal process"):
         server._assert_current_process_window(4242)
     assert seen == [4242, 4242]
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_owned_bootstrap_uses_engine_project_path_getter(bootstrap, monkeypatch, relative, owned_runtime_api):
+    project_file = bootstrap.profile["project_file"]
+    engine_path = Path(project_file).name if relative else project_file
+    reads = []
+    conversions = []
+    assert not hasattr(bootstrap.unreal.Paths, "project_file_path")
+    monkeypatch.setattr(
+        bootstrap.unreal.Paths, "get_project_file_path", lambda: reads.append(engine_path) or engine_path
+    )
+    monkeypatch.setattr(
+        bootstrap.unreal.Paths,
+        "convert_relative_path_to_full",
+        lambda path: conversions.append(path) or project_file,
+    )
+    bootstrap.pin()
+
+    bootstrap.module._start()
+
+    assert reads == [engine_path]
+    assert conversions == ([engine_path] if relative else [])
+    assert len(bootstrap.calls) == 1
+    assert bootstrap.calls[0]["dcc_window_handle"] == 4242
+    assert bootstrap.calls[0]["enable_gateway_failover"] is False
 
 
 def test_profile_composes_actual_core_type_and_explicit_window_ceiling(bootstrap, owned_runtime_api):
