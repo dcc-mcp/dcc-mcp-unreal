@@ -1309,7 +1309,8 @@ def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, 
     }
     commands: list[list[str]] = []
 
-    def capture_probe(command: list[str]) -> dict:
+    def capture_probe(command: list[str], *, output_limit: int) -> dict:
+        assert output_limit == install_cli.MAX_RUNTIME_PROBE_OUTPUT_BYTES
         commands.append(command)
         return completed
 

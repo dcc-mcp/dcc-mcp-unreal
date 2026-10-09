@@ -65,6 +65,7 @@ FALLBACK_REPORT_SCHEMA_VERSION = 1
 MAX_VERSION_LENGTH = 64
 MAX_VERSION_COMPONENT = 999999
 MAX_PROBE_OUTPUT_BYTES = 64 * 1024
+MAX_RUNTIME_PROBE_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_EDITOR_BYTES = 4 * 1024 * 1024 * 1024
 MAX_TRANSACTION_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})")
@@ -174,8 +175,11 @@ def _project_association_tuple(value: str) -> tuple[int, int, int]:
     return padded[0], padded[1], padded[2]
 
 
-def _run_bounded_probe(command: Sequence[str], *, timeout: float = 15.0) -> dict[str, Any]:
+def _run_bounded_probe(
+    command: Sequence[str], *, timeout: float = 15.0, output_limit: int = MAX_PROBE_OUTPUT_BYTES
+) -> dict[str, Any]:
     """Run one read-only child probe with bounded time and captured output."""
+    output_limit = max(1, min(output_limit, MAX_RUNTIME_PROBE_OUTPUT_BYTES))
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(mode="w+b") as stderr_file:
         try:
@@ -196,14 +200,14 @@ def _run_bounded_probe(command: Sequence[str], *, timeout: float = 15.0) -> dict
             return {"success": False, "reason": "probe timed out"}
         stdout_file.seek(0)
         stderr_file.seek(0)
-        stdout = stdout_file.read(MAX_PROBE_OUTPUT_BYTES + 1)
-        stderr = stderr_file.read(MAX_PROBE_OUTPUT_BYTES + 1)
+        stdout = stdout_file.read(output_limit + 1)
+        stderr = stderr_file.read(output_limit + 1)
     return {
         "success": process.returncode == 0,
         "returncode": int(process.returncode or 0),
-        "stdout": stdout[:MAX_PROBE_OUTPUT_BYTES].decode("utf-8", errors="replace"),
-        "stderr": stderr[:MAX_PROBE_OUTPUT_BYTES].decode("utf-8", errors="replace"),
-        "truncated": len(stdout) > MAX_PROBE_OUTPUT_BYTES or len(stderr) > MAX_PROBE_OUTPUT_BYTES,
+        "stdout": stdout[:output_limit].decode("utf-8", errors="replace"),
+        "stderr": stderr[:output_limit].decode("utf-8", errors="replace"),
+        "truncated": len(stdout) > output_limit or len(stderr) > output_limit,
     }
 
 
@@ -430,7 +434,11 @@ def _target_runtime(python_path: Path) -> dict[str, str]:
     trusted_overlay = ""
     if python_path.resolve() == Path(sys.executable).resolve():
         trusted_overlay = str(Path(__file__).resolve().parents[1])
-    completed = _run_bounded_probe([str(python_path), "-I", "-c", probe, trusted_overlay])
+    completed = _run_bounded_probe(
+        [str(python_path), "-I", "-c", probe, trusted_overlay], output_limit=MAX_RUNTIME_PROBE_OUTPUT_BYTES
+    )
+    if completed.get("truncated"):
+        raise ValueError("Target distribution identity probe exceeded the bounded output limit")
     if not completed.get("success") or completed.get("truncated"):
         error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
         diagnostic = error_lines[-1] if error_lines else "import probe failed"

@@ -8,6 +8,18 @@ from dcc_mcp_unreal import install_cli
 from tests.test_install_cli import _synthetic_host
 
 
+def test_runtime_inventory_budget_retains_large_output_and_rejects_overflow():
+    size = 256 * 1024
+    command = [sys.executable, "-c", f"import sys; sys.stdout.write('x' * {size})"]
+    ordinary = install_cli._run_bounded_probe(command)
+    assert ordinary["success"] and ordinary["truncated"]
+    inventory = install_cli._run_bounded_probe(command, output_limit=install_cli.MAX_RUNTIME_PROBE_OUTPUT_BYTES)
+    assert inventory["success"] and not inventory["truncated"]
+    assert len(inventory["stdout"]) == size
+    capped = install_cli._run_bounded_probe(command, output_limit=size - 1)
+    assert capped["truncated"] and len(capped["stdout"]) == size - 1
+
+
 def test_unbound_install_and_verify_preserve_receipt_without_host_probe(monkeypatch, tmp_path):
     engine, project = _synthetic_host(tmp_path)
     common = ["--json", "--dcc-path", str(engine), "--python", sys.executable, "--project", str(project)]
