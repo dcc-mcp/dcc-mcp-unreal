@@ -38,6 +38,19 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+  core-dispatcher-floor:
+    name: Shared dispatcher at Core minimum
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install declared minimum Core
+        run: python -m pip install -e ".[dev]" "dcc-mcp-core==0.20.13"
+      - name: Verify shared dispatcher and bridge contract
+        run: python -m pytest tests/test_shared_dispatcher.py tests/test_server.py tests/test_skill_runner.py -q
+
   core-latest:
     # The pinned upper bound keeps the main matrix reproducible, but it also hides
     # incompatibilities until a bump lands. This job deliberately runs against the newest
