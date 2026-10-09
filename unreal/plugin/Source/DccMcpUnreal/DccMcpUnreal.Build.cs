@@ -44,6 +44,7 @@ public class DccMcpUnreal : ModuleRules
                 "InputCore",
                 "AssetRegistry",
                 "Json",
+                "MainFrame",
                 "Networking",
                 "Projects",
                 "Sockets",

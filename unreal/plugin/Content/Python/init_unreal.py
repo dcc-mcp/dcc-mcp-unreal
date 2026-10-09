@@ -30,20 +30,30 @@ Configuration (environment variables)
 ``DCC_MCP_UI_CONTROL_BACKEND``
     UI automation backend.  Defaults to ``"cua"`` on Windows while
     preserving an explicit user override.
+
+``DCC_MCP_UNREAL_UI_CONTROL_PROFILE`` / ``DCC_MCP_UNREAL_UI_CONTROL_PROFILE_SHA256``
+    Optional launch-owned JSON file and exact SHA-256. Both must be supplied
+    to enable typed owned UI Control for this project and Editor MainFrame.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import re
+import stat
 import sys
-import uuid
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "DccMcpUnreal"
-PROCESS_START_TOKEN = globals().get("PROCESS_START_TOKEN") or uuid.uuid4().hex
+_OWNER_UI_CONTROL_PROFILE = (
+    os.environ.get("DCC_MCP_UNREAL_UI_CONTROL_PROFILE"),
+    os.environ.get("DCC_MCP_UNREAL_UI_CONTROL_PROFILE_SHA256"),
+)
 
 
 def _resolve_bootstrap_runtime() -> str:
@@ -154,6 +164,8 @@ def _add_sys_path(path: Path, *, prepend: bool = True) -> None:
 
 
 _runtime_mode = _resolve_bootstrap_runtime()
+if _runtime_mode == "sidecar" and any(value is not None for value in _OWNER_UI_CONTROL_PROFILE):
+    raise RuntimeError("Owned UI Control profiles require the embedded Editor Python bootstrap")
 if _runtime_mode != "sidecar":
     _ensure_package_importable()
 
@@ -219,6 +231,140 @@ def _project_skill_paths() -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+def _ordinary_owner_path(value: str) -> Path:
+    """Keep owner inputs local and reject ambiguous spellings and reparse paths."""
+    if not isinstance(value, str):
+        raise ValueError("Owner profile paths must be ordinary absolute local paths")
+    path = Path(value)
+    spelling = value.replace("\\", "/")
+    if (
+        len(value) > 4096
+        or value != value.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or spelling.startswith("//")
+        or not path.is_absolute()
+        or any(part in {".", ".."} or part.endswith((".", " ")) for part in spelling.split("/") if part)
+        or any(":" in part for part in path.parts[1:])
+    ):
+        raise ValueError("Owner profile paths must be ordinary absolute local paths")
+    for ancestor in (path, *path.parents):
+        details = ancestor.lstat()
+        if stat.S_ISLNK(details.st_mode) or getattr(details, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Owner profile paths must not contain symlinks or reparse points")
+    return path
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate owner configuration JSON key: " + key)
+        result[key] = value
+    return result
+
+
+def _owner_ui_control_kwargs() -> dict:
+    """Compose a typed ceiling only from a launch-pinned, project-bound profile.
+
+    This reads metadata; it does not start a runtime, observe, activate, capture
+    or provide input. The Core public ui-control route owns those operations.
+    """
+    profile_name, profile_sha = _OWNER_UI_CONTROL_PROFILE
+    if profile_name is None and profile_sha is None:
+        return {}
+    if not profile_name or not profile_sha or not re.fullmatch(r"[0-9a-f]{64}", profile_sha):
+        raise ValueError("Owned UI Control requires both an absolute profile path and its lowercase SHA-256")
+    profile_path = _ordinary_owner_path(profile_name)
+    before = profile_path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= 16384:
+        raise ValueError("Owner profile must be a nonempty ordinary file of at most 16384 bytes")
+    with profile_path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError("Owner profile changed while opening")
+        content = stream.read(16385)
+    if len(content) > 16384 or hashlib.sha256(content).hexdigest() != profile_sha:
+        raise ValueError("Owner profile SHA-256 mismatch or oversized content")
+    profile = json.loads(content, object_pairs_hook=_unique_json_object)
+    required = {"schema", "project_file", "binary", "sha256", "runtime_version", "allowed_actions"}
+    if (
+        not isinstance(profile, dict)
+        or not required <= profile.keys()
+        or profile.keys() - required - {"window_operations", "recording_output_root"}
+        or profile["schema"] != "dcc-unreal-ui-control-owner/v1"
+    ):
+        raise ValueError("Owner profile does not match dcc-unreal-ui-control-owner/v1")
+    for name in ("allowed_actions", "window_operations"):
+        items = profile.get(name, [])
+        if (
+            not isinstance(items, list)
+            or any(not isinstance(item, str) for item in items)
+            or len(set(items)) != len(items)
+        ):
+            raise ValueError(name + " must be a list of distinct action names")
+    if set(profile.get("window_operations", [])) - {"activate", "restore_activate"}:
+        raise ValueError("Owner profile supports only explicit activate and restore_activate window operations")
+    project_file = _ordinary_owner_path(profile["project_file"])
+    if project_file.suffix.lower() != ".uproject" or not project_file.is_file():
+        raise ValueError("Owner profile project_file must identify an existing .uproject")
+    if not _ordinary_owner_path(profile["binary"]).is_file():
+        raise ValueError("Owner profile binary must identify an existing ordinary file")
+
+    import unreal  # noqa: PLC0415
+
+    actual_project = str(unreal.Paths.project_file_path())
+    if not Path(actual_project).is_absolute():
+        actual_project = str(unreal.Paths.convert_relative_path_to_full(actual_project))
+    if os.path.normcase(str(_ordinary_owner_path(actual_project).resolve())) != os.path.normcase(
+        str(project_file.resolve())
+    ):
+        raise ValueError("Owner profile belongs to a different Unreal project")
+    try:
+        from dcc_mcp_core.server import UiControlRuntimeOptions  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError("This Core does not support typed owned UI Control") from exc
+
+    recording = None
+    if "recording_output_root" in profile:
+        try:
+            from dcc_mcp_core.server import UiControlRecordingOptions  # noqa: PLC0415
+
+            recording = UiControlRecordingOptions(output_root=profile["recording_output_root"], require_progress=True)
+        except (ImportError, TypeError) as exc:
+            raise RuntimeError("This Core does not support progress-required owned recording") from exc
+    options = UiControlRuntimeOptions(
+        binary=profile["binary"],
+        sha256=profile["sha256"],
+        runtime_version=profile["runtime_version"],
+        allowed_actions=tuple(profile["allowed_actions"]),
+        window_operations=tuple(profile.get("window_operations", [])),
+        recording=recording,
+    )
+    library = getattr(unreal, "DccMcpEditorWindowLibrary", None)
+    getter = getattr(library, "get_main_frame_identity_json", None)
+    if not callable(getter):
+        raise RuntimeError("The native Editor MainFrame identity getter is required for owned UI Control")
+    raw_identity = getter()
+    if not isinstance(raw_identity, str) or len(raw_identity) > 4096:
+        raise ValueError("Invalid Editor MainFrame identity response")
+    identity = json.loads(raw_identity, object_pairs_hook=_unique_json_object)
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"schema", "success", "reason", "host_pid", "window_pid", "window_handle"}
+        or identity["schema"] != "dcc-unreal-editor-main-frame/v1"
+        or identity["success"] is not True
+        or identity["reason"] != "ok"
+        or type(identity["host_pid"]) is not int
+        or type(identity["window_pid"]) is not int
+        or identity["host_pid"] != os.getpid()
+        or identity["window_pid"] != os.getpid()
+        or not isinstance(identity["window_handle"], str)
+        or not re.fullmatch(r"[1-9][0-9]{0,19}", identity["window_handle"])
+    ):
+        raise ValueError("Editor MainFrame identity must bind the exact current process and canonical HWND")
+    return {"ui_control": options, "dcc_window_handle": int(identity["window_handle"])}
+
+
 def _start() -> None:
     global _handle
     try:
@@ -228,6 +374,7 @@ def _start() -> None:
         _handle = dcc_mcp_unreal.start_server(
             server_name=server_name,
             extra_skill_paths=_project_skill_paths(),
+            **_owner_ui_control_kwargs(),
         )
         import unreal as ue  # noqa: PLC0415
 
