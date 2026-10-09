@@ -225,6 +225,13 @@ startup scripts with that name. Editor/project/plugin paths, package versions
 and module origins remain part of the readiness receipt, and the installer
 continues to validate distribution ownership and wheel RECORD hashes.
 
+The self-check's engine identity reads run on the existing main-thread
+dispatcher. Its HTTP probes run on the any-affinity worker; a direct main-thread
+caller must use `check_http=False` to keep self-HTTP waits off the Editor pump.
+For complete native receipt installations, follow
+[native wheel packaging](native-wheel-packaging.md) to build and install the
+platform wheel containing the new native plugin and bootstrap runtime.
+
 ### CLI Discovery
 
 If `dcc-mcp-cli` is installed:
