@@ -4,8 +4,80 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+def _load_level_script():
+    script = "src/dcc_mcp_unreal/skills/unreal-level/scripts/load_level.py"
+    spec = importlib.util.spec_from_file_location("_test_load_level", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_default_load_releases_old_world_before_engine_switch(monkeypatch):
+    class World:
+        def get_name(self):
+            return "NewLevel"
+
+    old_world_owner = [World()]
+    old_world = weakref.ref(old_world_owner[0])
+    events = []
+    switched = False
+
+    def get_world():
+        events.append("read-new" if switched else "read-old")
+        return World() if switched else old_world_owner[0]
+
+    def save():
+        events.append("save")
+        return True
+
+    def load(path):
+        nonlocal switched
+        events.append("load")
+        old_world_owner.clear()
+        assert old_world() is None, "load_level retained the old World across the map switch"
+        switched = True
+        return True
+
+    monkeypatch.setitem(
+        sys.modules,
+        "unreal",
+        SimpleNamespace(
+            EditorLevelLibrary=SimpleNamespace(get_editor_world=get_world, save_current_level=save, load_level=load)
+        ),
+    )
+    result = _load_level_script().load_level(level_path="/Game/Maps/NewLevel")
+    assert result["success"], result
+    assert result["context"]["previous_level_saved"]
+    assert events == ["save", "load", "read-new"]
+
+
+@pytest.mark.parametrize("save_result", [False, None])
+def test_default_load_refuses_failed_save(monkeypatch, save_result):
+    load = MagicMock(return_value=True)
+    read_world = MagicMock(return_value=SimpleNamespace(get_name=lambda: "OldLevel"))
+    monkeypatch.setitem(
+        sys.modules,
+        "unreal",
+        SimpleNamespace(
+            EditorLevelLibrary=SimpleNamespace(
+                get_editor_world=read_world,
+                save_current_level=lambda: save_result,
+                load_level=load,
+            )
+        ),
+    )
+    result = _load_level_script().load_level(level_path="/Game/Maps/NewLevel")
+    assert not result["success"]
+    assert "save_current_level" in str(result)
+    load.assert_not_called()
+    read_world.assert_not_called()
 
 
 def test_save_level_uses_ue58_save_packages_signature():

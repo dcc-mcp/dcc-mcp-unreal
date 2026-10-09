@@ -216,6 +216,22 @@ Runs the native Unreal Automation Test `DccMcp.Smoke.ServerStarts`, verifies
 HTTP readiness, and confirms the built-in tools are registered. Reports are
 written to `Saved/Automation/Reports`.
 
+The `unreal_automation__mcp_self_check` installation identity reads its opaque
+process token from the active `UnrealMcpServer.process_start_token` property.
+The adapter owns this token across embedded startup paths and server restarts;
+it is not an operating-system process creation timestamp. Identity checks never
+import a bare `init_unreal` module, since Engine plugins can provide unrelated
+startup scripts with that name. Editor/project/plugin paths, package versions
+and module origins remain part of the readiness receipt, and the installer
+continues to validate distribution ownership and wheel RECORD hashes.
+
+The self-check's engine identity reads run on the existing main-thread
+dispatcher. Its HTTP probes run on the any-affinity worker; a direct main-thread
+caller must use `check_http=False` to keep self-HTTP waits off the Editor pump.
+For complete native receipt installations, follow
+[native wheel packaging](native-wheel-packaging.md) to build and install the
+platform wheel containing the new native plugin and bootstrap runtime.
+
 ### CLI Discovery
 
 If `dcc-mcp-cli` is installed:

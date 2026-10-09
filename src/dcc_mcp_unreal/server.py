@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import logging
 import os
-import queue
 import threading
+import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from dcc_mcp_core.server import UiControlRuntimeOptions
+
+from dcc_mcp_core import ChunkedRunner, HostUiDispatcherBase
 
 try:
     from dcc_mcp_core import DccServerBase
@@ -32,6 +34,10 @@ _DEFAULT_SERVER_NAME = "unreal-mcp"
 _DEFAULT_SERVER_VERSION = "0.1.0"
 _IS_WINDOWS = os.name == "nt"
 _SCENE_REFRESH_SECS = 1.0
+_DISPATCH_BUDGET_MS = 4.0
+# Own this identity in the package, shared by embedded startup paths and server
+# restarts. Unreal executes multiple unrelated scripts named init_unreal.py.
+_PROCESS_START_TOKEN = globals().get("_PROCESS_START_TOKEN") or uuid.uuid4().hex
 
 
 def _configure_ui_control_for_process() -> None:
@@ -88,7 +94,7 @@ def _validate_ui_control_binding(ui_control: Any, dcc_window_handle: Optional[in
         _assert_current_process_window(dcc_window_handle)
 
 
-class UnrealMainThreadDispatcher:
+class UnrealMainThreadDispatcher(HostUiDispatcherBase):
     """Dispatch in-process skill calls onto Unreal's editor tick when needed.
 
     The MCP HTTP server handles requests off the editor thread.  Unreal's
@@ -98,15 +104,17 @@ class UnrealMainThreadDispatcher:
     """
 
     def __init__(self, timeout_secs: float = 60.0, main_thread_id: Optional[int] = None) -> None:
+        super().__init__(label="Unreal Slate")
         self.timeout_secs = timeout_secs
         self.main_thread_id = main_thread_id if main_thread_id is not None else threading.get_ident()
-        self._pending = queue.Queue()
         self._tick_handle: Any = None
         self._unregister_tick: Optional[Callable[[Any], Any]] = None
-        self._http_dispatcher: Any = None
         self._scene_publisher: Optional[Callable[[], Any]] = None
         self._scene_elapsed = 0.0
         self._inside_unreal = False
+        self._close_lock = threading.RLock()
+        self._closed = threading.Event()
+        self._draining = False
 
         try:
             import unreal  # noqa: PLC0415
@@ -117,19 +125,66 @@ class UnrealMainThreadDispatcher:
         register_tick = getattr(unreal, "register_slate_post_tick_callback", None)
         unregister_tick = getattr(unreal, "unregister_slate_post_tick_callback", None)
         if callable(register_tick) and callable(unregister_tick):
+            if not self.is_host_thread():
+                raise RuntimeError("Unreal dispatcher must be created on the host thread")
             self._unregister_tick = unregister_tick
             self._tick_handle = register_tick(self._on_tick)
 
-    def attach_http_dispatcher(self, dispatcher: Any) -> None:
-        """Attach core's native queue to the same Unreal Slate tick."""
-        if not callable(getattr(dispatcher, "tick", None)) or not callable(getattr(dispatcher, "pending", None)):
-            raise TypeError("HTTP dispatcher must expose tick() and pending()")
-        if self._http_dispatcher is not None and self._http_dispatcher is not dispatcher:
-            raise RuntimeError("an HTTP dispatcher is already attached")
-        self._http_dispatcher = dispatcher
+    def poke_host_pump(self) -> None:
+        """The existing recurring Slate callback already services this queue.
+
+        Submissions never register another callback or run a recursive pump.
+        """
 
     def is_host_thread(self) -> bool:
         return threading.get_ident() == self.main_thread_id
+
+    def _require_host_pump(self) -> None:
+        if self._tick_handle is None:
+            raise RuntimeError("Unreal main-thread dispatch is unavailable")
+
+    def submit_callable(
+        self, request_id: str, task: Callable[[], Any], affinity: str = "main", timeout_ms: Optional[int] = None
+    ) -> Dict[str, Any]:
+        # Core's any-affinity fast path does not check shutdown.
+        if self.is_shutdown:
+            return {
+                "request_id": request_id,
+                "affinity": affinity,
+                "success": False,
+                "output": None,
+                "error": "Interrupted",
+            }
+        if (affinity or "main").lower() == "main":
+            self._require_host_pump()
+            if self.is_host_thread():
+                return self.run_on_any_thread(request_id, task, affinity)
+        return super().submit_callable(request_id, task, affinity, timeout_ms)
+
+    def format_timeout_error(self, request_id: str, affinity: str, timeout_sec: float) -> str:
+        self.cancel(request_id)
+        return super().format_timeout_error(request_id, affinity, timeout_sec)
+
+    def submit_async_callable(self, request_id: str, task: Callable[[], Any], **kwargs: Any) -> Dict[str, Any]:
+        if not self.is_shutdown and (kwargs.get("affinity") or "main").lower() == "main":
+            self._require_host_pump()
+        return super().submit_async_callable(request_id, task, **kwargs)
+
+    def submit_chunked_runner(self, request_id: str, runner: ChunkedRunner, **kwargs: Any) -> Dict[str, Any]:
+        if not self.is_shutdown:
+            self._require_host_pump()
+        return super().submit_chunked_runner(request_id, runner, **kwargs)
+
+    def drain_queue(self, budget_ms: float) -> Tuple[int, int]:
+        if not self.is_host_thread():
+            raise RuntimeError("Unreal queue must be drained on the host thread")
+        if self._draining:
+            raise RuntimeError("Recursive Unreal queue draining is not supported")
+        self._draining = True
+        try:
+            return super().drain_queue(budget_ms)
+        finally:
+            self._draining = False
 
     def attach_scene_publisher(self, publisher: Callable[[], Any]) -> None:
         """Run a lightweight scene publisher on the Unreal main thread."""
@@ -147,39 +202,52 @@ class UnrealMainThreadDispatcher:
         kwargs.pop("skill_name", None)
         kwargs.pop("execution", None)
 
-        if affinity != "main" or threading.get_ident() == self.main_thread_id:
+        if self.is_shutdown:
+            raise RuntimeError("Unreal main-thread dispatcher is closed")
+        if affinity not in ("main", "any"):
+            raise ValueError("Unsupported Unreal thread affinity: {}".format(affinity))
+        if affinity == "any" or self.is_host_thread():
             return func(*args, **kwargs)
 
         if not self._inside_unreal:
             # Standalone tests and non-UE interpreters intentionally run inline.
             return func(*args, **kwargs)
 
-        if self._tick_handle is None:
-            raise RuntimeError("Unreal main-thread dispatch is unavailable")
+        errors: List[Exception] = []
 
-        event = threading.Event()
-        task: Dict[str, Any] = {
-            "func": func,
-            "args": args,
-            "kwargs": kwargs,
-            "event": event,
-            "cancelled": False,
-        }
-        self._pending.put(task)
+        def invoke() -> Any:
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                errors.append(exc)
+                raise
 
         timeout = float(timeout_hint_secs or self.timeout_secs)
-        if not event.wait(timeout):
-            task["cancelled"] = True
+        result = self.submit_callable(uuid.uuid4().hex, invoke, timeout_ms=max(1, int(timeout * 1000)))
+        if errors:
+            raise errors[0]
+        if not result["success"] and str(result["error"]).startswith("Timeout"):
             raise TimeoutError("Unreal main-thread dispatch timed out after {:.1f}s".format(timeout))
-
-        if "error" in task:
-            raise task["error"]
-        return task.get("value")
+        if not result["success"]:
+            raise RuntimeError(str(result["error"]))
+        return result["output"]
 
     def _on_tick(self, _delta: float) -> None:
-        http_dispatcher = self._http_dispatcher
-        if http_dispatcher is not None and http_dispatcher.pending() > 0:
-            http_dispatcher.tick(16)
+        if not self.is_host_thread():
+            raise RuntimeError("Unreal Slate callback must run on the host thread")
+        if self._draining:
+            # Engine operations may pump Slate recursively. The outer drain
+            # owns queue advancement, scene publication and deferred cleanup.
+            return
+        if self.is_shutdown:
+            self._unregister_tick_callback()
+            return
+        # Cooperative budget: a running function cannot be pre-empted. Skills
+        # must yield bounded steps; Core advances at most one chunk per drain.
+        self.drain_queue(budget_ms=_DISPATCH_BUDGET_MS)
+        if self.is_shutdown:
+            self._unregister_tick_callback()
+            return
 
         self._scene_elapsed += max(float(_delta), 0.0)
         if self._scene_publisher is not None and self._scene_elapsed >= _SCENE_REFRESH_SECS:
@@ -189,47 +257,33 @@ class UnrealMainThreadDispatcher:
             except Exception:
                 logger.debug("Unable to publish Unreal scene context", exc_info=True)
 
-        while True:
-            try:
-                task = self._pending.get_nowait()
-            except queue.Empty:
-                return
-
-            try:
-                if not task["cancelled"]:
-                    task["value"] = task["func"](*task["args"], **task["kwargs"])
-            except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
-                task["error"] = exc
-            finally:
-                task["event"].set()
-
     def close(self) -> None:
-        if self._tick_handle is None:
+        # Wake pending workers before waiting for the host to detach Slate.
+        with self._close_lock:
+            if not self.is_shutdown:
+                self.shutdown()
+        if self.is_host_thread() and self._draining:
+            # An active step may request close. Let it return to Core before
+            # cancelling any continuation it requeues and removing Slate.
+            return
+        if self._tick_handle is None or self.is_host_thread():
             self._unregister_tick_callback()
             return
-        if threading.get_ident() == self.main_thread_id:
-            self._unregister_tick_callback()
-            return
-        try:
-            self.dispatch_callable(
-                self._unregister_tick_callback,
-                affinity="main",
-                timeout_hint_secs=self.timeout_secs,
-            )
-        except Exception:
-            logger.warning("Failed to close Unreal main-thread dispatcher", exc_info=True)
+        if not self._closed.wait(self.timeout_secs):
+            logger.warning("Unreal dispatcher is shut down; Slate callback removal awaits the host tick")
 
     def _unregister_tick_callback(self) -> None:
+        if self.queue_size():
+            self.shutdown()
         handle = self._tick_handle
+        if handle is not None and self._unregister_tick is not None:
+            if not self.is_host_thread():
+                raise RuntimeError("Unreal Slate callback must be removed on the host thread")
+            self._unregister_tick(handle)
         self._tick_handle = None
         self._scene_publisher = None
-        if handle is not None and self._unregister_tick is not None:
-            self._unregister_tick(handle)
-        http_dispatcher = self._http_dispatcher
         self._http_dispatcher = None
-        shutdown = getattr(http_dispatcher, "shutdown", None)
-        if callable(shutdown):
-            shutdown()
+        self._closed.set()
 
 
 def _make_execution_bridge(timeout_secs: float) -> Any:
@@ -298,6 +352,11 @@ class UnrealMcpServer(DccServerBase):  # type: ignore[misc]
         )
         super().__init__(options=options)
         self._last_scene_snapshot: Optional[Dict[str, Any]] = None
+
+    @property
+    def process_start_token(self) -> str:
+        """Opaque process-scoped identity, independent of Engine startup modules."""
+        return _PROCESS_START_TOKEN
 
     def start(self, *, install_atexit_hook: bool = True) -> Any:
         """Start with UI Control scoped to the current Unreal process."""
