@@ -1503,6 +1503,20 @@ def _finalize_pending(context: dict[str, Any], receipt: dict[str, Any], identity
         _remove_tree(backup)
 
 
+def _host_runtime_origin(context: dict[str, Any], field: str, module: str) -> str:
+    """Map a verified vendored module to its installed plugin location.
+
+    The installer interpreter acquires the payload; Unreal's bootstrap imports
+    its vendored python directory. Only files in the bound payload snapshot
+    may move to that exact destination. Unvendored modules retain their origin.
+    """
+    relative = f"python/{module}/__init__.py"
+    manifest = context["runtime"]["plugin_payload"]["snapshot"]["manifest"]
+    if any(item.get("path") == relative and item.get("type") == "file" for item in manifest):
+        return str(context["plugin_root"] / relative)
+    return context["runtime"][field]
+
+
 def _readiness_identity(
     args: argparse.Namespace,
     context: dict[str, Any],
@@ -1540,8 +1554,8 @@ def _readiness_identity(
         "engine_version": context["engine_version"],
         "adapter_version": __version__,
         "core_version": context["runtime"]["core_version"],
-        "adapter_origin": context["runtime"]["adapter_origin"],
-        "core_origin": context["runtime"]["core_origin"],
+        "adapter_origin": _host_runtime_origin(context, "adapter_origin", "dcc_mcp_unreal"),
+        "core_origin": _host_runtime_origin(context, "core_origin", "dcc_mcp_core"),
     }
     for field, expected_value in expected.items():
         actual = identity.get(field)
