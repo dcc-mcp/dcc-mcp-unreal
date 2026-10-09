@@ -287,6 +287,45 @@ def test_nested_drain_does_not_advance_another_chunk(slate):
     dispatcher.close()
 
 
+@pytest.mark.parametrize("close_during_step", [False, True])
+def test_nested_slate_tick_defers_work_and_owned_cleanup(slate, close_during_step):
+    dispatcher = UnrealMainThreadDispatcher()
+    effects = []
+    terminals = []
+    other = []
+    scenes = []
+    dispatcher.attach_scene_publisher(lambda: scenes.append("published"))
+
+    def step():
+        effects.append("started")
+        if close_during_step:
+            dispatcher.close()
+        slate.callbacks[0](3)
+        assert other == [] and scenes == [] and slate.removed == []
+        effects.append("returned")
+
+    runner = ChunkedRunner(iter([step]), total=1)
+    dispatcher.submit_chunked_runner("nested-tick", runner, on_complete=terminals.append)
+    dispatcher.submit_chunked_runner("other", ChunkedRunner(iter([lambda: other.append("advanced")])))
+    slate.callbacks[0](0)
+    assert effects == ["started", "returned"]
+    assert other == []
+    if close_during_step:
+        assert scenes == [] and slate.removed == ["owned-slate-tick"]
+    else:
+        assert scenes == ["published"] and slate.removed == []
+        for _ in range(3):
+            slate.callbacks[0](0)
+        assert other == ["advanced"]
+    assert len(terminals) == 1
+    if close_during_step:
+        assert terminals[0]["error"] == "Cancelled", terminals[0]
+    else:
+        assert terminals[0]["success"], terminals[0]
+    dispatcher.close()
+    assert len(terminals) == 1
+
+
 def test_missing_slate_rejects_before_enqueue(monkeypatch):
     monkeypatch.setitem(sys.modules, "unreal", SimpleNamespace())
     dispatcher = UnrealMainThreadDispatcher()

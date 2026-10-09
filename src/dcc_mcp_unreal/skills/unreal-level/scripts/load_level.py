@@ -38,14 +38,13 @@ def load_level(
             ],
         )
 
-    # Save current level first if requested
-    if save_current:
-        current_world = unreal.EditorLevelLibrary.get_editor_world()
-        if current_world is not None:
-            saved = unreal.EditorLevelLibrary.save_current_level()
-            if not saved:
-                # Non-fatal — proceed with load anyway (user may have no changes)
-                pass
+    # Do not hold an old World wrapper across the engine's map switch.
+    if save_current and not unreal.EditorLevelLibrary.save_current_level():
+        return skill_error(
+            "Current level save failed; the requested level was not loaded",
+            "EditorLevelLibrary.save_current_level did not report success",
+            prompt="Resolve the current level's save failure before retrying the map switch.",
+        )
 
     success = unreal.EditorLevelLibrary.load_level(level_path)
     if not success:
