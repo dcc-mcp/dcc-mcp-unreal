@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -134,6 +135,21 @@ def test_default_server_accepts_actual_installed_core_options(server):
     assert isinstance(instance.test_options, dcc_mcp_core.DccServerOptions)
     assert instance.test_options.port == 0
     assert getattr(instance.test_options, "ui_control", None) is None
+    assert instance.test_options.gateway.enable_failover is True
+
+
+def test_public_start_forwards_disabled_failover_to_actual_core_options(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "_server_instance", None)
+    monkeypatch.setattr(server.UnrealMcpServer, "start", lambda self: self.test_options)
+    monkeypatch.setenv("DCC_MCP_GATEWAY_PORT", "19765")
+    monkeypatch.setenv("DCC_MCP_REGISTRY_DIR", str(tmp_path / "private-registry"))
+
+    options = server.start_server(register_builtins=False, enable_gateway_failover=False)
+
+    assert isinstance(options, dcc_mcp_core.DccServerOptions)
+    assert options.gateway.enable_failover is False
+    assert options.gateway.port == 19765
+    assert options.gateway.registry_dir == str(tmp_path / "private-registry")
 
 
 def test_default_bootstrap_uses_no_new_core_type_or_native_getter(bootstrap, monkeypatch):
@@ -300,6 +316,41 @@ def test_profile_composes_actual_core_type_and_explicit_window_ceiling(bootstrap
     assert kwargs["ui_control"].window_operations == ("activate", "restore_activate")
     assert kwargs["ui_control"].recording is None
     assert kwargs["dcc_window_handle"] == 4242
+    assert kwargs["enable_gateway_failover"] is False
+
+
+def test_owned_bootstrap_reaches_actual_core_isolated_gateway_options(
+    bootstrap, server, monkeypatch, tmp_path, owned_runtime_api
+):
+    if "gateway_remote_port" not in inspect.signature(dcc_mcp_core.DccServerOptions.from_env).parameters:
+        pytest.skip("Installed Core does not expose secondary listener configuration")
+    bootstrap.pin()
+    monkeypatch.setenv("DCC_MCP_GATEWAY_PORT", "19765")
+    monkeypatch.setenv("DCC_MCP_GATEWAY_REMOTE_PORT", "0")
+    monkeypatch.setenv("DCC_MCP_REGISTRY_DIR", str(tmp_path / "private-registry"))
+    monkeypatch.setattr(server, "_server_instance", None)
+    monkeypatch.setattr(server, "_assert_current_process_window", lambda _handle: None)
+    monkeypatch.setattr(server.UnrealMcpServer, "register_builtin_actions", lambda self, **_kwargs: None)
+    started = []
+
+    def capture_options_without_starting_runtime(self):
+        started.append(self.test_options)
+        return SimpleNamespace(mcp_url=lambda: "mock://not-started")
+
+    monkeypatch.setattr(server.UnrealMcpServer, "start", capture_options_without_starting_runtime)
+    monkeypatch.setattr(dcc_mcp_unreal, "start_server", server.start_server)
+
+    bootstrap.module._start()
+
+    assert len(started) == 1
+    options = started[0]
+    assert isinstance(options, dcc_mcp_core.DccServerOptions)
+    assert options.gateway.enable_failover is False
+    assert options.gateway.port == 19765
+    assert options.gateway.remote_port == 0
+    assert options.gateway.registry_dir == str(tmp_path / "private-registry")
+    assert options.diagnostics.dcc_pid == os.getpid()
+    assert options.diagnostics.window_handle == 4242
 
 
 def test_launch_profile_pair_cannot_be_enabled_by_later_environment_changes(bootstrap):

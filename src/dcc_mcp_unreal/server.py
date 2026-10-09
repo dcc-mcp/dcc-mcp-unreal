@@ -508,6 +508,7 @@ def start_server(
     eager_load: bool = True,
     gateway_port: Optional[int] = None,
     registry_dir: Optional[str] = None,
+    enable_gateway_failover: bool = True,
     ui_control: Optional["UiControlRuntimeOptions"] = None,
     dcc_window_handle: Optional[int] = None,
 ) -> Any:
@@ -525,6 +526,7 @@ def start_server(
                 server_version=server_version,
                 gateway_port=gateway_port,
                 registry_dir=registry_dir,
+                enable_gateway_failover=enable_gateway_failover,
                 ui_control=ui_control,
                 dcc_window_handle=dcc_window_handle,
             )

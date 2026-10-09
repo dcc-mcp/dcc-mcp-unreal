@@ -362,7 +362,11 @@ def _owner_ui_control_kwargs() -> dict:
         or not re.fullmatch(r"[1-9][0-9]{0,19}", identity["window_handle"])
     ):
         raise ValueError("Editor MainFrame identity must bind the exact current process and canonical HWND")
-    return {"ui_control": options, "dcc_window_handle": int(identity["window_handle"])}
+    return {
+        "ui_control": options,
+        "dcc_window_handle": int(identity["window_handle"]),
+        "enable_gateway_failover": False,
+    }
 
 
 def _start() -> None:

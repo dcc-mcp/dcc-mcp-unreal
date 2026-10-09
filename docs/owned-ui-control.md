@@ -86,6 +86,14 @@ Reusing an active owned server requires the same option and exact HWND again;
 omitting or changing either is refused. Stop the server before rebinding.
 Calls without an owner configuration retain the default startup behavior.
 
+Owned automatic startup also passes `enable_gateway_failover=False` through
+public `start_server` to the existing Core gateway options. Default startup
+keeps its historical `True` default. The operator selects the primary port and
+private FileRegistry with `DCC_MCP_GATEWAY_PORT` and `DCC_MCP_REGISTRY_DIR` before
+launch. When Core supports secondary listener configuration,
+`DCC_MCP_GATEWAY_REMOTE_PORT=0` disables that listener; disabling failover alone
+does not disable it. Verify the actual listeners after controlled startup.
+
 Offline tests load the source files explicitly against normally installed
 Core packages. They mock host and OS boundaries. One public
 bridge test runs the installed Core `snapshot.py` through its real binder,
