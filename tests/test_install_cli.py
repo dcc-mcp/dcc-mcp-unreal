@@ -2377,7 +2377,7 @@ def test_all_public_verbs_validate_against_core_draft_schema(
 
     exit_code, result = install_cli._execute(args)
 
-    assert exit_code == expected_exit
+    assert exit_code == expected_exit, result.get("verify")
     _assert_sop_v1(result)
 
 
