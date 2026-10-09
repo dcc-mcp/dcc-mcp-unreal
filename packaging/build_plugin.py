@@ -37,13 +37,17 @@ def validate_local_core(core_root: Path) -> None:
     metadata = core_root / "pyproject.toml"
     if not metadata.is_file():
         raise FileNotFoundError("Local dcc-mcp-core checkout has no pyproject.toml: {}".format(core_root))
-    match = re.search(r'^version\s*=\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', metadata.read_text(encoding="utf-8"), re.MULTILINE)
+    match = re.search(
+        r'^version\s*=\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', metadata.read_text(encoding="utf-8"), re.MULTILINE
+    )
     if not match:
         raise ValueError("Cannot determine dcc-mcp-core version from {}".format(metadata))
     version = tuple(int(part) for part in match.group(1).split("."))
     if version < MIN_CORE_VERSION:
         required = ".".join(str(part) for part in MIN_CORE_VERSION)
-        raise ValueError("Local dcc-mcp-core {} is too old; dcc-mcp-unreal requires >= {}".format(match.group(1), required))
+        raise ValueError(
+            "Local dcc-mcp-core {} is too old; dcc-mcp-unreal requires >= {}".format(match.group(1), required)
+        )
 
 
 def copytree_clean(src: Path, dst: Path) -> None:
@@ -73,7 +77,9 @@ def rewrite_plugin_descriptor(
         plugins = data.get("Plugins")
         if not isinstance(plugins, list):
             plugins = []
-        plugins = [entry for entry in plugins if not (isinstance(entry, dict) and entry.get("Name") == "PythonScriptPlugin")]
+        plugins = [
+            entry for entry in plugins if not (isinstance(entry, dict) and entry.get("Name") == "PythonScriptPlugin")
+        ]
         plugins.append({"Name": python_plugin_name, "Enabled": True})
         data["Plugins"] = plugins
     else:
@@ -108,6 +114,7 @@ def install_python_payload(
     core_root: Path,
     use_local_core: bool,
     skip_core: bool,
+    adapter_wheel: Optional[Path] = None,
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -145,7 +152,9 @@ def install_python_payload(
                 ]
             )
 
-    run(pip_base + ["--no-deps", str(REPO_ROOT)])
+    if adapter_wheel is not None and not adapter_wheel.is_file():
+        raise FileNotFoundError("dcc-mcp-unreal wheel not found: {}".format(adapter_wheel))
+    run(pip_base + ["--no-deps", str(adapter_wheel or REPO_ROOT)])
 
 
 def read_plugin_version(plugin_dir: Path) -> str:
@@ -266,6 +275,7 @@ def build(args: argparse.Namespace) -> None:
             core_root=core_root,
             use_local_core=args.use_local_core,
             skip_core=args.skip_core,
+            adapter_wheel=Path(args.adapter_wheel).resolve() if args.adapter_wheel else None,
         )
 
     write_build_info(
@@ -302,21 +312,32 @@ def main() -> None:
     parser.add_argument("--python", default=None, help="Python executable used for pip --target")
     parser.add_argument("--core-spec", default=DEFAULT_CORE_SPEC, help="dcc-mcp-core package spec for wheel installs")
     parser.add_argument("--core-wheel", default=DEFAULT_CORE_WHEEL, help="Local dcc-mcp-core wheel to vendor")
-    parser.add_argument("--core-root", default=str(DEFAULT_CORE_ROOT), help="Local dcc-mcp-core checkout for --use-local-core")
-    parser.add_argument("--use-local-core", action="store_true", help="Install dcc-mcp-core from --core-root instead of PyPI wheels")
+    parser.add_argument("--adapter-wheel", default=None, help="Built dcc-mcp-unreal wheel to vendor instead of source")
+    parser.add_argument(
+        "--core-root", default=str(DEFAULT_CORE_ROOT), help="Local dcc-mcp-core checkout for --use-local-core"
+    )
+    parser.add_argument(
+        "--use-local-core", action="store_true", help="Install dcc-mcp-core from --core-root instead of PyPI wheels"
+    )
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR), help="Output plugin directory")
     parser.add_argument("--clean", action="store_true", help="Remove an existing output plugin directory first")
     parser.add_argument("--zip", action="store_true", help="Also create a zip archive under dist/")
-    parser.add_argument("--skip-python-deps", action="store_true", help="Only copy the uplugin files; do not pip install")
+    parser.add_argument(
+        "--skip-python-deps", action="store_true", help="Only copy the uplugin files; do not pip install"
+    )
     parser.add_argument("--skip-core", action="store_true", help="Do not install dcc-mcp-core into python/")
-    parser.add_argument("--no-native", action="store_true", help="Remove C++ module metadata and Source/ before packaging")
+    parser.add_argument(
+        "--no-native", action="store_true", help="Remove C++ module metadata and Source/ before packaging"
+    )
     parser.add_argument(
         "--python-plugin-name",
         default=os.environ.get("DCC_MCP_UNREAL_PYTHON_PLUGIN", "PythonScriptPlugin"),
         help="Unreal Python plugin dependency name; pass an empty string to omit the dependency",
     )
     parser.add_argument("--install-project", default=None, help="Copy package to <project>/Plugins/DccMcpUnreal")
-    parser.add_argument("--install-engine", action="store_true", help="Copy package to <UE_ROOT>/Engine/Plugins/DccMcpUnreal")
+    parser.add_argument(
+        "--install-engine", action="store_true", help="Copy package to <UE_ROOT>/Engine/Plugins/DccMcpUnreal"
+    )
     args = parser.parse_args()
     build(args)
 
