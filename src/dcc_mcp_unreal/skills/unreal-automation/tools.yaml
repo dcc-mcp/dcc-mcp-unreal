@@ -56,9 +56,10 @@ tools:
       on-failure: [unreal_automation__configure_plugins]
 
   - name: mcp_self_check
-    description: Validate the active MCP server, bundled skills, registered tools, and HTTP readiness without restarting the server.
+    description: Validate the active MCP server, skills, tools, and HTTP readiness; dispatch engine identity reads to the main thread.
     source_file: scripts/mcp_self_check.py
     execution: sync
+    # HTTP remains on the caller; bounded engine reads use the main dispatcher.
     affinity: any
     enforce_thread_affinity: false
     timeout_hint_secs: 30
