@@ -362,6 +362,12 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         os.environ[GENERATED_HEADER_COMPAT_ENV] = str(compat_header)
     else:
         os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
+    previous_ubt_args = os.environ.get("UBT_EXTRA_ARGS")
+    if max_parallel_actions is not None:
+        # BuildPlugin ignores -ubtargs; UBT reads this inherited env and keeps the first scalar value.
+        os.environ["UBT_EXTRA_ARGS"] = "-MaxParallelActions={}".format(max_parallel_actions) + (
+            " " + previous_ubt_args if previous_ubt_args else ""
+        )
     try:
         if uses_legacy_ubt_config:
             with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):
@@ -369,6 +375,10 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         else:
             run(cmd)
     finally:
+        if previous_ubt_args is None:
+            os.environ.pop("UBT_EXTRA_ARGS", None)
+        else:
+            os.environ["UBT_EXTRA_ARGS"] = previous_ubt_args
         if previous_compat is None:
             os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
         else:

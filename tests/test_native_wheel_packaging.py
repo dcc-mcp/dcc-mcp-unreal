@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -279,16 +281,40 @@ def test_adapter_wheel_is_pip_input_and_default_still_uses_source(tmp_path, monk
 
 
 @pytest.mark.parametrize("limit", [None, 2])
-def test_optional_parallel_actions_forward_to_uat(native_fixture, monkeypatch, limit):
+@pytest.mark.parametrize("previous", [None, '-NoUBA -MaxParallelActions=1 -Log="path with spaces"'])
+@pytest.mark.parametrize("fails", [False, True])
+def test_optional_parallel_actions_reach_ubt_and_restore_environment(
+    native_fixture, monkeypatch, limit, previous, fails
+):
     module, repo, _, engine = native_fixture
     calls = []
-    monkeypatch.setattr(module, "run", lambda command: calls.append(command))
+    if previous is None:
+        monkeypatch.delenv("UBT_EXTRA_ARGS", raising=False)
+    else:
+        monkeypatch.setenv("UBT_EXTRA_ARGS", previous)
+
+    def uat(command, **kwargs):
+        calls.append((command, kwargs.get("env", os.environ).get("UBT_EXTRA_ARGS")))
+        if fails:
+            raise subprocess.CalledProcessError(7, command)
+
+    monkeypatch.setattr(module.subprocess, "run", uat)
     monkeypatch.setattr(module, "_check_msvc_toolchain", lambda *args: None)
-    module.build_precompiled_plugin(
-        SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir="", max_parallel_actions=limit),
-        repo / "dist" / "uat",
+    args = SimpleNamespace(
+        ue_root=engine, vctoolchain_version="14.36", patched_headers_dir="", max_parallel_actions=limit
     )
-    assert any("-MaxParallelActions=2" in part for part in calls[0]) == (limit is not None)
+    if fails:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            module.build_precompiled_plugin(args, repo / "dist" / "uat")
+        assert caught.value.returncode == 7
+    else:
+        module.build_precompiled_plugin(args, repo / "dist" / "uat")
+    command, inherited = calls[0]
+    expected = previous if limit is None else "-MaxParallelActions=2" + (" " + previous if previous else "")
+    assert inherited == expected
+    assert os.environ.get("UBT_EXTRA_ARGS") == previous
+    assert "-VCToolchainVersion=14.36" in command[-1]
+    assert any("-MaxParallelActions=2" in part for part in command) == (limit is not None)
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "abc"])
