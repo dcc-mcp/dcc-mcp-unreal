@@ -3,8 +3,12 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 
 def _load_build_package_module():
@@ -125,6 +129,200 @@ def test_legacy_ubt_config_guard_wraps_only_the_uat_subprocess():
 
     assert "temporarily_clear_legacy_ubt_user_config" in inspect.getsource(module.build_precompiled_plugin)
     assert "temporarily_clear_legacy_ubt_user_config" not in inspect.getsource(module.build_python_payload)
+
+
+def test_explicit_compiler_is_required_even_when_no_toolchains_are_discovered(monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setattr(module, "_msvc_toolchain_roots", lambda: [])
+    with pytest.raises(RuntimeError, match="Requested MSVC 14.36"):
+        module._check_msvc_toolchain("14.36")
+
+
+def test_compiler_prefix_has_a_version_boundary_and_requires_cl(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    wrong = tmp_path / "14.360.10000"
+    compiler = wrong / "bin" / "Hostx64" / "x64" / "cl.exe"
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"compiler")
+    missing = tmp_path / "14.36.32532"
+    missing.mkdir()
+    monkeypatch.setattr(module, "_msvc_toolchain_roots", lambda: [wrong, missing])
+    with pytest.raises(RuntimeError):
+        module._check_msvc_toolchain("14.36")
+    compiler = missing / "bin" / "Hostx64" / "x64" / "cl.exe"
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"compiler")
+    module._check_msvc_toolchain("14.36")
+
+
+def test_vswhere_handles_custom_installations_and_editions(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    vswhere = tmp_path / "vswhere.exe"
+    vswhere.touch()
+    installation = tmp_path / "custom Enterprise"
+    tools = installation / "VC" / "Tools" / "MSVC" / "14.44.35207"
+    tools.mkdir(parents=True)
+    monkeypatch.setattr(module.shutil, "which", lambda _command: str(vswhere))
+    calls = []
+
+    def discover(command, **_kwargs):
+        calls.append(command)
+        return json.dumps([{"installationPath": str(installation)}])
+
+    monkeypatch.setattr(module.subprocess, "check_output", discover)
+    assert module._msvc_toolchain_roots() == [tools]
+    assert "-products" in calls[0] and "*" in calls[0]
+
+
+def test_ubt_selection_must_match_every_compiled_target(tmp_path):
+    module = _load_build_distributable_module()
+    log = tmp_path / "uat.log"
+    good = "Using Visual Studio 2022 14.36.32532 toolchain (C:/VS) and Windows 10.0.22621.0 SDK (C:/Kits).\n"
+    log.write_text(good, encoding="utf-8")
+    module.verify_ubt_toolchain(log, "14.36", "10.0.22621.0")
+    with pytest.raises(RuntimeError, match="selected compiler"):
+        module.verify_ubt_toolchain(log, "14.44", "")
+    log.write_text(good + good.replace("14.36", "14.44"), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="selected compiler"):
+        module.verify_ubt_toolchain(log, "14.36", "")
+    log.write_text("UAT succeeded without selection evidence", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="did not report"):
+        module.verify_ubt_toolchain(log, "14.36", "")
+
+
+def test_legacy_config_recovers_backup_after_process_death(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config = tmp_path / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    config.parent.mkdir(parents=True)
+    original = b"user settings"
+    backup = config.with_name("BuildConfiguration.xml.dcc-mcp-backup")
+    backup.write_bytes(original)
+    config.write_bytes(module.EMPTY_UBT_CONFIG)
+    with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work"):
+        assert backup.read_bytes() == original
+    assert config.read_bytes() == original
+    assert not backup.exists()
+
+
+def test_orphaned_absence_marker_never_deletes_a_later_user_configuration(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config = tmp_path / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    config.parent.mkdir(parents=True)
+    original = b"user configuration created after interrupted restore"
+    config.write_bytes(original)
+    marker = config.with_name("BuildConfiguration.xml.dcc-mcp-created")
+    marker.touch()
+    config.with_name("BuildConfiguration.xml.dcc-mcp-active").write_bytes(module.EMPTY_UBT_CONFIG)
+    with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work"):
+        assert config.with_name("BuildConfiguration.xml.dcc-mcp-backup").read_bytes() == original
+        assert not marker.exists()
+    assert config.read_bytes() == original
+
+
+def test_interrupted_restore_of_absent_original_keeps_configuration_absent(tmp_path):
+    module = _load_build_distributable_module()
+    config = tmp_path / "BuildConfiguration.xml"
+    config.with_name("BuildConfiguration.xml.dcc-mcp-created").touch()
+    config.with_name("BuildConfiguration.xml.dcc-mcp-backup").write_bytes(b"")
+    config.with_name("BuildConfiguration.xml.dcc-mcp-active").write_bytes(module.EMPTY_UBT_CONFIG)
+    # The prior restore had already removed its created configuration.
+    module.recover_legacy_ubt_user_config(config)
+    assert not config.exists()
+    assert not config.with_name("BuildConfiguration.xml.dcc-mcp-created").exists()
+    assert not config.with_name("BuildConfiguration.xml.dcc-mcp-backup").exists()
+
+
+def test_legacy_config_preserves_external_edits_and_original_backup(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config = tmp_path / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(b"original")
+    with pytest.raises(RuntimeError, match="original preserved"):
+        with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work"):
+            config.write_bytes(b"external edit")
+    assert config.read_bytes() == b"external edit"
+    assert config.with_name("BuildConfiguration.xml.dcc-mcp-backup").read_bytes() == b"original"
+
+
+def test_ubt_lock_excludes_another_process(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    script = Path(module.__file__)
+    child = (
+        "import importlib.util; "
+        "s=importlib.util.spec_from_file_location('builder', {!r}); "
+        "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+        "m.ubt_user_config_lock(timeout=0.2).__enter__()"
+    ).format(str(script))
+    with module.ubt_user_config_lock():
+        result = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Another UAT job owns" in result.stderr
+
+
+def test_toolset_family_and_compiler_patch_are_recorded_separately(tmp_path):
+    module = _load_build_distributable_module()
+    log = tmp_path / "uat.log"
+    log.write_text(
+        "Using Visual Studio 2022 14.44.35225 toolchain (C:\\Program Files (x86)\\VS\\VC\\Tools\\MSVC\\14.44.35207) "
+        "and Windows 10.0.26100.0 SDK (C:\\Kits).",
+        encoding="utf-8",
+    )
+    module.verify_ubt_toolchain(log, "14.44.35207", "10.0.26100.0")
+    with pytest.raises(RuntimeError, match="selected compiler"):
+        module.verify_ubt_toolchain(log, "14.44.35225", "")
+
+
+def test_legacy_xml_selection_is_scoped_and_removes_previously_absent_config(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config = tmp_path / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+    with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work", "14.36", "10.0.19041.0"):
+        xml = config.read_text(encoding="utf-8")
+        assert "<CompilerVersion>14.36</CompilerVersion>" in xml
+        assert "<WindowsSdkVersion>10.0.19041.0</WindowsSdkVersion>" in xml
+    assert not config.exists()
+
+
+def test_legacy_engine_compiler_pin_accepts_reported_windows_sdk_81(tmp_path):
+    module = _load_build_distributable_module()
+    log = tmp_path / "uat.log"
+    log.write_text(
+        "Using Visual Studio 2017 14.16.27048 toolchain (C:/VS/VC/Tools/MSVC/14.16.27023) "
+        "and Windows 8.1 SDK (C:/Kits).",
+        encoding="utf-8",
+    )
+    module.verify_ubt_toolchain(log, "14.16", "")
+
+
+def test_buildplugin_uses_native_ubt_argument_contract_and_restores_it(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = _make_engine(tmp_path)
+    entrypoint = engine / "Engine" / "Source" / "Programs" / "UnrealBuildTool" / "UnrealBuildTool.cs"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text('Environment.GetEnvironmentVariable("UBT_EXTRA_ARGS")', encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("UBT_EXTRA_ARGS", "-NoUBA")
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda _version: None)
+    observed = []
+
+    def fake_uat(command, **_kwargs):
+        observed.append(module.os.environ["UBT_EXTRA_ARGS"])
+        assert not any(arg.startswith("-ubtargs=") for arg in command)
+
+    monkeypatch.setattr(module, "run", fake_uat)
+    monkeypatch.setattr(module, "verify_ubt_toolchain", lambda *_args: None)
+    module.build_precompiled_plugin(
+        SimpleNamespace(
+            ue_root=engine, vctoolchain_version="14.36", sdk_version="10.0.19041.0", patched_headers_dir=""
+        ),
+        tmp_path / "uat",
+    )
+    assert "-NoUBA -CompilerVersion=14.36 -WindowsSdkVersion=10.0.19041.0" in observed[0]
+    assert module.os.environ["UBT_EXTRA_ARGS"] == "-NoUBA"
 
 
 def test_ue58_in_place_update_uses_job_scoped_generated_header_aliases(tmp_path):
