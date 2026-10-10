@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.10](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.9...v0.3.10) (2026-10-10)
+
+
+### Documentation
+
+* **readme:** refresh the generated DCC-MCP host matrix pointer ([#244](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/244)) ([afd3408](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/afd3408767c72d63db85615e89f60caad8175069))
+
 ## [0.3.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.8...v0.3.9) (2026-10-08)
 
 
