@@ -552,6 +552,12 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         os.environ[GENERATED_HEADER_COMPAT_ENV] = str(compat_header)
     else:
         os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
+    previous_ubt_args = os.environ.get("UBT_EXTRA_ARGS")
+    if max_parallel_actions is not None:
+        # BuildPlugin ignores -ubtargs; UBT reads this inherited env and keeps the first scalar value.
+        os.environ["UBT_EXTRA_ARGS"] = "-MaxParallelActions={}".format(max_parallel_actions) + (
+            " " + previous_ubt_args if previous_ubt_args else ""
+        )
     try:
         log_path = uat_dir.parent / "uat-toolchain.log"
 
