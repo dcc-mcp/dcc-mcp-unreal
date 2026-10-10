@@ -50,15 +50,14 @@ def _module_origin(module, package: str) -> str:
 
 def _install_identity(server) -> dict:
     import dcc_mcp_core  # noqa: PLC0415
-    import init_unreal  # noqa: PLC0415
 
     import dcc_mcp_unreal  # noqa: PLC0415
     import unreal  # noqa: PLC0415
 
     instance_id = str(uuid.UUID(str(getattr(server, "instance_id", ""))))
-    process_start_token = getattr(init_unreal, "PROCESS_START_TOKEN", None)
+    process_start_token = getattr(server, "process_start_token", None)
     if not isinstance(process_start_token, str) or re.fullmatch(r"[A-Fa-f0-9]{32}", process_start_token) is None:
-        raise ValueError("Unreal bootstrap process token is missing or invalid")
+        raise ValueError("Unreal server process token is missing or invalid")
     editor = Path(sys.executable).resolve()
     if not editor.is_file() or editor.stat().st_size <= 0:
         raise ValueError("Unreal editor executable identity is unavailable")
@@ -128,9 +127,21 @@ def mcp_self_check(check_http: bool = True, **kwargs) -> dict:
                 tool_count=len(tool_names),
             )
 
+        # Keep network waits on the tool's any-affinity caller. Only the
+        # bounded engine identity read belongs on the existing Slate pump.
+        dispatcher = server._main_thread_dispatcher
+        install_identity = dispatcher.dispatch_callable(_install_identity, server, affinity="main", timeout_hint_secs=5)
         mcp_url = getattr(server, "mcp_url", None)
         http_status = {}
         if check_http and mcp_url:
+            if dispatcher.is_host_thread():
+                return unreal_error(
+                    "MCP server self-check failed",
+                    "HTTP probes require an off-main-thread caller",
+                    possible_solutions=[
+                        "Call the any-affinity self-check from a worker, or use check_http=False on the main thread."
+                    ],
+                )
             base_url = str(mcp_url).rsplit("/mcp", 1)[0]
             http_status = {
                 "health": _http_get(base_url + "/health"),
@@ -147,7 +158,7 @@ def mcp_self_check(check_http: bool = True, **kwargs) -> dict:
             tool_count=len(tool_names),
             sample_tools=tool_names[:20],
             http_status=http_status,
-            install_identity=_install_identity(server),
+            install_identity=install_identity,
         )
     except Exception as exc:
         return unreal_from_exception(exc, "MCP server self-check failed")

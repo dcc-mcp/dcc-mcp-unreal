@@ -1309,7 +1309,8 @@ def test_target_runtime_rejects_shadow_module_outside_distribution(monkeypatch, 
     }
     commands: list[list[str]] = []
 
-    def capture_probe(command: list[str]) -> dict:
+    def capture_probe(command: list[str], *, output_limit: int) -> dict:
+        assert output_limit == install_cli.MAX_RUNTIME_PROBE_OUTPUT_BYTES
         commands.append(command)
         return completed
 
@@ -2376,7 +2377,7 @@ def test_all_public_verbs_validate_against_core_draft_schema(
 
     exit_code, result = install_cli._execute(args)
 
-    assert exit_code == expected_exit
+    assert exit_code == expected_exit, result.get("verify")
     _assert_sop_v1(result)
 
 

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, agent/owned-ui-runtime-20261009]
+    branches: [main, agent/owned-ui-runtime-20261009, agent/owned-editor-bootstrap-20261010]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -37,6 +37,19 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
+
+  core-dispatcher-floor:
+    name: Shared dispatcher at Core minimum
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install declared minimum Core
+        run: python -m pip install -e ".[dev]" "dcc-mcp-core==0.20.13"
+      - name: Verify shared dispatcher and bridge contract
+        run: python -m pytest tests/test_shared_dispatcher.py tests/test_server.py tests/test_skill_runner.py tests/test_self_check_threading.py tests/test_level_skills.py -q
 
   core-latest:
     # The pinned upper bound keeps the main matrix reproducible, but it also hides
@@ -94,10 +107,10 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff check
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ packaging/build_distributable.py packaging/build_plugin.py
 
       - name: Run ruff format check
-        run: ruff format --check src/ tests/
+        run: ruff format --check src/ tests/ packaging/build_distributable.py packaging/build_plugin.py
 
   lint-skills:
     name: Lint Skills
