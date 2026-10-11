@@ -16,6 +16,13 @@ from typing import List, Sequence
 
 from dcc_mcp_core.skills_helper import CancelledError, check_dcc_cancelled, skill_error, skill_success
 
+from dcc_mcp_unreal._build_resources import (
+    BuildInterruptedError,
+    child_build_environment,
+    ubt_user_config_guard,
+    ubt_user_config_path,
+)
+
 _CORE_SPEC = "dcc-mcp-core>=0.20.13,<0.21.0"
 _PLUGIN_MODES = {"native", "source", "python-only"}
 _CONFIGURATIONS = {"Development", "Shipping"}
@@ -68,14 +75,18 @@ def _run_logged(command: Sequence[str], cwd: Path, log_path: Path) -> int:
             cwd=str(cwd),
             stdout=log,
             stderr=subprocess.STDOUT,
+            env=child_build_environment(),
             **process_kwargs,
         )
         try:
             while process.poll() is None:
                 check_dcc_cancelled()
                 time.sleep(0.25)
-        except CancelledError:
-            _terminate_process_tree(process)
+        except CancelledError as exc:
+            try:
+                _terminate_process_tree(process)
+            except Exception as cleanup_error:
+                raise exc from cleanup_error
             raise
     return int(process.returncode or 0)
 
@@ -527,10 +538,16 @@ def package_project_executable_impl(
         command.append("-prereqs")
     log_path = output.parent / "{}.build.log".format(output.name)
     try:
-        return_code = _run_logged(command, project.parent, log_path)
-    except CancelledError as exc:
-        return skill_error("Project packaging was cancelled", str(exc), log_path=str(log_path))
-    except OSError as exc:
+        with ubt_user_config_guard(ubt_user_config_path(), clear=False):
+            try:
+                return_code = _run_logged(command, project.parent, log_path)
+            except CancelledError as exc:
+                raise BuildInterruptedError(str(exc), primary_error=exc) from exc
+    except BuildInterruptedError as exc:
+        if isinstance(exc.primary_error, CancelledError):
+            return skill_error("Project packaging was cancelled", str(exc.primary_error), log_path=str(log_path))
+        return skill_error("Project packaging was interrupted", str(exc), log_path=str(log_path))
+    except (OSError, RuntimeError) as exc:
         return skill_error("Project packaging could not start", str(exc), log_path=str(log_path))
     if return_code:
         return skill_error(

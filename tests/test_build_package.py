@@ -24,6 +24,8 @@ def _load_build_package_module():
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Synthetic packaging tests never access the actual user's UBT profile.
+    module.ubt_user_config_path = lambda: None
     return module
 
 
@@ -418,8 +420,14 @@ def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypat
     project.write_text("{}", encoding="utf-8")
     output = tmp_path / "Builds" / "Game-Win64"
     observed = {}
+    config = tmp_path / "BuildConfiguration.xml"
+    original = b"<Configuration>user profile</Configuration>"
+    config.write_bytes(original)
+    monkeypatch.setattr(module, "ubt_user_config_path", lambda: config)
 
     def fake_run(command, cwd, log_path):
+        assert config.read_bytes() == original
+        assert config.with_suffix(".xml.dcc-mcp-active").is_file()
         observed["command"] = command
         observed["cwd"] = cwd
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -439,6 +447,8 @@ def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypat
     )
 
     assert result["success"] is True
+    assert config.read_bytes() == original
+    assert not config.with_suffix(".xml.dcc-mcp-active").exists()
     assert observed["cwd"] == project.parent.resolve()
     assert "-clientconfig=Shipping" in observed["command"]
     assert "-package" in observed["command"]
@@ -446,6 +456,68 @@ def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypat
     assert "-prereqs" in observed["command"]
     assert "-archivedirectory={}".format(output.resolve()) in observed["command"]
     assert result["context"]["executable_paths"] == [str(output.resolve() / "Windows" / "Game.exe")]
+
+
+@pytest.fixture
+def sdk_build(tmp_path, monkeypatch):
+    module = _load_build_package_module()
+    project = tmp_path / "Game.uproject"
+    project.write_text("{}", encoding="utf-8")
+    config = tmp_path / "BuildConfiguration.xml"
+    config.write_bytes(b"<Configuration>original</Configuration>")
+    monkeypatch.setattr(module, "ubt_user_config_path", lambda: config)
+    return SimpleNamespace(
+        module=module, project=project, engine=_make_engine(tmp_path), output=tmp_path / "Build", config=config
+    )
+
+
+@pytest.mark.parametrize("suffix", [".xml.dcc-mcp-active", ".xml.dcc-mcp-backup", ".xml.dcc-mcp-new"])
+def test_sdk_project_packaging_refuses_unfinished_build_before_uat(sdk_build, monkeypatch, suffix):
+    marker = sdk_build.config.with_suffix(suffix)
+    marker.write_bytes(b"existing transaction")
+    monkeypatch.setattr(sdk_build.module, "_run_logged", lambda *args: pytest.fail("UAT must not start"))
+
+    result = sdk_build.module.package_project_executable_impl(
+        str(sdk_build.project), str(sdk_build.output), ue_root=str(sdk_build.engine)
+    )
+
+    assert result["success"] is False
+    assert "Unfinished UBT build" in result["error"]
+    assert marker.read_bytes() == b"existing transaction"
+    assert sdk_build.config.read_bytes() == b"<Configuration>original</Configuration>"
+
+
+def test_sdk_project_cancellation_preserves_marker_and_original_error(sdk_build, monkeypatch):
+    def cancel(*args):
+        raise sdk_build.module.CancelledError("cancelled by test")
+
+    monkeypatch.setattr(sdk_build.module, "_run_logged", cancel)
+
+    result = sdk_build.module.package_project_executable_impl(
+        str(sdk_build.project), str(sdk_build.output), ue_root=str(sdk_build.engine)
+    )
+
+    assert result["success"] is False
+    assert "cancelled by test" in result["error"]
+    assert sdk_build.config.with_suffix(".xml.dcc-mcp-active").is_file()
+    assert sdk_build.config.read_bytes() == b"<Configuration>original</Configuration>"
+
+
+def test_sdk_logged_child_keeps_native_uat_mutex_without_changing_parent(tmp_path, monkeypatch):
+    module = _load_build_package_module()
+    observed = {}
+
+    def fake_process(command, **kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(poll=lambda: 0, returncode=0)
+
+    monkeypatch.setenv("UEBP_UATMUTEXNOWAIT", "1")
+    parent = os.environ.copy()
+    monkeypatch.setattr(module.subprocess, "Popen", fake_process)
+
+    assert module._run_logged(["synthetic-command"], tmp_path, tmp_path / "build.log") == 0
+    assert not any(name.casefold() == "uebp_uatmutexnowait" for name in observed["env"])
+    assert os.environ.copy() == parent
 
 
 def test_package_project_executable_builds_installer_and_steam_profiles(tmp_path, monkeypatch):

@@ -80,14 +80,18 @@ class GuardProcess:
     def token(self, name, timeout=8):
         path = self.state / name
         deadline = time.monotonic() + timeout
-        while not path.exists():
-            if self.process.poll() is not None:
+        while True:
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, PermissionError):
+                # Windows may briefly deny opening a file while its rename completes.
+                pass
+            if self.process.poll() is not None and not path.exists():
                 stdout, stderr = self.process.communicate(timeout=1)
                 raise AssertionError(f"helper exited {self.process.returncode} before {name}: {stdout!r}; {stderr!r}")
             if time.monotonic() >= deadline:
                 raise AssertionError(f"helper did not publish {name}")
             time.sleep(0.01)
-        return json.loads(path.read_text(encoding="utf-8"))
 
     def release(self):
         (self.state / "release").touch()

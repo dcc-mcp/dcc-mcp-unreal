@@ -282,9 +282,9 @@ The `Ensure MSVC 14.36 toolchain` step is gated by
 
 ### Interrupted shared-runner builds
 
-The distributable builder keeps AutomationTool's native mutex enabled and holds
+The distributable builder and SDK project packager keep AutomationTool's native mutex enabled and hold
 `dcc-mcp-build.lock` beside the actual user `BuildConfiguration.xml` for the whole
-UAT invocation. Legacy builds temporarily replace this XML; modern builds take
+UAT invocation. Legacy builds temporarily replace this XML; modern builds and SDK project packaging take
 the same lock before reading it. The lock wait is bounded to 120 seconds. Other
 build tools sharing this configuration must honor the same lock.
 
