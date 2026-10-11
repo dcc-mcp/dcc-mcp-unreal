@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _load_build_package_module():
     script = (
@@ -40,6 +42,15 @@ def _load_build_plugin_module():
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def native_builder(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    config = tmp_path / "user-config" / "BuildConfiguration.xml"
+    monkeypatch.setattr(module, "ubt_user_config_path", lambda: config)
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
     return module
 
 
@@ -108,17 +119,16 @@ def test_legacy_ubt_user_config_is_restored_after_build_failure(tmp_path, monkey
         b"<Configuration><WindowsPlatform><CompilerVersion>14.36</CompilerVersion></WindowsPlatform></Configuration>"
     )
     config.write_bytes(original)
-    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr(module, "ubt_user_config_path", lambda: config)
 
-    try:
+    with pytest.raises(RuntimeError, match="simulated UAT failure"):
         with module.temporarily_clear_legacy_ubt_user_config(tmp_path / "work"):
             assert b"CompilerVersion" not in config.read_bytes()
             raise RuntimeError("simulated UAT failure")
-    except RuntimeError:
-        pass
 
     assert config.read_bytes() == original
-    assert not (tmp_path / "work" / "legacy-ubt-user-BuildConfiguration.xml.backup").exists()
+    assert not config.with_suffix(".xml.dcc-mcp-backup").exists()
+    assert not config.with_suffix(".xml.dcc-mcp-new").exists()
 
 
 def test_legacy_ubt_config_guard_wraps_only_the_uat_subprocess():
@@ -229,7 +239,7 @@ def test_ue4_native_payload_skips_incompatible_embedded_python_dependencies(tmp_
         encoding="utf-8",
     )
     observed = []
-    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: observed.append(command))
 
     module.build_python_payload(
         SimpleNamespace(
@@ -251,8 +261,8 @@ def test_ue4_native_payload_skips_incompatible_embedded_python_dependencies(tmp_
     assert "--skip-python-deps" in observed[0]
 
 
-def test_ue4_source_engine_allows_uat_to_compile(tmp_path, monkeypatch):
-    module = _load_build_distributable_module()
+def test_ue4_source_engine_allows_uat_to_compile(tmp_path, monkeypatch, native_builder):
+    module = native_builder
     engine = tmp_path / "UE_4.26"
     batch_files = engine / "Engine" / "Build" / "BatchFiles"
     batch_files.mkdir(parents=True)
@@ -267,9 +277,7 @@ def test_ue4_source_engine_allows_uat_to_compile(tmp_path, monkeypatch):
         (project_dir / "{}.csproj".format(project)).write_text("", encoding="utf-8")
 
     observed = []
-    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
-    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: observed.append(command))
 
     module.build_precompiled_plugin(
         SimpleNamespace(
@@ -283,8 +291,8 @@ def test_ue4_source_engine_allows_uat_to_compile(tmp_path, monkeypatch):
     assert "-nocompile" not in observed[0]
 
 
-def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
-    module = _load_build_distributable_module()
+def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch, native_builder):
+    module = native_builder
     engine = tmp_path / "UE_4.26"
     batch_files = engine / "Engine" / "Build" / "BatchFiles"
     batch_files.mkdir(parents=True)
@@ -302,9 +310,7 @@ def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
     automation_tool.write_bytes(b"")
 
     observed = []
-    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
-    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(module, "run", lambda command, **kwargs: observed.append(command))
 
     module.build_precompiled_plugin(
         SimpleNamespace(
@@ -318,53 +324,90 @@ def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
     assert "-nocompile" in observed[0]
 
 
-def test_uat_mutex_no_wait_opt_in_sets_the_automationtool_variable(tmp_path, monkeypatch):
-    module = _load_build_distributable_module()
-    engine = tmp_path / "UE_5.5"
+@pytest.mark.parametrize("engine_version", [(4, 26), (5, 8)], ids=["ue426", "ue58"])
+@pytest.mark.parametrize("uat_fails", [False, True], ids=["success", "failure"])
+@pytest.mark.parametrize("mutex_key", ["uebp_UATMutexNoWait", "UEBP_UATMUTEXNOWAIT"])
+def test_native_build_environment_is_child_scoped(
+    tmp_path, monkeypatch, native_builder, engine_version, uat_fails, mutex_key
+):
+    module = native_builder
+    major, minor = engine_version
+    engine = tmp_path / "UE_{}.{}".format(major, minor)
     batch_files = engine / "Engine" / "Build" / "BatchFiles"
     batch_files.mkdir(parents=True)
     (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
     (engine / "Engine" / "Build" / "Build.version").write_text(
-        json.dumps({"MajorVersion": 5, "MinorVersion": 5}),
+        json.dumps({"MajorVersion": major, "MinorVersion": minor}),
         encoding="utf-8",
     )
-
-    observed = []
-    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
-    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
-    monkeypatch.delenv("uebp_UATMutexNoWait", raising=False)
+    config = module.ubt_user_config_path()
+    config.parent.mkdir(parents=True)
+    original = b"<Configuration><CompilerVersion>14.36</CompilerVersion></Configuration>"
+    config.write_bytes(original)
+    compat = tmp_path / "generated-header-compat.h" if major == 5 else None
+    monkeypatch.setattr(module, "create_generated_header_compat", lambda ue_root, work_dir: compat)
+    patched = tmp_path / "patched-headers"
+    patched.mkdir()
+    monkeypatch.setenv(mutex_key, "1")
     monkeypatch.setenv("DCC_MCP_UAT_MUTEX_NO_WAIT", "1")
+    monkeypatch.setenv("UEBP_LOGFOLDER", "parent-log-folder")
+    monkeypatch.setenv("_CL_", "/DUSER_FLAG=1")
+    monkeypatch.setenv(module.GENERATED_HEADER_COMPAT_ENV, "parent-compat.h")
+    parent_environment = dict(os.environ)
+    output = tmp_path / "uat" / "DccMcpUnreal"
+    observed = {}
 
-    module.build_precompiled_plugin(
-        SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir=""),
-        tmp_path / "uat" / "DccMcpUnreal",
-    )
+    def fake_run(command, *, env):
+        observed["environment"] = env
+        assert config.with_name("dcc-mcp-build.lock").exists()
+        if major == 4:
+            assert b"CompilerVersion" not in config.read_bytes()
+        else:
+            assert config.read_bytes() == original
+        if uat_fails:
+            raise RuntimeError("simulated UAT failure")
 
-    assert os.environ["uebp_UATMutexNoWait"] == "1"
+    monkeypatch.setattr(module, "run", fake_run)
+    args = SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir=str(patched))
+    if uat_fails:
+        with pytest.raises(RuntimeError, match="simulated UAT failure"):
+            module.build_precompiled_plugin(args, output)
+    else:
+        module.build_precompiled_plugin(args, output)
+
+    child_environment = observed["environment"]
+    assert child_environment is not os.environ
+    assert not any(name.casefold() == "uebp_uatmutexnowait" for name in child_environment)
+    assert child_environment["_CL_"] == '/DUSER_FLAG=1 /FI"{}" /wd4668'.format(patched / "suppress_msvc_has_feature.h")
+    log_folders = {value for name, value in child_environment.items() if name.casefold() == "uebp_logfolder"}
+    assert log_folders == {str(output.parent / "uat-logs") if major == 4 else "parent-log-folder"}
+    if compat is None:
+        assert module.GENERATED_HEADER_COMPAT_ENV not in child_environment
+    else:
+        assert child_environment[module.GENERATED_HEADER_COMPAT_ENV] == str(compat)
+    assert dict(os.environ) == parent_environment
+    assert config.read_bytes() == original
+    assert not config.with_suffix(".xml.dcc-mcp-backup").exists()
+    assert not config.with_suffix(".xml.dcc-mcp-new").exists()
 
 
-def test_uat_mutex_no_wait_stays_off_without_the_opt_in(tmp_path, monkeypatch):
+def test_run_forwards_the_child_environment(tmp_path, monkeypatch):
     module = _load_build_distributable_module()
-    engine = tmp_path / "UE_5.5"
-    batch_files = engine / "Engine" / "Build" / "BatchFiles"
-    batch_files.mkdir(parents=True)
-    (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
-    (engine / "Engine" / "Build" / "Build.version").write_text(
-        json.dumps({"MajorVersion": 5, "MinorVersion": 5}),
-        encoding="utf-8",
-    )
+    observed = {}
+    child_environment = {"_CL_": "/wd4668"}
 
-    monkeypatch.setattr(module, "run", lambda command: None)
-    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
-    monkeypatch.delenv("uebp_UATMutexNoWait", raising=False)
-    monkeypatch.delenv("DCC_MCP_UAT_MUTEX_NO_WAIT", raising=False)
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed.update(kwargs)
 
-    module.build_precompiled_plugin(
-        SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir=""),
-        tmp_path / "uat" / "DccMcpUnreal",
-    )
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
 
-    assert "uebp_UATMutexNoWait" not in os.environ
+    module.run(["fake-uat", "BuildPlugin"], cwd=tmp_path, env=child_environment)
+
+    assert observed["command"] == ["fake-uat", "BuildPlugin"]
+    assert observed["cwd"] == str(tmp_path)
+    assert observed["check"] is True
+    assert observed["env"] is child_environment
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):

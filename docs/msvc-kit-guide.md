@@ -280,6 +280,23 @@ The `Ensure MSVC 14.36 toolchain` step is gated by
 
 ## Troubleshooting
 
+### Interrupted shared-runner builds
+
+The distributable builder keeps AutomationTool's native mutex enabled and holds
+`dcc-mcp-build.lock` beside the actual user `BuildConfiguration.xml` for the whole
+UAT invocation. Legacy builds temporarily replace this XML; modern builds take
+the same lock before reading it. The lock wait is bounded to 120 seconds. Other
+build tools sharing this configuration must honor the same lock.
+
+Normal build failures restore the original XML. A cancelled or forcibly
+terminated builder leaves `BuildConfiguration.xml.dcc-mcp-active` (and a
+`.xml.dcc-mcp-backup` if it replaced the configuration) and refuses later builds,
+because its UAT children may still be running. Stop those children
+and reconcile any user edits before restoring the backup to
+`BuildConfiguration.xml` and removing the activity marker and any leftover
+`.xml.dcc-mcp-new` file. Do not
+delete the persistent lock file or discard the backup to force another build.
+
 ### C4668 `__has_feature` is undefined
 
 ```

@@ -206,8 +206,15 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
     assert '"ue5.5"' in builder
     assert '"AutomationTool.exe"' in builder
     assert 'cmd.append("-nocompile")' in builder
-    assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
-    assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):" in builder
+    assert 'child_env["uebp_LogFolder"] = str(uat_log_dir)' in builder
+    assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent, clear=uses_legacy_ubt_config):" in builder
+
+
+def test_build_workflow_preserves_the_native_uat_mutex() -> None:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "DCC_MCP_UAT_MUTEX_NO_WAIT" not in text
+    assert "uebp_UATMutexNoWait" not in text
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:

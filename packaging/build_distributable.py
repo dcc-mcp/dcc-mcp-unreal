@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -38,9 +40,9 @@ GENERATED_HEADER_COMPAT_ENV = "DCC_MCP_UNREAL_GENERATED_HEADER_COMPAT"
 PACKAGE_HEADER_ID = "FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h"
 
 
-def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:
+def run(cmd: List[str], *, cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None) -> None:
     print("[build-uplugin] " + " ".join(_quote(part) for part in cmd))
-    subprocess.run(cmd, cwd=str(cwd or REPO_ROOT), check=True)
+    subprocess.run(cmd, cwd=str(cwd or REPO_ROOT), check=True, env=env)
 
 
 def _quote(value: str) -> str:
@@ -173,34 +175,112 @@ def resolve_uat(ue_root: Path) -> Path:
 
 
 @contextlib.contextmanager
-def temporarily_clear_legacy_ubt_user_config(work_dir: Path):
-    """Hide cross-version UBT settings while an old engine is running."""
-    appdata = os.environ.get("APPDATA")
-    if not appdata:
+def ubt_user_config_lock(config_path: Path, timeout: float = 120):
+    """Serialize builds that read or temporarily replace the same user config."""
+    lock_path = config_path.with_name("dcc-mcp-build.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            handle.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Timed out waiting for UBT user config lock: {}".format(lock_path)) from exc
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def ubt_user_config_path() -> Optional[Path]:
+    if os.name == "nt":
+        import ctypes
+
+        folder = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x001A, None, 0, folder) != 0 or not folder.value:
+            raise OSError("Cannot resolve the ApplicationData folder used by UnrealBuildTool")
+        appdata = folder.value
+    else:
+        appdata = os.environ.get("APPDATA")
+    return Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml" if appdata else None
+
+
+def write_durable_file(path: Path, data: bytes) -> None:
+    with path.open("xb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+@contextlib.contextmanager
+def temporarily_clear_legacy_ubt_user_config(work_dir: Path, *, clear: bool = True, timeout: float = 120):
+    """Protect user config for the entire UAT invocation, including modern readers."""
+    config_path = ubt_user_config_path()
+    if config_path is None:
         yield
         return
-
-    config_path = Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
-    if not config_path.is_file():
-        yield
-        return
-
-    backup_path = work_dir / "legacy-ubt-user-BuildConfiguration.xml.backup"
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(config_path), str(backup_path))
-    config_path.write_text(
+    backup_path = config_path.with_suffix(".xml.dcc-mcp-backup")
+    pending_path = config_path.with_suffix(".xml.dcc-mcp-new")
+    active_path = config_path.with_suffix(".xml.dcc-mcp-active")
+    empty_config = (
         '<?xml version="1.0" encoding="utf-8" ?>\n'
         '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">\n'
-        "</Configuration>\n",
-        encoding="utf-8",
-    )
-    print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
-    try:
-        yield
-    finally:
-        shutil.copy2(str(backup_path), str(config_path))
-        backup_path.unlink()
-        print("[build-uplugin] Restored UBT config: {}".format(config_path))
+        "</Configuration>\n"
+    ).encode("utf-8")
+    with ubt_user_config_lock(config_path, timeout):
+        # shortcut: hard-killed builds need manual recovery after their UAT children stop.
+        if any(path.exists() for path in (backup_path, pending_path, active_path)):
+            raise RuntimeError(
+                "Unfinished UBT build; stop its UAT children before reconciling {} and {}".format(
+                    config_path, backup_path
+                )
+            )
+        write_durable_file(active_path, b"Build in progress; stop UAT children before recovering this transaction.\n")
+        restore = True
+        try:
+            if clear and config_path.exists():
+                original = config_path.read_bytes()
+                write_durable_file(pending_path, original)
+                os.replace(pending_path, backup_path)
+                write_durable_file(pending_path, empty_config)
+                os.replace(pending_path, config_path)
+                print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
+            yield
+        except BaseException as exc:
+            # Cancellation cannot prove that AutomationTool's descendants have stopped.
+            restore = isinstance(exc, Exception)
+            raise
+        finally:
+            if restore:
+                if backup_path.exists():
+                    if not config_path.exists() or config_path.read_bytes() not in (empty_config, original):
+                        raise RuntimeError(
+                            "UBT config changed during build; original preserved at {}".format(backup_path)
+                        )
+                    os.replace(backup_path, config_path)
+                    print("[build-uplugin] Restored UBT config: {}".format(config_path))
+                pending_path.unlink(missing_ok=True)
+                active_path.unlink()
 
 
 def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
@@ -278,13 +358,11 @@ def _check_msvc_toolchain(version: str) -> None:
 
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
-    # AutomationTool guards itself with a global mutex derived from its own assembly path, so
-    # every matrix leg on one self-hosted runner contends for the same mutex. A leg that loses
-    # that race aborts with UnauthorizedAccessException unless uebp_UATMutexNoWait is set
-    # (see ProcessSingleton.cs), which makes it proceed instead. The build-uplugin matrix sets
-    # DCC_MCP_UAT_MUTEX_NO_WAIT=1 for exactly that reason.
-    if os.environ.get("DCC_MCP_UAT_MUTEX_NO_WAIT") == "1":
-        os.environ["uebp_UATMutexNoWait"] = "1"
+    child_env = os.environ.copy()
+    # Keep AutomationTool's singleton protection even if the parent opted out.
+    for name in tuple(child_env):
+        if name.casefold() == "uebp_uatmutexnowait":
+            child_env.pop(name)
     uat = resolve_uat(args.ue_root)
     cmd = [str(uat)]
     engine_tag = read_engine_tag(args.ue_root)
@@ -299,7 +377,10 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         # created there by another user, so keep all UAT writes job-scoped.
         uat_log_dir = uat_dir.parent / "uat-logs"
         uat_log_dir.mkdir(parents=True, exist_ok=True)
-        os.environ["uebp_LogFolder"] = str(uat_log_dir)
+        for name in tuple(child_env):
+            if name.casefold() == "uebp_logfolder":
+                child_env.pop(name)
+        child_env["uebp_LogFolder"] = str(uat_log_dir)
         print("[build-uplugin] UE4 UAT log folder: {}".format(uat_log_dir))
     cmd += [
         "BuildPlugin",
@@ -339,31 +420,19 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     # /FI ensures suppress_msvc_has_feature.h is included in EVERY
     # cl.exe invocation, including Shared PCH generation (which UBT's
     # -AdditionalCompilerArguments does not reach).
+    compiler_flags = "/wd4668"
     if args.patched_headers_dir:
         fi_header = Path(args.patched_headers_dir) / "suppress_msvc_has_feature.h"
         if fi_header.exists():
-            os.environ["_CL_"] = '/FI"{}" /wd4668'.format(fi_header)
-        else:
-            os.environ["_CL_"] = "/wd4668"
-    else:
-        os.environ["_CL_"] = "/wd4668"
+            compiler_flags = '/FI"{}" /wd4668'.format(fi_header)
+    child_env["_CL_"] = " ".join((child_env.get("_CL_", ""), compiler_flags)).strip()
     compat_header = create_generated_header_compat(args.ue_root, uat_dir.parent)
-    previous_compat = os.environ.get(GENERATED_HEADER_COMPAT_ENV)
     if compat_header is not None:
-        os.environ[GENERATED_HEADER_COMPAT_ENV] = str(compat_header)
+        child_env[GENERATED_HEADER_COMPAT_ENV] = str(compat_header)
     else:
-        os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
-    try:
-        if uses_legacy_ubt_config:
-            with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):
-                run(cmd)
-        else:
-            run(cmd)
-    finally:
-        if previous_compat is None:
-            os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
-        else:
-            os.environ[GENERATED_HEADER_COMPAT_ENV] = previous_compat
+        child_env.pop(GENERATED_HEADER_COMPAT_ENV, None)
+    with temporarily_clear_legacy_ubt_user_config(uat_dir.parent, clear=uses_legacy_ubt_config):
+        run(cmd, env=child_env)
 
 
 def merge_payload(payload_dir: Path, uat_dir: Path, final_plugin_dir: Path) -> None:

@@ -143,10 +143,6 @@ jobs:
 
       - name: Build distributable uplugin
         shell: pwsh
-        env:
-          # Each matrix leg packages the same plugin on the same self-hosted runner, so their
-          # AutomationTool singleton mutexes collide. Losing legs should proceed, not abort.
-          DCC_MCP_UAT_MUTEX_NO_WAIT: "1"
         run: |
           & "$env:PYTHON_HOME\python.exe" packaging/build_distributable.py `
             --ue-root "${env:UE_ROOT}" `
