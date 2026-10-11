@@ -37,13 +37,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import uuid
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "DccMcpUnreal"
-PROCESS_START_TOKEN = globals().get("PROCESS_START_TOKEN") or uuid.uuid4().hex
 
 
 def _resolve_bootstrap_runtime() -> str:
