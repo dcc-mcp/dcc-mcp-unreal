@@ -107,7 +107,8 @@ def test_prepare_official_mcp_writes_autostart_idempotently(tmp_path):
     assert "bEnableToolSearch=True" in contents
 
 
-def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
+@pytest.mark.parametrize("endpoint", [official_mcp.DEFAULT_OFFICIAL_MCP_URL, "http://127.0.0.1:18081/mcp"])
+def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch, endpoint):
     responses = iter(
         [
             _json_response(
@@ -141,6 +142,7 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
 
     result = official_mcp.bridge_official_mcp(
         "call_tool",
+        endpoint=endpoint,
         toolset_name="ActorTools",
         tool_name="get_selected_actors",
         arguments={"include_components": False},
@@ -158,6 +160,7 @@ def test_bridge_calls_tool_search_meta_tool_and_closes_session(monkeypatch):
         },
     }
     assert requests[-1].method == "DELETE"
+    assert all(request.full_url == endpoint for request in requests)
     assert timeouts == [42.0, 41.0, 40.0, 39.0, 38.0]
 
 
