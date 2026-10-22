@@ -12,6 +12,13 @@ import math
 import re
 from typing import Any, Callable
 
+from dcc_mcp_unreal.pcg_grammar import (
+    GRAMMAR_PROPERTIES,
+    GrammarCodecError,
+    observe_grammar_property,
+    prepare_grammar_property,
+)
+
 _MAX_NODES = 256
 _MAX_PINS = 64
 _MAX_EDGES = 4096
@@ -92,7 +99,7 @@ def _node(graph: Any, node_id: str) -> Any:
     raise PcgGraphError("node_id is not an observed node in this graph", reason="node_not_owned")
 
 
-def inspect_graph(graph: Any, settings_names: list | None = None) -> dict:
+def inspect_graph(graph: Any, settings_names: list | None = None, *, unreal: Any = None) -> dict:
     """Inspect complete bounded topology, identifying edges through shared pins.
 
     PCGEdge endpoint fields are not part of the documented Python surface. Read
@@ -121,13 +128,16 @@ def inspect_graph(graph: Any, settings_names: list | None = None) -> dict:
         for name in names:
             try:
                 value = _property(settings, name)
-                if type(value) not in (bool, int, float, str) or (type(value) is float and not math.isfinite(value)):
+                aggregate = observe_grammar_property(unreal, settings, name, value)
+                if aggregate is not None:
+                    row["settings"][name] = {"status": "observed", **aggregate}
+                elif type(value) not in (bool, int, float, str) or (type(value) is float and not math.isfinite(value)):
                     row["settings"][name] = {"status": "unsupported_value_type"}
                 elif isinstance(value, str) and len(value) > 4096:
                     row["settings"][name] = {"status": "value_exceeds_limit"}
                 else:
                     row["settings"][name] = {"status": "observed", "value": value}
-            except PcgGraphError:
+            except (PcgGraphError, GrammarCodecError):
                 row["settings"][name] = {"status": "unavailable"}
         for direction, property_name in (("input", "input_pins"), ("output", "output_pins")):
             labels = set()
@@ -238,7 +248,7 @@ def _mutate(
     objects: tuple = (),
 ) -> dict:
     transaction = _method(unreal, "ScopedEditorTransaction")
-    before = inspect_graph(graph, settings_names)
+    before = inspect_graph(graph, settings_names, unreal=unreal)
     # Check rollback/transaction requirements before touching any object.
     modifiers = [_method(obj, "modify") for obj in (graph, *objects)]
     with transaction("DCC-MCP PCG graph edit"):
@@ -248,7 +258,7 @@ def _mutate(
                     raise PcgGraphError("Object declined transaction recording")
             action()
             verify()
-            return inspect_graph(graph, settings_names)
+            return inspect_graph(graph, settings_names, unreal=unreal)
         except Exception as exc:
             recovery_errors = []
             try:
@@ -257,7 +267,8 @@ def _mutate(
                 recovery_errors.append(str(recovery_exc)[:500])
             try:
                 restored = (
-                    inspect_graph(graph, settings_names)["structural_fingerprint"] == before["structural_fingerprint"]
+                    inspect_graph(graph, settings_names, unreal=unreal)["structural_fingerprint"]
+                    == before["structural_fingerprint"]
                 )
             except Exception as recovery_exc:
                 restored = False
@@ -288,7 +299,7 @@ def _edit_edge(unreal: Any, graph: Any, operation: str, edge: dict) -> dict:
         or any(not isinstance(v, str) or not v for v in edge.values())
     ):
         raise PcgGraphError("edge requires exact from_node, from_pin, to_node and to_pin strings")
-    before = inspect_graph(graph)
+    before = inspect_graph(graph, unreal=unreal)
     exists = edge in before["edges"]
     source, output = _pin(graph, edge["from_node"], edge["from_pin"], "output")
     target, input_pin = _pin(graph, edge["to_node"], edge["to_pin"], "input")
@@ -307,7 +318,7 @@ def _edit_edge(unreal: Any, graph: Any, operation: str, edge: dict) -> dict:
                 raise PcgGraphError("Pin cardinality would replace an existing connection")
 
     def verify():
-        after = inspect_graph(graph)
+        after = inspect_graph(graph, unreal=unreal)
         expected_edges = (
             before["edges"] + [edge] if operation == "connect" else [e for e in before["edges"] if e != edge]
         )
@@ -315,7 +326,7 @@ def _edit_edge(unreal: Any, graph: Any, operation: str, edge: dict) -> dict:
             raise PcgGraphError("Engine edge readback differs from the requested topology")
 
     def restore():
-        present = edge in inspect_graph(graph)["edges"]
+        present = edge in inspect_graph(graph, unreal=unreal)["edges"]
         if present != exists:
             (add if exists else remove)(*args)
 
@@ -335,28 +346,40 @@ def _update(unreal: Any, graph: Any, node_id: str, position: Any, settings: Any)
     if settings is None:
         settings = {}
     if not isinstance(settings, dict) or len(settings) > 32:
-        raise PcgGraphError("settings must be an object with at most 32 scalar properties")
+        raise PcgGraphError("settings must be an object with at most 32 supported properties")
     names = list(settings)
-    inspect_graph(graph, names)  # validate names before reading/writing anything
+    before_graph = inspect_graph(graph, names, unreal=unreal)  # validate names before reading/writing anything
     native_settings = _method(node, "get_settings")()
     if settings:
         if _property(node, "settings_interface") != native_settings or _method(native_settings, "get_outer")() != node:
             raise PcgGraphError(
-                "Scalar edits require direct settings owned by this node; external or instanced settings are not edited",
+                "Settings edits require direct settings owned by this node; external or instanced settings are not edited",
                 reason="settings_not_owned",
             )
         if any(other != node and _method(other, "get_settings")() == native_settings for other in _nodes(graph)):
             raise PcgGraphError("Settings are shared by another node in this graph", reason="settings_shared")
-    old = {}
+    old, prepared, typed = {}, {}, set()
     for name, value in settings.items():
         current = _property(native_settings, name)
+        if name in GRAMMAR_PROPERTIES:
+            try:
+                old[name], prepared[name] = prepare_grammar_property(unreal, native_settings, name, value, settings)
+            except GrammarCodecError as exc:
+                raise PcgGraphError(str(exc), reason="unsupported_or_invalid_grammar_setting") from exc
+            typed.add(name)
+            continue
         if type(current) not in (bool, int, float, str) or type(value) is not type(current):
             raise PcgGraphError(
                 f"{name} requires the exact reflected scalar type; enums/objects/structs are unsupported"
             )
         if (type(value) is float and not math.isfinite(value)) or (type(value) is str and len(value) > 4096):
             raise PcgGraphError(f"{name} is nonfinite or exceeds the scalar size limit")
-        old[name] = current
+        old[name], prepared[name] = current, value
+    if "modules_info" in typed and _property(native_settings, "module_info_as_input") is True:
+        # Disabling an optional input may remove a pin. Never implicitly drop an
+        # existing edge while configuring fixed modules; use explicit disconnect.
+        if any(node_id in (edge["from_node"], edge["to_node"]) for edge in before_graph["edges"]):
+            raise PcgGraphError("Disconnect this node's edges explicitly before switching to fixed modules")
     original_position = _position(_method(node, "get_node_position")())
     target_position = original_position if position is None else _position(position)
     set_position = _method(node, "set_node_position")
@@ -364,24 +387,36 @@ def _update(unreal: Any, graph: Any, node_id: str, position: Any, settings: Any)
 
     def apply(values, coordinates):
         for name, value in values.items():
-            set_property(name, value)
+            set_property(name, value.native() if name in typed else value)
         set_position(*coordinates)
 
     def verify():
         if _position(node.get_node_position()) != target_position or any(
-            _property(native_settings, key) != value for key, value in settings.items()
+            not value.matches(_property(native_settings, key))
+            if key in typed
+            else _property(native_settings, key) != value
+            for key, value in prepared.items()
         ):
             raise PcgGraphError("Node readback differs from the requested values")
 
-    return _mutate(
+    result = _mutate(
         unreal,
         graph,
-        lambda: apply(settings, target_position),
+        lambda: apply(prepared, target_position),
         lambda: apply(old, original_position),
         verify,
         names,
         (node, native_settings) if settings else (node,),
     )
+    if typed:
+        result["grammar_validation"] = {
+            "settings_readback_verified": True,
+            "syntax_verified": False,
+            "symbol_references_verified": False,
+            "geometric_fit_verified": False,
+            "asset_mapping_verified": False,
+        }
+    return result
 
 
 def graph_operation(
@@ -451,7 +486,7 @@ def graph_operation(
                     raise PcgGraphError("Asset factory did not return a PCGGraph")
                 if _identity(graph) != path + "." + name:
                     raise PcgGraphError("Created graph identity differs from the explicit asset path")
-                result = inspect_graph(graph)
+                result = inspect_graph(graph, unreal=unreal)
         except Exception as exc:
             raise PcgGraphError(
                 str(exc)[:1000],
@@ -463,7 +498,7 @@ def graph_operation(
     else:
         graph = _load(unreal, path)
         if operation == "inspect":
-            result = inspect_graph(graph, settings_names)
+            result = inspect_graph(graph, settings_names, unreal=unreal)
         elif operation in {"connect", "disconnect"}:
             result = _edit_edge(unreal, graph, operation, edge)
         elif operation == "update_node":
@@ -508,12 +543,12 @@ def graph_operation(
             result = _mutate(unreal, graph, add_node, restore_nodes, verify_node)
             result["created_node_id"] = created[0]
         else:
-            before = inspect_graph(graph, settings_names)
+            before = inspect_graph(graph, settings_names, unreal=unreal)
             save = _method(getattr(unreal, "EditorAssetLibrary", None), "save_loaded_asset")
             try:
                 if save(graph, only_if_is_dirty=False) is not True:
                     raise PcgGraphError("Engine did not confirm save success")
-                result = inspect_graph(_load(unreal, path), settings_names)
+                result = inspect_graph(_load(unreal, path), settings_names, unreal=unreal)
                 if result["structural_fingerprint"] != before["structural_fingerprint"]:
                     raise PcgGraphError("Save/readback topology differs; inspect the asset before retrying")
             except Exception as exc:
