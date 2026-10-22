@@ -379,6 +379,17 @@ def test_skill_success_and_unknown_top_level_args(monkeypatch):
     assert host.events == []
 
 
+def test_catalog_script_runner_invokes_the_preflight_entry(monkeypatch):
+    from dcc_mcp_unreal.skill_runner import run_skill_script
+
+    monkeypatch.setitem(sys.modules, "unreal", _host())
+    script = "src/dcc_mcp_unreal/skills/unreal-pcg-pathfinding/scripts/preflight_pcg_pathfinding.py"
+    result = run_skill_script(script, _request())
+    assert result["success"] is True
+    assert result["context"]["configuration_verified"] is True
+    assert result["context"]["execution_verified"] is False
+
+
 def test_schema_examples_runtime_contract_and_affinity():
     path = Path("src/dcc_mcp_unreal/skills/unreal-pcg-pathfinding/tools.yaml")
     tool = yaml.safe_load(path.read_text())["tools"][0]
