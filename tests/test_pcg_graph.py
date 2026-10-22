@@ -533,3 +533,30 @@ def test_missing_transaction_api_prevents_mutation(host):
     with pytest.raises(PcgGraphError, match="unavailable"):
         graph_operation(host, "add_node", "/Game/Test", settings_class="PCGTestSettings")
     assert not host.assets["/Game/Test"].properties["nodes"]
+
+
+@pytest.mark.parametrize("field,value", [("to_node", "/Game/Foreign:Node"), ("to_pin", "Missing")])
+def test_disconnected_noop_still_validates_node_and_pin(host, field, value):
+    edge = edge_for(host.assets["/Game/Test"])
+    edge[field] = value
+    with pytest.raises(PcgGraphError):
+        graph_operation(host, "disconnect", "/Game/Test", edge=edge)
+    assert not host.transactions
+
+
+@pytest.mark.parametrize("field", ["direction", "cardinality"])
+def test_unknown_pin_metadata_fails_closed(host, field):
+    graph = host.assets["/Game/Test"]
+    pin = graph.input.properties["input_pins"][0]
+    if field == "direction":
+        pin.output = None
+    else:
+        pin.properties["properties"].multiple = None
+    with pytest.raises(PcgGraphError):
+        graph_operation(host, "connect", "/Game/Test", edge=edge_for(graph))
+    assert not host.transactions
+
+
+def test_empty_engine_query_is_unknown(host):
+    host.SystemLibrary = SimpleNamespace(get_engine_version=lambda: None)
+    assert graph_operation(host, "inspect", "/Game/Test")["engine"]["version"] is None
