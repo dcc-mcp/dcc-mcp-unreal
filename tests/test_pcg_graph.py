@@ -18,6 +18,10 @@ class Object:
         self.path = path
         self.properties = properties
         self.modifications = 0
+        self.outer = None
+
+    def get_outer(self):
+        return self.outer
 
     def get_path_name(self):
         return self.path
@@ -72,6 +76,8 @@ class Node(Object):
         super().__init__(graph.path + ":" + name)
         self.graph = graph
         self.settings = settings_class()
+        self.settings.outer = self
+        self.properties["settings_interface"] = self.settings
         self.position = (0, 0)
         self.properties.update(input_pins=[Pin(self, False, "In")], output_pins=[Pin(self, True, "Out")])
 
@@ -560,3 +566,34 @@ def test_unknown_pin_metadata_fails_closed(host, field):
 def test_empty_engine_query_is_unknown(host):
     host.SystemLibrary = SimpleNamespace(get_engine_version=lambda: None)
     assert graph_operation(host, "inspect", "/Game/Test")["engine"]["version"] is None
+
+
+@pytest.mark.parametrize("ownership", ["external_graph", "instance", "shared_node", "unknown_outer"])
+def test_settings_updates_cannot_mutate_external_instanced_or_shared_settings(host, ownership):
+    graph = host.assets["/Game/Test"]
+    node = graph.input
+    if ownership == "external_graph":
+        node.settings = PCGGraph("/Game/External").input.settings
+        node.properties["settings_interface"] = node.settings
+    elif ownership == "instance":
+        node.properties["settings_interface"] = Object("SettingsInstance")
+    elif ownership == "shared_node":
+        graph.output.settings = node.settings
+    else:
+        node.settings.outer = None
+    before_seed = node.settings.properties["seed"]
+    with pytest.raises(PcgGraphError) as error:
+        graph_operation(host, "update_node", "/Game/Test", node_id=node.path, settings={"seed": 20})
+    assert error.value.context["reason"] in {"settings_not_owned", "settings_shared"}
+    assert node.settings.properties["seed"] == before_seed
+    assert not host.transactions and node.settings.modifications == 0
+
+
+def test_position_only_edit_does_not_mutate_external_settings(host):
+    graph = host.assets["/Game/Test"]
+    external = PCGGraph("/Game/External").input.settings
+    graph.input.settings = external
+    graph.input.properties["settings_interface"] = Object("SettingsInstance")
+    result = graph_operation(host, "update_node", "/Game/Test", node_id=graph.input.path, position=[50, -20])
+    assert next(row for row in result["nodes"] if row["node_id"] == graph.input.path)["position"] == [50, -20]
+    assert external.properties["seed"] == 1 and external.modifications == 0

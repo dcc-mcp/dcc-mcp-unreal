@@ -24,7 +24,12 @@ nodes within their owning graph. The identity must be re-observed after a rename
 
 `add_node` requires an actually exposed `PCGSettings` subclass. `update_node`
 accepts an int32 position and at most 32 selected scalar properties whose Python
-type exactly matches the current reflected value. Unknown properties,
+type exactly matches the current reflected value. Scalar changes require the
+direct `settings_interface` object to be owned by the selected node and not
+resolved by another node in the inspected graph. External settings assets and
+settings instances fail closed; position-only edits do not change settings and
+remain available. This checks the mutated object's ownership, not every possible
+external reference to a node-owned object. Unknown properties,
 nonfinite floats, type coercions, enums, structs, arrays and object references
 are not silently accepted. Property-specific ranges remain engine-enforced,
 with exact readback and attempted recovery on rejection or normalization.

@@ -339,6 +339,14 @@ def _update(unreal: Any, graph: Any, node_id: str, position: Any, settings: Any)
     names = list(settings)
     inspect_graph(graph, names)  # validate names before reading/writing anything
     native_settings = _method(node, "get_settings")()
+    if settings:
+        if _property(node, "settings_interface") != native_settings or _method(native_settings, "get_outer")() != node:
+            raise PcgGraphError(
+                "Scalar edits require direct settings owned by this node; external or instanced settings are not edited",
+                reason="settings_not_owned",
+            )
+        if any(other != node and _method(other, "get_settings")() == native_settings for other in _nodes(graph)):
+            raise PcgGraphError("Settings are shared by another node in this graph", reason="settings_shared")
     old = {}
     for name, value in settings.items():
         current = _property(native_settings, name)

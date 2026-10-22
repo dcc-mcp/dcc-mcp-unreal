@@ -27,7 +27,10 @@ properties actually needed instead of assuming support from an engine version.
 2. Use returned `node_id` object paths, not display titles or array indexes.
    `add_node` accepts an exposed PCGSettings subclass. `update_node` accepts
    int32 positions and exact-type scalar settings; enums, arrays, structs and
-   object references are deliberately unsupported. Unknown fields fail closed.
+   object references are deliberately unsupported. Scalar writes require direct
+   node-owned settings not shared by other nodes in the inspected graph; external
+   settings/instances fail closed. Position-only edits remain available.
+   Unknown fields fail closed.
 3. `connect` / `disconnect` take `from_node`, `from_pin`, `to_node`, `to_pin`.
    Direction, graph ownership, data-type masks and connection cardinality are
    checked. Native compilation can still reject structurally compatible graphs.
