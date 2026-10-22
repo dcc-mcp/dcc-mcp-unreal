@@ -34,7 +34,12 @@ _AUTOSTART_SETTINGS = {
 
 def _process_arguments() -> list[str]:
     if os.name != "nt":
-        return list(sys.argv)
+        # Embedded Python's sys.argv is not the complete Editor command line.
+        if sys.platform == "linux":
+            contents = Path("/proc/self/cmdline").read_bytes()
+            if contents and contents.endswith(b"\0"):
+                return [os.fsdecode(argument) for argument in contents[:-1].split(b"\0")]
+        raise OSError("The complete native Editor command line cannot be verified on this platform")
 
     command_line_to_argv = ctypes.windll.shell32.CommandLineToArgvW
     command_line_to_argv.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
@@ -46,17 +51,36 @@ def _process_arguments() -> list[str]:
     local_free.argtypes = [ctypes.c_void_p]
     local_free.restype = ctypes.c_void_p
     argc = ctypes.c_int()
-    argv = command_line_to_argv(get_command_line(), ctypes.byref(argc))
+    command_line = get_command_line()
+    if not command_line:
+        raise OSError("GetCommandLineW could not read the native Editor command line")
+    argv = command_line_to_argv(command_line, ctypes.byref(argc))
     if not argv:
-        return list(sys.argv)
+        raise OSError("CommandLineToArgvW could not parse the native Editor command line")
     try:
         return [argv[index] for index in range(argc.value)]
     finally:
         local_free(ctypes.cast(argv, ctypes.c_void_p))
 
 
+def _validate_port_override(arguments: list[str], server_port: int) -> None:
+    """Accept only one unambiguous, matching documented startup override."""
+    # Keyword-only paths are not options; nested assignments remain ambiguous.
+    candidate = r"^[-/]+ModelContextProtocolPort(?=$|[=\s:])|ModelContextProtocolPort\s*="
+    overrides = [argument for argument in arguments[1:] if re.search(candidate, argument, flags=re.IGNORECASE)]
+    if not overrides:
+        return
+    match = re.fullmatch(r"-ModelContextProtocolPort=([0-9]+)", overrides[0], flags=re.IGNORECASE)
+    if len(overrides) != 1 or match is None or int(match[1]) != server_port:
+        raise ValueError(
+            "ModelContextProtocolPort startup override is invalid, ambiguous, or conflicts with server_port"
+        )
+
+
 def _resolve_project_context(arguments: Iterable[str]) -> tuple[Path, Path]:
     raw_arguments = list(arguments)
+    if not raw_arguments or not raw_arguments[0]:
+        raise ValueError("The native Editor command line is empty")
     project_arguments = [
         argument.split("=", 1)[1] for argument in raw_arguments[1:] if argument.lower().startswith("-project=")
     ]
@@ -120,13 +144,8 @@ def _read_optional_bytes(path: Path) -> bytes | None:
         return None
 
 
-def _render_autostart(original: bytes | None) -> bytes:
-    """Validate without reserializing Unreal's comments, arrays or duplicate keys.
-
-    Unreal merges repeated sections and the last scalar assignment wins. Append
-    only our four scalar overrides when necessary, retaining every original byte.
-    """
-    contents = original or b""
+def _autostart_values(contents: bytes) -> dict[str, str | None]:
+    """Read this INI's effective scalars, not the engine's merged runtime config."""
     text = contents.decode("utf-8-sig")
     parser = configparser.RawConfigParser(strict=False, delimiters=("=",), default_section="\0")
     parser.optionxform = str.casefold
@@ -151,29 +170,31 @@ def _render_autostart(original: bytes | None) -> bytes:
                     pending_commands.add(scalar)
                 else:
                     pending_commands.discard(scalar)
-    if (
-        not pending_commands
-        and parser.has_section(_MCP_SECTION.casefold())
-        and all(
-            parser.get(_MCP_SECTION.casefold(), key, fallback=None) == value
-            for key, value in _AUTOSTART_SETTINGS.items()
-        )
-    ):
+    return {
+        key: parser.get(_MCP_SECTION.casefold(), key, fallback=None) if key.casefold() not in pending_commands else None
+        for key in _AUTOSTART_SETTINGS
+    }
+
+
+def _render_autostart(original: bytes | None, server_port: int = 8000) -> bytes:
+    """Append only needed scalar overrides, retaining every original INI byte."""
+    contents = original or b""
+    settings = {**_AUTOSTART_SETTINGS, "ServerPortNumber": str(server_port)}
+    if _autostart_values(contents) == settings:
         return contents
 
+    text = contents.decode("utf-8-sig")
     newline = "\r\n" if "\r\n" in text else "\n"
     separator = newline if not text or text.endswith(("\n", "\r")) else newline * 2
-    section = newline.join([f"[{_MCP_SECTION}]", *[f"{key}={value}" for key, value in _AUTOSTART_SETTINGS.items()]])
+    section = newline.join([f"[{_MCP_SECTION}]", *[f"{key}={value}" for key, value in settings.items()]])
     return contents + (separator + section + newline).encode("utf-8")
 
 
-def _configure_autostart(config_path: Path) -> bool:
+def _configure_autostart(config_path: Path, server_port: int = 8000) -> bool:
     original = _read_optional_bytes(config_path)
-    configured = _render_autostart(original)
-    if configured == original:
-        return False
-    _atomic_write_bytes(config_path, configured)
-    return True
+    configured = _render_autostart(original, server_port)
+    _write_configuration([(config_path, original, configured)])
+    return configured != original
 
 
 def _read_plugin_descriptor(path: Path) -> dict[str, Any]:
@@ -235,18 +256,31 @@ class _ConfigurationWriteError(OSError):
         self.rollback_errors = rollback_errors
 
 
-def _write_configuration(changes: list[tuple[Path, bytes | None, bytes]]) -> None:
-    attempted: list[tuple[Path, bytes | None]] = []
+def _write_configuration(configuration: list[tuple[Path, bytes | None, bytes]]) -> dict[Path, bytes]:
+    attempted: list[tuple[Path, bytes | None, bytes]] = []
     try:
-        for path, original, configured in changes:
-            attempted.append((path, original))
-            _atomic_write_bytes(path, configured)
+        for path, original, configured in configuration:
+            if _read_optional_bytes(path) != original:
+                raise OSError(f"Configuration changed before write: {path}")
+            if configured != original:
+                attempted.append((path, original, configured))
+                _atomic_write_bytes(path, configured)
+        verified = {}
+        for path, original, configured in configuration:
+            actual = _read_optional_bytes(path)
+            if actual != configured:
+                raise OSError(f"Configuration readback mismatch: {path}")
+            verified[path] = actual
+        return verified
     except Exception as exc:
         rollback_errors = []
-        for path, original in reversed(attempted):
+        for path, original, configured in reversed(attempted):
             try:
-                if _read_optional_bytes(path) == original:
+                current = _read_optional_bytes(path)
+                if current == original:
                     continue
+                if current != configured:
+                    raise OSError("Configuration changed externally; left untouched")
                 if original is None:
                     path.unlink()
                 else:
@@ -261,6 +295,7 @@ def prepare_official_mcp(
     include_editor_toolset: bool = True,
     include_niagara_toolsets: bool = False,
     include_pcg_toolset: bool = False,
+    server_port: int = 8000,
     **kwargs,
 ) -> dict:
     """Enable official MCP plugins and autostart for the current project."""
@@ -277,11 +312,19 @@ def prepare_official_mcp(
             invalid_flags=invalid_flags,
             possible_solutions=["Use true or false, not strings, numbers, or null, for include flags."],
         )
+    if type(server_port) is not int or not 1 <= server_port <= 65535:
+        return skill_error(
+            "Official MCP server_port must be an integer from 1 to 65535",
+            "invalid_server_port",
+            possible_solutions=["Specify the intended port explicitly; automatic port selection is not supported."],
+        )
     try:
-        project_file, engine_plugins_dir = _resolve_project_context(_process_arguments())
+        arguments = _process_arguments()
+        _validate_port_override(arguments, server_port)
+        project_file, engine_plugins_dir = _resolve_project_context(arguments)
     except (OSError, ValueError) as exc:
         return skill_error(
-            "The current Unreal project could not be resolved",
+            "The current Unreal project or MCP port override could not be verified",
             str(exc),
             possible_solutions=["Launch Unreal Editor with an explicit .uproject path."],
         )
@@ -319,24 +362,24 @@ def prepare_official_mcp(
             raise ValueError("The .uproject root must be an object")
         config_path = project_file.parent / "Config" / "DefaultEditorPerProjectUserSettings.ini"
         config_original = _read_optional_bytes(config_path)
-        config_contents = _render_autostart(config_original)
+        config_contents = _render_autostart(config_original, server_port)
         required_dependencies = (
             _validate_pcg_dependencies(engine_plugins_dir, project_data) if include_pcg_toolset else []
         )
         changed_plugins = _upsert_plugins(project_data, plugin_names)
-        changes = []
+        project_contents = project_original
         if changed_plugins:
             project_contents = (json.dumps(project_data, ensure_ascii=False, indent="\t") + "\n").encode("utf-8")
-            changes.append((project_file, project_original, project_contents))
         config_changed = config_contents != config_original
-        if config_changed:
-            changes.append((config_path, config_original, config_contents))
-        _write_configuration(changes)
+        verified = _write_configuration(
+            [(project_file, project_original, project_contents), (config_path, config_original, config_contents)]
+        )
+        configured_port = int(_autostart_values(verified[config_path])["ServerPortNumber"])
     except _ConfigurationWriteError as exc:
         return skill_error(
             "Failed to configure Epic Unreal MCP; rollback is incomplete"
             if exc.rollback_errors
-            else "Failed to configure Epic Unreal MCP; original files were restored",
+            else "Failed to configure Epic Unreal MCP; no owned writes remain",
             "configuration_rollback_failed" if exc.rollback_errors else "configuration_write_failed",
             details=str(exc),
             rollback_complete=not exc.rollback_errors,
@@ -353,18 +396,19 @@ def prepare_official_mcp(
             ],
         )
 
-    restart_required = bool(changed_plugins)
+    restart_required = bool(changed_plugins) or config_changed
+    configured_endpoint = f"http://127.0.0.1:{configured_port}/mcp"
     message = (
-        "Epic Unreal MCP project configuration is ready; restart Unreal Editor to load newly enabled plugins."
+        "Epic Unreal MCP project configuration is ready; restart Unreal Editor to apply plugin or settings changes."
         if restart_required
         else "Epic Unreal MCP project configuration is ready."
     )
     return skill_success(
         message,
         prompt=(
-            "Restart Unreal Editor, verify the DCC MCP instance, then call official_mcp_bridge with operation=status."
-            if restart_required
-            else "Call official_mcp_bridge with operation=status to verify the live endpoint."
+            "Verify the isolated project's ownership, intended port availability and effective loopback binding before "
+            "any authorized restart. Then verify the DCC MCP instance and call official_mcp_bridge with "
+            f"operation=status, endpoint={configured_endpoint}. Stop on conflicts or unknown ownership/binding."
         ),
         project_file=str(project_file),
         config_file=str(config_path),
@@ -372,6 +416,9 @@ def prepare_official_mcp(
         changed_plugins=changed_plugins,
         required_dependencies=required_dependencies,
         config_changed=config_changed,
+        configured_port=configured_port,
+        configured_endpoint=configured_endpoint,
+        configuration_verified=True,
         restart_required=restart_required,
         runtime_verified=False,
     )

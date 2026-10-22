@@ -12,6 +12,12 @@ tools:
     input_schema:
       type: object
       properties:
+        server_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+          description: Explicit official MCP port to configure. No automatic selection or fallback. File readback is not live listener verification; use the returned configured_endpoint with the bridge after independent ownership and loopback checks.
         include_editor_toolset:
           type: boolean
           default: true
@@ -34,6 +40,9 @@ tools:
       - arguments:
           include_pcg_toolset: true
         note: Also enable installed official PCG tools; fails without writes if a required dependency is missing, invalid, or explicitly disabled.
+      - arguments:
+          server_port: 18081
+        note: Configure an explicitly selected port for an authorized isolated project; this does not check availability or start a server.
   - name: official_mcp_bridge
     description: Discover or call Epic Unreal MCP tools through its local Streamable HTTP endpoint.
     source_file: scripts/official_mcp_bridge.py
@@ -72,6 +81,10 @@ tools:
       - arguments:
           operation: status
         note: Confirm that Epic Unreal MCP is running before discovery.
+      - arguments:
+          operation: status
+          endpoint: http://127.0.0.1:18081/mcp
+        note: Use the exact configured_endpoint after verifying the intended instance and actual loopback listener; this URL does not change the listener's port or bind address.
       - arguments:
           operation: describe_toolset
           toolset_name: ActorTools
