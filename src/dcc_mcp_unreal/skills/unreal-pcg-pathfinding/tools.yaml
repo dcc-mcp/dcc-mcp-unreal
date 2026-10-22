@@ -1,0 +1,152 @@
+tools:
+  - name: preflight_pcg_pathfinding
+    description: Validate bounded PCG point-cloud descriptors and read back transient native Pathfinding settings and pins; does not compute a path, materialize PCGData, or edit/save assets.
+    source_file: scripts/preflight_pcg_pathfinding.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 30
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [point_cloud, start, goal, settings]
+      additionalProperties: false
+      definitions:
+        vector:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: number
+            minimum: -1000000000
+            maximum: 1000000000
+        attribute:
+          type: string
+          pattern: ^[A-Za-z_][A-Za-z0-9_]{0,127}$
+        endpoint:
+          oneOf:
+            - type: object
+              required: [location]
+              additionalProperties: false
+              properties:
+                location:
+                  $ref: '#/definitions/vector'
+            - type: object
+              required: [attribute, values]
+              additionalProperties: false
+              properties:
+                attribute:
+                  $ref: '#/definitions/attribute'
+                values:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items:
+                    $ref: '#/definitions/vector'
+      properties:
+        point_cloud:
+          type: array
+          maxItems: 4096
+          description: Validated JSON input descriptors only, not materialized native PCGData. Positions share one coordinate frame in centimeters.
+          items:
+            type: object
+            required: [position]
+            additionalProperties: false
+            properties:
+              position:
+                $ref: '#/definitions/vector'
+              attributes:
+                type: object
+                maxProperties: 16
+                propertyNames:
+                  $ref: '#/definitions/attribute'
+                additionalProperties:
+                  type: number
+                  minimum: -1000000000000
+                  maximum: 1000000000000
+        start:
+          $ref: '#/definitions/endpoint'
+        goal:
+          $ref: '#/definitions/endpoint'
+        settings:
+          type: object
+          required: [search_distance]
+          additionalProperties: false
+          properties:
+            search_distance:
+              type: number
+              exclusiveMinimum: 0
+              maximum: 1000000000
+            cost_function_mode:
+              type: string
+              enum: [DISTANCE, FITNESS_SCORE, COST_MULTIPLIER]
+              default: DISTANCE
+            cost_attribute:
+              $ref: '#/definitions/attribute'
+            heuristic_weight:
+              type: number
+              minimum: 0
+              maximum: 100
+              default: 1
+            maximum_fitness_penalty_factor:
+              type: number
+              minimum: 0
+              maximum: 1000000
+              default: 1
+            accept_partial_path:
+              type: boolean
+              default: false
+            copy_originating_points:
+              type: boolean
+              default: true
+            output_as_spline:
+              type: boolean
+              default: false
+            spline_mode:
+              type: string
+              enum: [CURVE, LINEAR]
+              description: Requires output_as_spline. Actual enum availability is checked on the host.
+            goal_mapping_mode:
+              type: string
+              pattern: ^[A-Z][A-Z0-9_]{0,63}$
+              description: Exact exposed host enum member; requires attribute-driven start and goal inputs and actual native property support.
+            seed:
+              type: integer
+              minimum: -2147483648
+              maximum: 2147483647
+              default: 0
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          point_cloud:
+            - position: [0, 0, 0]
+            - position: [100, 0, 0]
+            - position: [200, 0, 0]
+          start:
+            location: [0, 0, 0]
+          goal:
+            location: [200, 0, 0]
+          settings:
+            search_distance: 110
+        note: Verify native configuration and actual pins only; this example does not solve or save a path.
+      - arguments:
+          point_cloud:
+            - position: [0, 0, 0]
+              attributes:
+                Fitness: 0.8
+          start:
+            attribute: StartPosition
+            values: [[0, 0, 0]]
+          goal:
+            attribute: GoalPosition
+            values: [[100, 0, 0]]
+          settings:
+            search_distance: 110
+            cost_function_mode: FITNESS_SCORE
+            cost_attribute: Fitness
+            accept_partial_path: true
+        note: Validate named selectors and intended endpoint data without claiming a partial or complete result.
