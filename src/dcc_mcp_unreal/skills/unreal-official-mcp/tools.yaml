@@ -18,6 +18,10 @@ tools:
         include_niagara_toolsets:
           type: boolean
           default: false
+        include_pcg_toolset:
+          type: boolean
+          default: false
+          description: Opt in to installed PCGToolset after validating its descriptor and required dependencies. Does not start the server or verify loaded tools.
     output_schema:
       type: object
       additionalProperties: true
@@ -27,6 +31,9 @@ tools:
       - arguments:
           include_niagara_toolsets: true
         note: Also enable official Niagara tools for a Niagara authoring task.
+      - arguments:
+          include_pcg_toolset: true
+        note: Also enable installed official PCG tools; fails without writes if a required dependency is missing, invalid, or explicitly disabled.
   - name: official_mcp_bridge
     description: Discover or call Epic Unreal MCP tools through its local Streamable HTTP endpoint.
     source_file: scripts/official_mcp_bridge.py

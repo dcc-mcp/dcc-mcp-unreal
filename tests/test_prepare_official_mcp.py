@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from test_official_mcp import _load_prepare_module
+
+
+@pytest.fixture
+def setup_project(tmp_path, monkeypatch):
+    prepare = _load_prepare_module()
+    engine = tmp_path / "Engine"
+    plugins = engine / "Plugins"
+    project = tmp_path / "Project" / "Example.uproject"
+    project.parent.mkdir()
+    project.write_bytes(b'\xef\xbb\xbf{\r\n "FileVersion": 3, "Description": "Keep me", "Plugins": []\r\n}\r\n')
+    config = project.parent / "Config" / "DefaultEditorPerProjectUserSettings.ini"
+    monkeypatch.setattr(
+        prepare, "_process_arguments", lambda: [str(engine / "Binaries" / "UnrealEditor"), str(project)]
+    )
+    for relative in prepare._PLUGIN_RELATIVE_PATHS.values():
+        path = plugins / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = {"FileVersion": 3}
+        if path.stem == "PCGToolset":
+            descriptor["Plugins"] = [{"Name": "PCG", "Enabled": True}]
+        path.write_text(json.dumps(descriptor), encoding="utf-8")
+    pcg = plugins / "PCG" / "PCG.uplugin"
+    pcg.parent.mkdir()
+    pcg.write_text('{"FileVersion": 3, "EnabledByDefault": false}', encoding="utf-8")
+    return prepare, project, config, plugins
+
+
+def _assert_no_writes(prepare, monkeypatch):
+    def unexpected_write(*args):
+        pytest.fail("Preflight failure must not attempt a write")
+
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", unexpected_write)
+
+
+@pytest.mark.parametrize("flag", ["include_editor_toolset", "include_niagara_toolsets", "include_pcg_toolset"])
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, [], {}])
+def test_non_boolean_flags_block_before_any_writes(setup_project, monkeypatch, flag, value):
+    prepare, project, config, plugins = setup_project
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(**{flag: value})
+    assert result["success"] is False
+    assert result["error"] == "invalid_include_flags"
+    assert result["context"]["invalid_flags"] == [flag]
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+@pytest.mark.parametrize("missing_pcg", [False, True])
+def test_pcg_is_opt_in_and_not_validated_by_default(setup_project, missing_pcg):
+    prepare, project, config, plugins = setup_project
+    pcg_toolset = plugins / prepare._PLUGIN_RELATIVE_PATHS["PCGToolset"]
+    if missing_pcg:
+        pcg_toolset.unlink()
+        (plugins / "PCG" / "PCG.uplugin").unlink()
+    else:
+        pcg_toolset.write_text("invalid", encoding="utf-8")
+    result = prepare.prepare_official_mcp()
+    assert result["success"] is True
+    assert result["context"]["enabled_plugins"] == ["ModelContextProtocol", "EditorToolset"]
+    assert result["context"]["required_dependencies"] == []
+    assert result["context"]["runtime_verified"] is False
+    assert "PCGToolset" not in project.read_text(encoding="utf-8")
+    assert config.is_file()
+
+
+@pytest.mark.parametrize("legacy_pcg", [False, True])
+def test_pcg_opt_in_validates_installed_dependency_and_is_idempotent(setup_project, legacy_pcg, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    if legacy_pcg:
+        legacy = plugins / "Experimental" / "PCG" / "PCG.uplugin"
+        legacy.parent.mkdir()
+        (plugins / "PCG" / "PCG.uplugin").rename(legacy)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is True
+    assert result["context"]["enabled_plugins"] == ["ModelContextProtocol", "EditorToolset", "PCGToolset"]
+    assert result["context"]["required_dependencies"] == ["PCG"]
+    assert result["context"]["restart_required"] is True
+    assert result["context"]["runtime_verified"] is False
+    data = json.loads(project.read_bytes())
+    assert data["Description"] == "Keep me"
+    assert "PCG" not in [entry["Name"] for entry in data["Plugins"]]
+    original_project, original_config = project.read_bytes(), config.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    repeated = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert repeated["success"] is True
+    assert repeated["context"]["changed_plugins"] == []
+    assert repeated["context"]["config_changed"] is False
+    assert repeated["context"]["restart_required"] is False
+    assert project.read_bytes() == original_project
+    assert config.read_bytes() == original_config
+
+
+@pytest.mark.parametrize("missing", ["ModelContextProtocol", "EditorToolset", "PCGToolset", "PCG"])
+def test_missing_descriptor_blocks_before_any_writes(setup_project, missing, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    relative = Path("PCG/PCG.uplugin") if missing == "PCG" else prepare._PLUGIN_RELATIVE_PATHS[missing]
+    (plugins / relative).unlink()
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert missing in result["error"]
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+@pytest.mark.parametrize("target", ["PCGToolset", "PCG"])
+@pytest.mark.parametrize("contents", [b"broken json", b"[]", b"{}"])
+def test_malformed_pcg_descriptors_block_without_writes(setup_project, target, contents, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    relative = Path("PCG/PCG.uplugin") if target == "PCG" else prepare._PLUGIN_RELATIVE_PATHS[target]
+    (plugins / relative).write_bytes(contents)
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
+    assert project.read_bytes() == original
+    assert not config.exists()
+
+
+@pytest.mark.parametrize(
+    "references",
+    [
+        [],
+        [{"Name": "PCG", "Enabled": False}],
+        [{"Name": "PCG", "Enabled": True, "Optional": True}],
+        [{"Name": "PCG"}],
+        [{"Name": "PCG", "Enabled": "true"}],
+        [{"Name": "PCG", "Enabled": True}, {"Name": "UnknownDependency", "Enabled": True}],
+        {},
+    ],
+)
+def test_invalid_or_unverifiable_direct_dependencies_block(setup_project, references, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    descriptor = plugins / prepare._PLUGIN_RELATIVE_PATHS["PCGToolset"]
+    descriptor.write_text(json.dumps({"FileVersion": 3, "Plugins": references}), encoding="utf-8")
+    _assert_no_writes(prepare, monkeypatch)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
+    assert not config.exists()
+
+
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        {"Name": "UnknownRequiredPlugin", "Enabled": True, "Optional": "false"},
+        {"Name": "UnknownRequiredPlugin", "Enabled": True, "Optional": None},
+        {"Name": "UnknownRequiredPlugin", "Enabled": True, "Optional": 0},
+        {"Name": "UnknownRequiredPlugin", "Enabled": True, "Optional": 1},
+        {"Name": "", "Enabled": True, "Optional": True},
+        {"Name": "  ", "Enabled": True, "Optional": True},
+    ],
+)
+def test_malformed_optional_dependencies_block_before_any_writes(setup_project, dependency, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    descriptor = plugins / prepare._PLUGIN_RELATIVE_PATHS["PCGToolset"]
+    references = [{"Name": "PCG", "Enabled": True}, dependency]
+    descriptor.write_text(json.dumps({"FileVersion": 3, "Plugins": references}), encoding="utf-8")
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert "invalid plugin dependency declarations" in result["error"]
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+def test_explicitly_disabled_pcg_is_not_silently_reenabled(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    project.write_text('{"Plugins":[{"Name":"PCG","Enabled":false}]}', encoding="utf-8")
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert "PCG is explicitly disabled" in result["error"]
+    assert project.read_bytes() == original
+    assert not config.exists()
+
+
+def test_ambiguous_installed_pcg_descriptors_block(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    duplicate = plugins / "Experimental" / "PCG" / "PCG.uplugin"
+    duplicate.parent.mkdir()
+    duplicate.write_text('{"FileVersion":3}', encoding="utf-8")
+    _assert_no_writes(prepare, monkeypatch)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
+    assert not config.exists()
+
+
+@pytest.mark.parametrize("project_contents", [b"{ broken", b"[]", b'{"Plugins": {}}', b"\xff"])
+def test_invalid_project_blocks_without_writes(setup_project, project_contents, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    project.write_bytes(project_contents)
+    _assert_no_writes(prepare, monkeypatch)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
+    assert project.read_bytes() == project_contents
+    assert not config.parent.exists()
+
+
+@pytest.mark.parametrize("config_contents", [b"key=value\n", b"[Unclosed\n", b"[Valid]\nbroken\n", b"\xff"])
+def test_malformed_ini_prevents_project_write(setup_project, config_contents, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    config.parent.mkdir()
+    config.write_bytes(config_contents)
+    project_original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
+    assert project.read_bytes() == project_original
+    assert config.read_bytes() == config_contents
+
+
+def test_unrelated_ini_bytes_comments_duplicates_and_arrays_are_preserved(setup_project):
+    prepare, project, config, plugins = setup_project
+    config.parent.mkdir()
+    original = (
+        b"\xef\xbb\xbf; Keep this comment and CRLF\r\n[Other]\r\n"
+        b"Repeated=one\r\nRepeated=two\r\n+Array=one\r\n+Array=two\r\n"
+        b"-Array=gone\r\n!Array=ClearArray\r\n.Array=duplicate\r\n"
+        b"[/Script/ModelContextProtocolEngine.ModelContextProtocolSettings]\r\n"
+        b"; Keep MCP comment\r\nServerPortNumber=42\r\nUnrelated=keep\r\n"
+        b"[Other]\r\nPreserveNoFinalNewline=yes"
+    )
+    config.write_bytes(original)
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is True
+    updated = config.read_bytes()
+    assert updated.startswith(original)
+    suffix = updated[len(original) :]
+    assert b"ServerPortNumber=8000\r\n" in suffix
+    assert suffix.count(b"\n") == suffix.count(b"\r\n")
+    assert prepare._configure_autostart(config) is False
+    assert config.read_bytes() == updated
+
+
+def test_ini_section_case_and_default_section_follow_unreal_semantics(setup_project):
+    prepare, project, config, plugins = setup_project
+    desired = "\n".join(f"{key}={value}" for key, value in prepare._AUTOSTART_SETTINGS.items())
+    inherited = f"[DEFAULT]\n{desired}\n[{prepare._MCP_SECTION}]\n".encode()
+    assert prepare._render_autostart(inherited) != inherited
+    overrides = f"[{prepare._MCP_SECTION}]\n{desired}\n[{prepare._MCP_SECTION.lower()}]\nServerPortNumber=42\n".encode()
+    corrected = prepare._render_autostart(overrides)
+    assert corrected != overrides
+    assert prepare._render_autostart(corrected) == corrected
+
+
+@pytest.mark.parametrize("command", ["+", "-", ".", "!"])
+def test_later_target_ini_commands_cannot_report_false_ready(setup_project, command):
+    prepare, project, config, plugins = setup_project
+    configured = prepare._render_autostart(None)
+    original = configured + f"{command}ServerPortNumber=8000\n".encode()
+    corrected = prepare._render_autostart(original)
+    assert corrected.startswith(original)
+    assert corrected != original
+    assert prepare._render_autostart(corrected) == corrected
+
+
+@pytest.mark.parametrize("existing_config", [False, True])
+@pytest.mark.parametrize("fail_after_replace", [False, True])
+def test_second_write_failure_restores_exact_originals_or_absence(
+    setup_project, monkeypatch, existing_config, fail_after_replace
+):
+    prepare, project, config, plugins = setup_project
+    config_original = b"\xef\xbb\xbf; unchanged\r\n[Other]\r\nRepeated=1\r\nRepeated=2\r\n"
+    if existing_config:
+        config.parent.mkdir()
+        config.write_bytes(config_original)
+    project_original = project.read_bytes()
+    actual_write = prepare._atomic_write_bytes
+    attempts = []
+
+    def fail_second_write(path, contents):
+        attempts.append(path)
+        if len(attempts) == 2:
+            if fail_after_replace:
+                actual_write(path, contents)
+            raise OSError("Injected second-write failure")
+        actual_write(path, contents)
+
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", fail_second_write)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert result["error"] == "configuration_write_failed"
+    assert result["context"]["rollback_complete"] is True
+    assert result["context"]["rollback_errors"] == []
+    assert project.read_bytes() == project_original
+    assert config.read_bytes() == config_original if existing_config else not config.exists()
+
+
+def test_partial_rollback_is_reported_with_affected_path(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    actual_write = prepare._atomic_write_bytes
+    attempts = []
+
+    def fail_second_write_and_rollback(path, contents):
+        attempts.append(path)
+        if len(attempts) > 1:
+            raise OSError("Injected write failure")
+        actual_write(path, contents)
+
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", fail_second_write_and_rollback)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert result["error"] == "configuration_rollback_failed"
+    assert "rollback is incomplete" in result["message"]
+    assert result["context"]["rollback_complete"] is False
+    assert result["context"]["rollback_errors"] == [{"path": str(project), "error": "Injected write failure"}]
+    assert not config.exists()
+
+
+def test_atomic_replace_failure_keeps_original_and_removes_temporary_file(tmp_path, monkeypatch):
+    prepare = _load_prepare_module()
+    target = tmp_path / "test.ini"
+    target.write_bytes(b"exact original")
+
+    def fail_replace(source, destination):
+        raise OSError("Injected atomic replace failure")
+
+    monkeypatch.setattr(prepare.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="atomic replace"):
+        prepare._atomic_write_bytes(target, b"replacement")
+    assert target.read_bytes() == b"exact original"
+    assert list(tmp_path.iterdir()) == [target]
