@@ -174,6 +174,10 @@ def test_unknown_native_command_line_blocks_before_any_writes(setup_project, mon
     result = prepare.prepare_official_mcp(server_port=18081)
     assert result["success"] is False
     assert result["error"] == "Native command line unavailable"
+    guidance = " ".join(result["context"]["possible_solutions"])
+    assert ".uproject" in guidance
+    assert "server_port" in guidance and "-ModelContextProtocolPort" in guidance
+    assert "unreadable" in guidance and "platform" in guidance
     assert not config.parent.exists()
 
 
@@ -271,23 +275,38 @@ def test_configuration_readback_failure_preserves_external_changes(
         assert result["context"]["rollback_complete"] is True
 
 
-def test_existing_external_change_before_write_is_not_overwritten(setup_project, monkeypatch):
+@pytest.mark.parametrize("timing", ["before", "during"])
+def test_external_change_before_or_during_transaction_is_not_overwritten(setup_project, monkeypatch, timing):
     prepare, project, config, plugins = setup_project
     original = project.read_bytes()
     write_configuration = prepare._write_configuration
+    actual_write = prepare._atomic_write_bytes
     external = b"; External change before transaction\n"
+    writes = []
 
-    def concurrent_write(configuration):
+    def external_write():
         config.parent.mkdir()
         config.write_bytes(external)
+
+    def concurrent_write(configuration):
+        if timing == "before":
+            external_write()
         return write_configuration(configuration)
 
+    def write(path, contents):
+        writes.append(path)
+        actual_write(path, contents)
+        if timing == "during" and len(writes) == 1:
+            external_write()
+
     monkeypatch.setattr(prepare, "_write_configuration", concurrent_write)
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", write)
     result = prepare.prepare_official_mcp(server_port=18081)
     assert result["success"] is False
     assert "changed before write" in result["context"]["details"]
     assert project.read_bytes() == original
     assert config.read_bytes() == external
+    assert writes == ([] if timing == "before" else [project, project])
 
 
 def test_unchanged_configuration_is_also_read_back(setup_project, monkeypatch):
@@ -309,6 +328,23 @@ def test_unchanged_configuration_is_also_read_back(setup_project, monkeypatch):
     result = prepare.prepare_official_mcp(server_port=18081)
     assert result["success"] is False
     assert "unchanged-file readback" in result["context"]["details"]
+
+
+def test_batch_preflight_read_error_performs_no_writes(tmp_path, monkeypatch):
+    prepare = _load_prepare_module()
+    project, config = tmp_path / "project", tmp_path / "config"
+    writes = []
+
+    def read(path):
+        if path == config:
+            raise OSError("Unreadable configuration")
+        return b"original"
+
+    monkeypatch.setattr(prepare, "_read_optional_bytes", read)
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", lambda *args: writes.append(args))
+    with pytest.raises(prepare._ConfigurationWriteError, match="Unreadable configuration"):
+        prepare._write_configuration([(project, b"original", b"changed"), (config, b"original", b"changed")])
+    assert writes == []
 
 
 @pytest.fixture
@@ -579,6 +615,31 @@ def test_invalid_project_blocks_without_writes(setup_project, project_contents, 
     assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is False
     assert project.read_bytes() == project_contents
     assert not config.parent.exists()
+
+
+@pytest.mark.parametrize(
+    ("config_contents", "error_type", "line_numbers"),
+    [
+        (b"FAKE_OPTION_TEST_ONLY=FAKE_SECRET_TEST_ONLY\n", "MissingSectionHeaderError", [1]),
+        (b"[FAKE_SECTION_TEST_ONLY]\nFAKE_SECRET_TEST_ONLY\nOTHER_FAKE_SECRET_TEST_ONLY\n", "ParsingError", [2, 3]),
+    ],
+)
+def test_ini_parse_error_does_not_echo_unrelated_configuration(
+    setup_project, monkeypatch, config_contents, error_type, line_numbers
+):
+    prepare, project, config, plugins = setup_project
+    config.parent.mkdir()
+    config.write_bytes(config_contents)
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp()
+    assert result["success"] is False
+    assert "FAKE_" not in json.dumps(result)
+    assert result["error"] == "invalid_editor_ini"
+    assert result["context"]["error_type"] == error_type
+    assert result["context"]["line_numbers"] == line_numbers
+    assert project.read_bytes() == original
+    assert config.read_bytes() == config_contents
 
 
 @pytest.mark.parametrize("config_contents", [b"key=value\n", b"[Unclosed\n", b"[Valid]\nbroken\n", b"\xff"])

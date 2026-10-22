@@ -259,10 +259,13 @@ class _ConfigurationWriteError(OSError):
 def _write_configuration(configuration: list[tuple[Path, bytes | None, bytes]]) -> dict[Path, bytes]:
     attempted: list[tuple[Path, bytes | None, bytes]] = []
     try:
-        for path, original, configured in configuration:
+        for path, original, _ in configuration:
             if _read_optional_bytes(path) != original:
                 raise OSError(f"Configuration changed before write: {path}")
+        for path, original, configured in configuration:
             if configured != original:
+                if _read_optional_bytes(path) != original:
+                    raise OSError(f"Configuration changed before write: {path}")
                 attempted.append((path, original, configured))
                 _atomic_write_bytes(path, configured)
         verified = {}
@@ -326,7 +329,13 @@ def prepare_official_mcp(
         return skill_error(
             "The current Unreal project or MCP port override could not be verified",
             str(exc),
-            possible_solutions=["Launch Unreal Editor with an explicit .uproject path."],
+            possible_solutions=[
+                "Launch Unreal Editor with a resolvable explicit .uproject path.",
+                "Use a single valid -ModelContextProtocolPort matching server_port, or remove that override only "
+                "as part of an authorized restart; never silently select another port.",
+                "Setup cannot run when the native command line is unreadable or this platform has no supported "
+                "native reader. Do not retry unchanged inputs or bypass denied access.",
+            ],
         )
     if not project_file.is_file():
         return skill_error(
@@ -386,7 +395,21 @@ def prepare_official_mcp(
             rollback_errors=exc.rollback_errors,
             possible_solutions=["Review the reported files and restore them before retrying."],
         )
-    except (OSError, ValueError, configparser.Error) as exc:
+    except configparser.Error as exc:
+        # Parser exception strings can contain unrelated configuration values.
+        line_numbers = [number for number, _ in getattr(exc, "errors", [])]
+        line_numbers.append(getattr(exc, "lineno", None))
+        return skill_error(
+            "Failed to validate the editor INI syntax",
+            "invalid_editor_ini",
+            error_type=type(exc).__name__,
+            line_numbers=sorted({number for number in line_numbers if type(number) is int}),
+            possible_solutions=[
+                "Correct the reported syntax lines in Config/DefaultEditorPerProjectUserSettings.ini locally; "
+                "configuration text is intentionally omitted from this diagnostic."
+            ],
+        )
+    except (OSError, ValueError) as exc:
         return skill_error(
             "Failed to configure Epic Unreal MCP for this project",
             str(exc),
