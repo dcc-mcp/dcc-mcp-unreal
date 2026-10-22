@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
+from jsonschema import Draft202012Validator
 from test_official_mcp import _load_prepare_module
 
 
@@ -37,6 +40,275 @@ def _assert_no_writes(prepare, monkeypatch):
         pytest.fail("Preflight failure must not attempt a write")
 
     monkeypatch.setattr(prepare, "_atomic_write_bytes", unexpected_write)
+
+
+@pytest.mark.parametrize("port", [1, 8000, 18081, 65535])
+def test_server_port_is_read_back_without_claiming_runtime_verification(setup_project, port):
+    prepare, project, config, plugins = setup_project
+    result = prepare.prepare_official_mcp(server_port=port)
+    assert result["success"] is True, result
+    context = result["context"]
+    assert context["configured_port"] == port
+    assert context["configured_endpoint"] == f"http://127.0.0.1:{port}/mcp"
+    assert context["configuration_verified"] is True
+    assert context["runtime_verified"] is False
+    assert f"ServerPortNumber={port}\n".encode() in config.read_bytes()
+    assert context["configured_endpoint"] in result["prompt"]
+
+
+@pytest.mark.parametrize("port", [True, False, "18081", 18081.0, None, 0, -1, 65536, [], {}])
+def test_invalid_server_ports_block_before_any_writes(setup_project, monkeypatch, port):
+    prepare, project, config, plugins = setup_project
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(server_port=port)
+    assert result["success"] is False
+    assert result["error"] == "invalid_server_port"
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+def test_server_port_schema_matches_runtime_contract():
+    prepare = _load_prepare_module()
+    tools = yaml.safe_load((Path(prepare.__file__).parents[1] / "tools.yaml").read_text(encoding="utf-8"))["tools"]
+    schema = next(tool["input_schema"] for tool in tools if tool["name"] == "prepare_official_mcp")
+    validator = Draft202012Validator(schema)
+    assert schema["properties"]["server_port"]["default"] == 8000
+    for port in (1, 8000, 18081, 65535):
+        assert validator.is_valid({"server_port": port})
+    for port in (True, False, "18081", None, 0, -1, 65536):
+        assert not validator.is_valid({"server_port": port})
+
+
+def test_port_only_change_requires_restart_and_has_no_global_state_leak(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    assert prepare.prepare_official_mcp()["success"] is True
+    original = project.read_bytes()
+    for port in (18081, 18082, 8000):
+        kwargs = {} if port == 8000 else {"server_port": port}
+        result = prepare.prepare_official_mcp(**kwargs)
+        assert result["success"] is True
+        assert result["context"]["configured_port"] == port
+        assert result["context"]["changed_plugins"] == []
+        assert result["context"]["config_changed"] is True
+        assert result["context"]["restart_required"] is True
+        assert project.read_bytes() == original
+        with monkeypatch.context() as patch:
+            _assert_no_writes(prepare, patch)
+            repeated = prepare.prepare_official_mcp(**kwargs)
+        assert repeated["success"] is True
+        assert repeated["context"]["restart_required"] is False
+    assert prepare._AUTOSTART_SETTINGS["ServerPortNumber"] == "8000"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        ["-ModelContextProtocolPort=8000"],
+        ["-ModelContextProtocolPort=0"],
+        ["-ModelContextProtocolPort=65536"],
+        ["-ModelContextProtocolPort="],
+        ["-ModelContextProtocolPort=18081.0"],
+        ["-ModelContextProtocolPort", "18081"],
+        ["--ModelContextProtocolPort=18081"],
+        ["-ModelContextProtocolPort=18081"] * 2,
+    ],
+)
+def test_conflicting_or_ambiguous_port_override_blocks_without_writes(setup_project, monkeypatch, overrides):
+    prepare, project, config, plugins = setup_project
+    arguments = prepare._process_arguments() + overrides
+    monkeypatch.setattr(prepare, "_process_arguments", lambda: arguments)
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is False
+    assert "ModelContextProtocolPort" in result["error"]
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+def test_matching_port_override_does_not_claim_runtime_verification(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    arguments = prepare._process_arguments() + ["-modelcontextprotocolport=18081"]
+    monkeypatch.setattr(prepare, "_process_arguments", lambda: arguments)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is True
+    assert result["context"]["configured_port"] == 18081
+    assert result["context"]["runtime_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["Editor", "/Projects/ModelContextProtocolPortProbe/Example.uproject"],
+        ["Editor", "/Projects/Example.uproject", "-log=/Logs/ModelContextProtocolPortProbe.log"],
+    ],
+)
+def test_port_keyword_in_project_or_log_path_is_not_an_override(arguments):
+    prepare = _load_prepare_module()
+    prepare._validate_port_override(arguments, 18081)
+
+
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "-log=/Logs/ModelContextProtocolPort=18081.log",
+        "-args=-ModelContextProtocolPort=18081",
+        "-notes=ModelContextProtocolPort =18081",
+    ],
+)
+def test_nested_port_assignment_remains_ambiguous(argument):
+    prepare = _load_prepare_module()
+    with pytest.raises(ValueError, match="ModelContextProtocolPort"):
+        prepare._validate_port_override(["Editor", "/Projects/Example.uproject", argument], 18081)
+
+
+def test_unknown_native_command_line_blocks_before_any_writes(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+
+    def unavailable():
+        raise OSError("Native command line unavailable")
+
+    monkeypatch.setattr(prepare, "_process_arguments", unavailable)
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is False
+    assert result["error"] == "Native command line unavailable"
+    assert not config.parent.exists()
+
+
+@pytest.mark.parametrize("command_line", [None, "Editor Project.uproject"])
+def test_windows_command_line_failure_never_falls_back_to_python_argv(monkeypatch, command_line):
+    prepare = _load_prepare_module()
+    monkeypatch.setattr(prepare, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        prepare.ctypes,
+        "windll",
+        SimpleNamespace(
+            shell32=SimpleNamespace(CommandLineToArgvW=lambda *args: None),
+            kernel32=SimpleNamespace(GetCommandLineW=lambda: command_line, LocalFree=lambda *args: None),
+        ),
+        raising=False,
+    )
+    with pytest.raises(OSError, match="native Editor command line"):
+        prepare._process_arguments()
+
+
+@pytest.mark.parametrize(
+    "contents", [b"Editor\0Project.uproject\0-ModelContextProtocolPort=18081\0", b"", b"truncated"]
+)
+def test_linux_command_line_requires_complete_native_arguments(monkeypatch, contents):
+    prepare = _load_prepare_module()
+    monkeypatch.setattr(prepare, "os", SimpleNamespace(name="posix", fsdecode=lambda value: value.decode()))
+    monkeypatch.setattr(prepare.sys, "platform", "linux")
+
+    def read(path):
+        assert path.as_posix() == "/proc/self/cmdline"
+        return contents
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    if contents.endswith(b"\0"):
+        assert prepare._process_arguments() == ["Editor", "Project.uproject", "-ModelContextProtocolPort=18081"]
+    else:
+        with pytest.raises(OSError, match="cannot be verified"):
+            prepare._process_arguments()
+
+
+def test_unsupported_native_command_line_reader_fails_closed(monkeypatch):
+    prepare = _load_prepare_module()
+    monkeypatch.setattr(prepare, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(prepare.sys, "platform", "darwin")
+    with pytest.raises(OSError, match="cannot be verified"):
+        prepare._process_arguments()
+
+
+@pytest.mark.parametrize("failure", ["unreadable", "external_edit", "external_delete", "no_write"])
+@pytest.mark.parametrize("existing_config", [False, True])
+def test_configuration_readback_failure_preserves_external_changes(
+    setup_project, monkeypatch, failure, existing_config
+):
+    prepare, project, config, plugins = setup_project
+    original = project.read_bytes()
+    config_original = b"; Original config\r\n"
+    if existing_config:
+        config.parent.mkdir()
+        config.write_bytes(config_original)
+    actual_write, actual_read = prepare._atomic_write_bytes, prepare._read_optional_bytes
+    wrote_config = False
+    failed_read = False
+
+    def write(path, contents):
+        nonlocal wrote_config
+        if path != config or failure != "no_write":
+            actual_write(path, contents)
+        if path == config:
+            wrote_config = True
+            if failure == "external_edit":
+                path.write_bytes(b"; External editor change\n")
+            elif failure == "external_delete":
+                path.unlink()
+
+    def read(path):
+        nonlocal failed_read
+        if path == config and wrote_config and failure == "unreadable" and not failed_read:
+            failed_read = True
+            raise OSError("Injected readback failure")
+        return actual_read(path)
+
+    monkeypatch.setattr(prepare, "_atomic_write_bytes", write)
+    monkeypatch.setattr(prepare, "_read_optional_bytes", read)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is False
+    assert project.read_bytes() == original
+    if failure == "external_edit":
+        assert config.read_bytes() == b"; External editor change\n"
+        assert result["context"]["rollback_complete"] is False
+    elif failure == "external_delete":
+        assert not config.exists()
+        assert result["context"]["rollback_complete"] is (not existing_config)
+    else:
+        assert config.read_bytes() == config_original if existing_config else not config.exists()
+        assert result["context"]["rollback_complete"] is True
+
+
+def test_existing_external_change_before_write_is_not_overwritten(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    original = project.read_bytes()
+    write_configuration = prepare._write_configuration
+    external = b"; External change before transaction\n"
+
+    def concurrent_write(configuration):
+        config.parent.mkdir()
+        config.write_bytes(external)
+        return write_configuration(configuration)
+
+    monkeypatch.setattr(prepare, "_write_configuration", concurrent_write)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is False
+    assert "changed before write" in result["context"]["details"]
+    assert project.read_bytes() == original
+    assert config.read_bytes() == external
+
+
+def test_unchanged_configuration_is_also_read_back(setup_project, monkeypatch):
+    prepare, project, config, plugins = setup_project
+    assert prepare.prepare_official_mcp(server_port=18081)["success"] is True
+    actual_read = prepare._read_optional_bytes
+    config_reads = 0
+
+    def read(path):
+        nonlocal config_reads
+        if path == config:
+            config_reads += 1
+            if config_reads == 3:
+                raise OSError("Injected unchanged-file readback failure")
+        return actual_read(path)
+
+    monkeypatch.setattr(prepare, "_read_optional_bytes", read)
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(server_port=18081)
+    assert result["success"] is False
+    assert "unchanged-file readback" in result["context"]["details"]
 
 
 @pytest.fixture
@@ -321,7 +593,8 @@ def test_malformed_ini_prevents_project_write(setup_project, config_contents, mo
     assert config.read_bytes() == config_contents
 
 
-def test_unrelated_ini_bytes_comments_duplicates_and_arrays_are_preserved(setup_project):
+@pytest.mark.parametrize("port", [8000, 18081])
+def test_unrelated_ini_bytes_comments_duplicates_and_arrays_are_preserved(setup_project, port):
     prepare, project, config, plugins = setup_project
     config.parent.mkdir()
     original = (
@@ -333,13 +606,13 @@ def test_unrelated_ini_bytes_comments_duplicates_and_arrays_are_preserved(setup_
         b"[Other]\r\nPreserveNoFinalNewline=yes"
     )
     config.write_bytes(original)
-    assert prepare.prepare_official_mcp(include_pcg_toolset=True)["success"] is True
+    assert prepare.prepare_official_mcp(include_pcg_toolset=True, server_port=port)["success"] is True
     updated = config.read_bytes()
     assert updated.startswith(original)
     suffix = updated[len(original) :]
-    assert b"ServerPortNumber=8000\r\n" in suffix
+    assert f"ServerPortNumber={port}\r\n".encode() in suffix
     assert suffix.count(b"\n") == suffix.count(b"\r\n")
-    assert prepare._configure_autostart(config) is False
+    assert prepare._configure_autostart(config, server_port=port) is False
     assert config.read_bytes() == updated
 
 
