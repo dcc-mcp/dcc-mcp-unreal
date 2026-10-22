@@ -53,7 +53,11 @@ same editor process.
 `prepare_official_mcp` checks actual installed descriptors, not an engine-version
 guess. Epic's experimental `PCGToolset` descriptor is at
 `Engine/Plugins/Experimental/Toolsets/PCGToolset/PCGToolset.uplugin` and declares
-`PCG` as a required dependency. Setup parses that declaration and the installed
+`PCG` as a required dependency. UE 5.8.1 also declares `ToolsetRegistry`, whose
+descriptor is at `Engine/Plugins/Experimental/ToolsetRegistry/ToolsetRegistry.uplugin`.
+Setup follows the installed dependency declarations, not the version string;
+it does not require `ToolsetRegistry` when an older descriptor does not declare it.
+Setup parses those declarations and the installed
 PCG descriptor at `Engine/Plugins/PCG/PCG.uplugin` (or the legacy
 `Engine/Plugins/Experimental/PCG/PCG.uplugin` location). Missing, malformed,
 ambiguous, unsupported, or explicitly project-disabled direct dependencies block

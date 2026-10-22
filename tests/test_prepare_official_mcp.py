@@ -39,6 +39,112 @@ def _assert_no_writes(prepare, monkeypatch):
     monkeypatch.setattr(prepare, "_atomic_write_bytes", unexpected_write)
 
 
+@pytest.fixture
+def setup_ue_5_8_1_project(setup_project):
+    prepare, project, config, plugins = setup_project
+    # Dependency declarations observed on UE 5.8.1, CL 56057345 (PC8).
+    descriptor = plugins / "Experimental/Toolsets/PCGToolset/PCGToolset.uplugin"
+    descriptor.write_text(
+        json.dumps(
+            {
+                "FileVersion": 3,
+                "Plugins": [{"Name": "PCG", "Enabled": True}, {"Name": "ToolsetRegistry", "Enabled": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = plugins / "Experimental/ToolsetRegistry/ToolsetRegistry.uplugin"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text('{"FileVersion": 3}', encoding="utf-8")
+    return prepare, project, config, plugins
+
+
+def test_ue_5_8_1_dependencies_are_verified_without_enabling_them_directly(setup_ue_5_8_1_project, monkeypatch):
+    prepare, project, config, plugins = setup_ue_5_8_1_project
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is True, result
+    assert result["context"]["required_dependencies"] == ["PCG", "ToolsetRegistry"]
+    assert result["context"]["runtime_verified"] is False
+    assert result["context"]["restart_required"] is True
+    assert [entry["Name"] for entry in json.loads(project.read_bytes())["Plugins"]] == [
+        "ModelContextProtocol",
+        "EditorToolset",
+        "PCGToolset",
+    ]
+    original_project, original_config = project.read_bytes(), config.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    repeated = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert repeated["success"] is True
+    assert repeated["context"]["required_dependencies"] == ["PCG", "ToolsetRegistry"]
+    assert repeated["context"]["restart_required"] is False
+    assert project.read_bytes() == original_project
+    assert config.read_bytes() == original_config
+
+
+@pytest.mark.parametrize("contents", [None, b"broken json", b"[]", b"{}", b'{"FileVersion":true}'])
+def test_ue_5_8_1_registry_missing_or_malformed_blocks_without_writes(setup_ue_5_8_1_project, contents, monkeypatch):
+    prepare, project, config, plugins = setup_ue_5_8_1_project
+    registry = plugins / "Experimental/ToolsetRegistry/ToolsetRegistry.uplugin"
+    if contents is None:
+        registry.unlink()
+    else:
+        registry.write_bytes(contents)
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+def test_explicitly_disabled_registry_is_not_silently_reenabled(setup_ue_5_8_1_project, monkeypatch):
+    prepare, project, config, plugins = setup_ue_5_8_1_project
+    project.write_text('{"Plugins":[{"Name":"ToolsetRegistry","Enabled":false}]}', encoding="utf-8")
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert "ToolsetRegistry is explicitly disabled" in result["error"]
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
+def test_undeclared_registry_is_not_required_for_older_descriptors(setup_project):
+    prepare, project, config, plugins = setup_project
+    registry = plugins / "Experimental/ToolsetRegistry/ToolsetRegistry.uplugin"
+    if registry.exists():
+        registry.unlink()
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is True
+    assert result["context"]["required_dependencies"] == ["PCG"]
+
+
+@pytest.mark.parametrize("blocker", ["ambiguous_pcg", "unknown_dependency"])
+def test_ue_5_8_1_dependencies_still_fail_closed(setup_ue_5_8_1_project, blocker, monkeypatch):
+    prepare, project, config, plugins = setup_ue_5_8_1_project
+    if blocker == "ambiguous_pcg":
+        unsupported = plugins / "Experimental/PCG/PCG.uplugin"
+        expected_dependency = "PCG"
+    else:
+        unsupported = plugins / "UnknownDependency/UnknownDependency.uplugin"
+        expected_dependency = "UnknownDependency"
+        descriptor = plugins / "Experimental/Toolsets/PCGToolset/PCGToolset.uplugin"
+        data = json.loads(descriptor.read_bytes())
+        data["Plugins"].append({"Name": expected_dependency, "Enabled": True})
+        descriptor.write_text(json.dumps(data), encoding="utf-8")
+    unsupported.parent.mkdir(parents=True, exist_ok=True)
+    unsupported.write_text('{"FileVersion": 3}', encoding="utf-8")
+    original = project.read_bytes()
+    _assert_no_writes(prepare, monkeypatch)
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+    assert result["success"] is False
+    assert result["error"] == (
+        f"Cannot verify one installed descriptor for required PCGToolset dependency {expected_dependency}"
+    )
+    assert project.read_bytes() == original
+    assert not config.parent.exists()
+
+
 @pytest.mark.parametrize("flag", ["include_editor_toolset", "include_niagara_toolsets", "include_pcg_toolset"])
 @pytest.mark.parametrize("value", ["false", "true", 0, 1, None, [], {}])
 def test_non_boolean_flags_block_before_any_writes(setup_project, monkeypatch, flag, value):

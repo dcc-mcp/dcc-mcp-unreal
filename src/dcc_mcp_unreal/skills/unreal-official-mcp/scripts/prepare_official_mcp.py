@@ -19,6 +19,7 @@ _PLUGIN_RELATIVE_PATHS = {
     "EditorToolset": Path("Experimental/Toolsets/EditorToolset/EditorToolset.uplugin"),
     "NiagaraToolsets": Path("Experimental/Toolsets/NiagaraToolsets/NiagaraToolsets.uplugin"),
     "PCGToolset": Path("Experimental/Toolsets/PCGToolset/PCGToolset.uplugin"),
+    "ToolsetRegistry": Path("Experimental/ToolsetRegistry/ToolsetRegistry.uplugin"),
 }
 # Inspect supported installed locations, never infer availability from an engine version.
 _PCG_DEPENDENCY_PATHS = (Path("PCG/PCG.uplugin"), Path("Experimental/PCG/PCG.uplugin"))
