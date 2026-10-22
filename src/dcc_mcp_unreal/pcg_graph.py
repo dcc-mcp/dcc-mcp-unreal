@@ -132,7 +132,12 @@ def inspect_graph(graph: Any, settings_names: list | None = None) -> dict:
         for direction, property_name in (("input", "input_pins"), ("output", "output_pins")):
             labels = set()
             for pin in _bounded(_property(node, property_name), _MAX_PINS, "Node pin count"):
-                if _property(pin, "node") != node or bool(_method(pin, "is_output_pin")()) != (direction == "output"):
+                output_state = _method(pin, "is_output_pin")()
+                if (
+                    type(output_state) is not bool
+                    or _property(pin, "node") != node
+                    or output_state != (direction == "output")
+                ):
                     raise PcgGraphError("Pin ownership or direction is inconsistent")
                 properties = _property(pin, "properties")
                 label = str(_property(properties, "label"))
@@ -140,7 +145,9 @@ def inspect_graph(graph: Any, settings_names: list | None = None) -> dict:
                     raise PcgGraphError("Pin labels are duplicated or exceed the inspection limit")
                 labels.add(label)
                 allowed_types = int(_property(properties, "allowed_types"))
-                multiple = bool(_method(properties, "allows_multiple_connections")())
+                multiple = _method(properties, "allows_multiple_connections")()
+                if type(multiple) is not bool:
+                    raise PcgGraphError("Pin connection cardinality is unknown")
                 edges = _bounded(_property(pin, "edges"), _MAX_EDGES, "Pin edge count")
                 row["pins"].append(
                     {
@@ -191,7 +198,7 @@ def inspect_graph(graph: Any, settings_names: list | None = None) -> dict:
 def _engine(unreal: Any) -> dict:
     try:
         value = _method(getattr(unreal, "SystemLibrary", None), "get_engine_version")()
-        return {"version": str(value)[:256], "used_as_feature_gate": False}
+        return {"version": value[:256] if isinstance(value, str) and value else None, "used_as_feature_gate": False}
     except Exception:
         return {"version": None, "used_as_feature_gate": False}
 
@@ -283,10 +290,10 @@ def _edit_edge(unreal: Any, graph: Any, operation: str, edge: dict) -> dict:
         raise PcgGraphError("edge requires exact from_node, from_pin, to_node and to_pin strings")
     before = inspect_graph(graph)
     exists = edge in before["edges"]
-    if exists == (operation == "connect"):
-        return {**before, "changed": False}
     source, output = _pin(graph, edge["from_node"], edge["from_pin"], "output")
     target, input_pin = _pin(graph, edge["to_node"], edge["to_pin"], "input")
+    if exists == (operation == "connect"):
+        return {**before, "changed": False}
     add, remove = _method(graph, "add_edge"), _method(graph, "remove_edge")
     args = (source, edge["from_pin"], target, edge["to_pin"])
     if operation == "connect":
