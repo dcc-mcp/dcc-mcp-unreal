@@ -31,7 +31,8 @@ loopback HTTP endpoint.
 1. Call `official_mcp_bridge` with `operation=status`.
 2. If status is unavailable on Unreal Engine 5.8+, obtain explicit permission
    to change project configuration, then call `prepare_official_mcp`. Enable
-   `NiagaraToolsets` only when the task needs Niagara authoring.
+   `NiagaraToolsets` only when the task needs Niagara authoring. Set
+   `include_pcg_toolset=true` only for a PCG task; it defaults to false.
 3. When `restart_required` is true, restart the editor and verify the DCC MCP
    instance before retrying `operation=status`. Do not claim success from the
    configuration write alone.
@@ -46,6 +47,37 @@ loopback HTTP endpoint.
 The bridge accepts loopback HTTP endpoints only. Run it with `affinity:any`;
 never block Unreal's game thread while making an HTTP request back into the
 same editor process.
+
+## PCG opt-in and safe setup
+
+`prepare_official_mcp` checks actual installed descriptors, not an engine-version
+guess. Epic's experimental `PCGToolset` descriptor is at
+`Engine/Plugins/Experimental/Toolsets/PCGToolset/PCGToolset.uplugin` and declares
+`PCG` as a required dependency. Setup parses that declaration and the installed
+PCG descriptor at `Engine/Plugins/PCG/PCG.uplugin` (or the legacy
+`Engine/Plugins/Experimental/PCG/PCG.uplugin` location). Missing, malformed,
+ambiguous, unsupported, or explicitly project-disabled direct dependencies block
+setup before any writes. It does not silently override a disabled dependency or
+change unrelated project plugins. Newly encountered direct dependencies outside
+the supported descriptor paths require manual review rather than an engine scan.
+
+Both the project JSON and existing editor INI are validated before writing.
+Setup preserves all existing INI bytes, including comments, repeated sections,
+duplicate entries and array commands, appending only a final MCP settings block
+when the four scalar settings need updating. Repeating setup makes no further
+changes. Writes use atomic replacement; on a write failure, setup attempts to
+restore the exact original file bytes or original absence. An incomplete
+rollback is reported explicitly with the affected file paths. This is not a
+crash-safe transaction across both files; keep normal project backups.
+
+Successful setup means configuration was prepared, not that any plugin loaded
+or PCG tool is available. `runtime_verified` remains false. Restart when requested,
+then verify the live endpoint and discover its actual toolsets before authoring;
+setup never starts a service, loads Unreal, or mutates a PCG graph.
+
+References: [PCGToolset](https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex/PCGToolset),
+[PCG](https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex/PCG), and
+[Unreal plugins](https://dev.epicgames.com/documentation/en-us/unreal-engine/plugins-in-unreal-engine).
 
 ## Scripts
 
