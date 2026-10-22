@@ -1,6 +1,6 @@
 tools:
   - name: inspect_pcg_graph
-    description: Read complete bounded PCG graph topology and selected scalar settings without editing, saving or generating.
+    description: Read complete bounded PCG graph topology, scalar settings and allowlisted spline grammar settings without editing, saving or generating.
     source_file: scripts/inspect_pcg_graph.py
     execution: sync
     affinity: main
@@ -72,6 +72,42 @@ tools:
           maxProperties: 32
           propertyNames:
             pattern: '^[a-z][a-z0-9_]{0,79}$'
+          properties:
+            grammar_selection:
+              description: PCGSubdivideSplineSettings only. Text is preserved, not parsed. Named-attribute selection does not create or validate input spline data.
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [grammar_as_attribute, grammar_string]
+                  properties:
+                    grammar_as_attribute: {const: false}
+                    grammar_string: {type: string, minLength: 1, maxLength: 4096}
+                - type: object
+                  additionalProperties: false
+                  required: [grammar_as_attribute, grammar_attribute]
+                  properties:
+                    grammar_as_attribute: {const: true}
+                    grammar_attribute:
+                      type: string
+                      pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
+            modules_info:
+              description: PCGSubdivideSplineSettings only. Fixed modules require effective module_info_as_input=false. Size is in Unreal centimeters, not mesh bounds or fitted length.
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                type: object
+                additionalProperties: false
+                required: [symbol, size, scalable]
+                properties:
+                  symbol: {type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'}
+                  size: {type: number, exclusiveMinimum: 0, maximum: 1000000000}
+                  scalable: {type: boolean}
+                  debug_color:
+                    type: array
+                    minItems: 4
+                    maxItems: 4
+                    items: {type: number, minimum: 0, maximum: 1}
           additionalProperties:
             type: [boolean, integer, number, string]
         edge:
