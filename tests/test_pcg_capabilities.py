@@ -22,7 +22,9 @@ def _host(version="5.8.4-123456+++UE5+Release-5.8"):
     host = SimpleNamespace(SystemLibrary=SimpleNamespace(get_engine_version=lambda: version))
     for surface in pcg_capabilities._SURFACES.values():
         for name, methods in surface.items():
-            setattr(host, name, type(name, (), {"__init__": _unexpected, **{method: _unexpected for method in methods}}))
+            setattr(
+                host, name, type(name, (), {"__init__": _unexpected, **{method: _unexpected for method in methods}})
+            )
     return host
 
 

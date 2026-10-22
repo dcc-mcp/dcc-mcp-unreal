@@ -150,8 +150,13 @@ def _render_autostart(original: bytes | None) -> bytes:
                     pending_commands.add(scalar)
                 else:
                     pending_commands.discard(scalar)
-    if not pending_commands and parser.has_section(_MCP_SECTION.casefold()) and all(
-        parser.get(_MCP_SECTION.casefold(), key, fallback=None) == value for key, value in _AUTOSTART_SETTINGS.items()
+    if (
+        not pending_commands
+        and parser.has_section(_MCP_SECTION.casefold())
+        and all(
+            parser.get(_MCP_SECTION.casefold(), key, fallback=None) == value
+            for key, value in _AUTOSTART_SETTINGS.items()
+        )
     ):
         return contents
 
@@ -197,7 +202,9 @@ def _validate_pcg_dependencies(engine_plugins_dir: Path, project_data: dict[str,
     if not any(ref["Name"] == "PCG" and ref["Enabled"] and not ref.get("Optional", False) for ref in references):
         raise ValueError("The installed PCGToolset descriptor does not declare its required enabled PCG dependency")
 
-    required = list(dict.fromkeys(ref["Name"] for ref in references if ref["Enabled"] and not ref.get("Optional", False)))
+    required = list(
+        dict.fromkeys(ref["Name"] for ref in references if ref["Enabled"] and not ref.get("Optional", False))
+    )
     project_plugins = project_data.get("Plugins", [])
     if not isinstance(project_plugins, list):
         raise ValueError("The .uproject Plugins field must be an array")
@@ -210,7 +217,9 @@ def _validate_pcg_dependencies(engine_plugins_dir: Path, project_data: dict[str,
         relative_paths = (
             _PCG_DEPENDENCY_PATHS
             if name == "PCG"
-            else (_PLUGIN_RELATIVE_PATHS[name],) if name in _PLUGIN_RELATIVE_PATHS else ()
+            else (_PLUGIN_RELATIVE_PATHS[name],)
+            if name in _PLUGIN_RELATIVE_PATHS
+            else ()
         )
         installed = [engine_plugins_dir / path for path in relative_paths if (engine_plugins_dir / path).is_file()]
         if len(installed) != 1:
@@ -310,7 +319,9 @@ def prepare_official_mcp(
         config_path = project_file.parent / "Config" / "DefaultEditorPerProjectUserSettings.ini"
         config_original = _read_optional_bytes(config_path)
         config_contents = _render_autostart(config_original)
-        required_dependencies = _validate_pcg_dependencies(engine_plugins_dir, project_data) if include_pcg_toolset else []
+        required_dependencies = (
+            _validate_pcg_dependencies(engine_plugins_dir, project_data) if include_pcg_toolset else []
+        )
         changed_plugins = _upsert_plugins(project_data, plugin_names)
         changes = []
         if changed_plugins:
