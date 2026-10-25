@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.10](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.9...v0.3.10) (2026-10-25)
+
+
+### Features
+
+* **pcg:** add bounded graph structural authoring foundation ([ae288af](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/ae288af69df1187318540b66c973b430eb9920fd))
+
+
+### Bug Fixes
+
+* **pcg:** reject external and shared node settings mutations ([582eda8](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/582eda8c762e832242f8076c095a99dab52baa69))
+* **pcg:** validate no-op targets and unknown pin metadata ([50bf6e7](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/50bf6e7153c7b2e17990796921b4a331a3e33fb7))
+
+
+### Documentation
+
+* **readme:** refresh the generated DCC-MCP host matrix pointer ([#244](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/244)) ([afd3408](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/afd3408767c72d63db85615e89f60caad8175069))
+* refresh the generated DCC-MCP host matrix pointer ([5710b22](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5710b224631b5cbc51707cbfe1f0a35c4e6fa1c3))
+
 ## [0.3.9](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.8...v0.3.9) (2026-10-08)
 
 
