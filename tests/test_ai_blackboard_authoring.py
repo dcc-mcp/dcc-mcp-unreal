@@ -955,3 +955,75 @@ def test_f8_commandlet_probe_is_idempotent_on_rerun():
     assert first["status"] == "ok"
     assert second["status"] == "ok"
     assert second["author"].get("reused_existing_key") is True
+
+
+# ---------------------------------------------------------------------------
+# Round-2 NACK regression contracts (N1 blocking; N2/N3 follow-ups)
+# ---------------------------------------------------------------------------
+
+
+def test_n1_author_refuses_case_insensitive_duplicate_key():
+    core = _load_core()
+    fake = FakeUnreal()
+    _seed_asset(fake, "/Game/AI/BB_Enemy", keys=[_existing_key("ProbeDistance")])
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "probedistance")
+    assert exc.value.reason == "duplicate_key"
+    assert fake.transactions == []  # rejected before any mutation
+    assert fake.editor_lib.saved == []
+    # No case-variant duplicate and the existing key is untouched.
+    asset = fake.editor_lib.assets["/Game/AI/BB_Enemy"]
+    names = [str(e.get_editor_property("entry_name")) for e in asset.get_editor_property("keys")]
+    assert names == ["ProbeDistance"]
+
+
+def test_n1_readback_matches_key_after_fname_case_normalization():
+    # FName equality ignores case and preserves an earlier spelling, so the
+    # authored key can reappear in the readback under a different case. The
+    # post-write readback must still match it instead of failing closed.
+    core = _load_core()
+    fake = FakeUnreal()
+    asset = _seed_asset(fake, "/Game/AI/BB_Enemy")
+    original_set = asset.set_editor_property
+
+    def normalize_case(name, value):
+        if name == "keys":
+            for entry in value:
+                entry.set_editor_property("entry_name", str(entry.get_editor_property("entry_name")).lower())
+        original_set(name, value)
+
+    asset.set_editor_property = normalize_case
+    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "ProbeDistance", key_type="float")
+    assert result["readback_verified"] is True
+    assert result["saved"] is True
+
+
+def test_n2_commandlet_probe_fails_closed_when_first_inspect_raises():
+    import importlib.util  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("ue_probe_n2", COMMANDLET_PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake = FakeUnreal(unloadable=["/Game/DccMcpAiProbe/BB_Probe"])
+    with patch.dict(sys.modules, {"unreal": fake.module, "_ai_blackboard": _load_core()}):
+        result = module.run_probe()
+    assert result["status"] == "rejected"
+    assert result["reason"] == "asset_load_failed"
+
+
+def test_n3_failure_context_matches_documented_expectations():
+    core = _load_core()
+    # Pre-mutation validation failures carry neither created nor recovery_errors.
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(FakeUnreal().module, "/Game/AI/BB", "9bad")
+    assert "created" not in exc.value.context
+    assert "recovery_errors" not in exc.value.context
+    # In-transaction failures carry created and the rollback's recovery_errors.
+    fake = FakeUnreal(drop_writes=True)
+    _seed_asset(fake, "/Game/AI/BB", drop_writes=True)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB", "X")
+    assert exc.value.context["created"] is False
+    assert "recovery_errors" in exc.value.context

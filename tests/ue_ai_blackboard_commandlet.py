@@ -44,8 +44,10 @@ def run_probe():
 
     path = "/Game/DccMcpAiProbe/BB_Probe"
     key_name = "ProbeDistance"
-    result["inspect_before"] = core.inspect_blackboard(unreal, path)
     try:
+        # Keep the first inspection inside the guard: an occupied or
+        # unloadable target must fail closed with JSON, never a traceback.
+        result["inspect_before"] = core.inspect_blackboard(unreal, path)
         # Idempotent: this probe targets a dedicated scratch path, so a key left
         # by an earlier run is reused rather than re-authored. Re-running on the
         # same project must not fail with duplicate_key -> rejected.
