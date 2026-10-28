@@ -877,9 +877,7 @@ def test_f6_author_error_response_validates():
     schema = tools["author_ai_blackboard_key"]["output_schema"]
     dup_fake = FakeUnreal()
     _seed_asset(dup_fake, "/Game/AI/BB_Dup", keys=[_existing_key("Target")])
-    error = _run_script(
-        "author_ai_blackboard_key.py", dup_fake, asset_path="/Game/AI/BB_Dup", key_name="Target"
-    )
+    error = _run_script("author_ai_blackboard_key.py", dup_fake, asset_path="/Game/AI/BB_Dup", key_name="Target")
     assert error["success"] is False
     Draft202012Validator(schema).validate(error)
 
