@@ -1,0 +1,606 @@
+"""Runtime-gated AI Blackboard authoring core for the ``unreal-ai`` skill.
+
+Design
+------
+This module is intentionally free of any ``unreal`` import at module scope.
+The caller injects the ``unreal`` module (or a behavioral double) into every
+public function, which keeps the logic verifiable with bounded contract tests
+without a live Unreal Editor.  Nothing here assumes that a given engine version
+exposes a particular editor API: every method, class and reflected property is
+resolved at call time and gated, and a missing surface fails closed with a typed
+:class:`AiBlackboardError` carrying a machine-readable ``reason`` and a
+``next_action``.  This mirrors the runtime-gating philosophy of
+``dcc_mcp_unreal.pcg_graph`` and the preflight contract of
+``dcc_mcp_unreal.plugin_preflight``.
+
+The slice deliberately targets AI *Blackboard data*, the smallest high-value AI
+authoring primitive.  Behaviour-tree graph node editing, StateTree states and
+EQS query authoring are not Python-exposed in many engine versions; they belong
+in a follow-up slice backed by the plugin's C++ ``DccMcpAutomationLibrary``
+typed native bridge and are documented as a real gap in
+``docs/unreal-ai-capability-matrix.md``.  No claim is made that this module
+qualifies those capabilities on a live host.
+
+Real host acceptance (a commandlet probe that drives the real editor) is a
+separate gate; see ``tests/ue_ai_blackboard_commandlet.py``.  The readback here
+is reflected editor state, not proof of disk persistence across an editor
+restart, and no automatic generation or save-on-reopen is implied.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# Bounded limits and validation patterns
+# ---------------------------------------------------------------------------
+
+_MIN_ENGINE = (5, 0)
+_MAX_KEYS = 128
+_MAX_NAME = 96
+_PATH = re.compile(r"/Game/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+\Z")
+_KEY_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,95}\Z")
+
+# Public key_type tokens mapped to the Unreal BlackboardKeyType class name.
+# Only the requested type is gated at action time; requiring every class up
+# front would reject hosts that expose a legitimate subset.
+_KEY_TYPES: Dict[str, str] = {
+    "bool": "BlackboardKeyType_Bool",
+    "int": "BlackboardKeyType_Int",
+    "float": "BlackboardKeyType_Float",
+    "string": "BlackboardKeyType_String",
+    "name": "BlackboardKeyType_Name",
+    "vector": "BlackboardKeyType_Vector",
+    "rotator": "BlackboardKeyType_Rotator",
+    "object": "BlackboardKeyType_Object",
+    "class": "BlackboardKeyType_Class",
+}
+
+# Python-exposed API symbols required for any editor mutation.  Each is gated
+# in :func:`preflight`; a missing one yields a deterministic next_action.
+_REQUIRED_APIS: Tuple[str, ...] = (
+    "BlackboardData",
+    "BlackboardDataFactory",
+    "BlackboardEntry",
+    "ScopedEditorTransaction",
+    "SystemLibrary",
+    "EditorAssetLibrary",
+    "AssetToolsHelpers",
+)
+
+
+class AiBlackboardError(RuntimeError):
+    """A rejected operation or a failure with explicit recovery evidence."""
+
+    def __init__(self, message: str, *, reason: str, **context: Any) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.context: Dict[str, Any] = dict(context)
+        self.context["reason"] = reason
+
+
+# ---------------------------------------------------------------------------
+# Runtime gating helpers
+# ---------------------------------------------------------------------------
+
+
+def _method(owner: Any, name: str) -> Any:
+    method = getattr(owner, name, None)
+    if not callable(method):
+        raise AiBlackboardError(
+            "Required API {!r} is unavailable on this host".format(name),
+            reason="unsupported_api",
+            api=name,
+        )
+    return method
+
+
+def _symbol(unreal: Any, name: str) -> Any:
+    symbol = getattr(unreal, name, None)
+    if symbol is None:
+        raise AiBlackboardError(
+            "Required Unreal symbol {!r} is unavailable on this host".format(name),
+            reason="unsupported_api",
+            api=name,
+        )
+    return symbol
+
+
+def _engine_version(unreal: Any) -> Tuple[str, Optional[Tuple[int, int]]]:
+    """Return ``(raw_string, (major, minor) | None)`` via SystemLibrary."""
+    system = getattr(unreal, "SystemLibrary", None)
+    getter = getattr(system, "get_engine_version", None)
+    if not callable(getter):
+        return "", None
+    raw = str(getter())
+    match = re.match(r"\s*(\d+)\.(\d+)", raw)
+    if not match:
+        return raw, None
+    return raw, (int(match.group(1)), int(match.group(2)))
+
+
+def _enabled_plugins(unreal: Any) -> Optional[List[str]]:
+    """List enabled plugins through the adapter's C++ native bridge.
+
+    Reuses ``DccMcpAutomationLibrary.get_enabled_plugin_names`` (the plugin's
+    existing typed native bridge) and falls back to ``PluginBlueprintLibrary``
+    where available.  Returns ``None`` when no plugin enumeration surface is
+    present, so the caller can fail closed.
+    """
+    library = getattr(unreal, "DccMcpAutomationLibrary", None)
+    getter = getattr(library, "get_enabled_plugin_names", None)
+    if not callable(getter):
+        library = getattr(unreal, "PluginBlueprintLibrary", None)
+        getter = getattr(library, "get_enabled_plugin_names", None)
+    if not callable(getter):
+        return None
+    return sorted({str(name) for name in getter()})
+
+
+def _validated_path(asset_path: str) -> str:
+    if not isinstance(asset_path, str) or len(asset_path) > 240 or not _PATH.fullmatch(asset_path):
+        raise AiBlackboardError(
+            "Use a /Game/Folder/Asset package path with ASCII letters, digits or underscores",
+            reason="invalid_asset_path",
+        )
+    return asset_path
+
+
+def _validated_key_name(key_name: str) -> str:
+    if not isinstance(key_name, str) or not _KEY_NAME.fullmatch(key_name):
+        raise AiBlackboardError(
+            "key_name must start with a letter and contain at most 96 letters, digits or underscores",
+            reason="invalid_key_name",
+        )
+    return key_name
+
+
+# ---------------------------------------------------------------------------
+# Preflight (version + plugin + API) — read-only, no editor mutation
+# ---------------------------------------------------------------------------
+
+
+def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
+    """Return typed readiness and one deterministic next action.
+
+    This is the ``search/describe`` preflight for the capability: it gates the
+    engine version, the Python-exposed API surface and the enabled-plugin
+    enumeration before any authoring action is attempted.  It never mutates.
+    """
+    if capability != "ai_blackboard":
+        raise AiBlackboardError(
+            "Unknown Unreal AI capability: {}".format(capability),
+            reason="unknown_capability",
+            capability=capability,
+        )
+
+    raw_version, parsed_version = _engine_version(unreal)
+    version_supported = parsed_version is not None and parsed_version >= _MIN_ENGINE
+
+    available_apis: List[str] = []
+    missing_apis: List[str] = []
+    for name in _REQUIRED_APIS:
+        (available_apis if getattr(unreal, name, None) is not None else missing_apis).append(name)
+
+    # AI Blackboard data lives in the always-on AIModule, so no optional plugin
+    # is required for this slice.  We still enumerate plugins as preflight
+    # evidence and to gate the typed native bridge that deeper AI authoring
+    # (StateTree/EQS/BT graph) will require.
+    required_plugins: List[str] = []
+    plugins = _enabled_plugins(unreal)
+    plugin_bridge_available = plugins is not None
+    enabled_plugins = plugins or []
+    missing_plugins = [name for name in required_plugins if name not in enabled_plugins]
+
+    ready = version_supported and not missing_apis and plugin_bridge_available and not missing_plugins
+
+    if not version_supported:
+        next_action: Dict[str, Any] = {
+            "action": "unsupported_engine_version",
+            "requires": ">={}.{}".format(*_MIN_ENGINE),
+            "observed": raw_version or "unknown",
+            "retry_tool": "unreal_ai__ai_capability_preflight",
+        }
+    elif missing_apis or not plugin_bridge_available:
+        next_action = {
+            "action": "update_adapter_plugin",
+            "missing_apis": missing_apis,
+            "plugin_bridge_available": plugin_bridge_available,
+            "retry_tool": "unreal_ai__ai_capability_preflight",
+        }
+    else:
+        next_action = {"action": "proceed", "capability": capability}
+
+    return {
+        "capability": capability,
+        "engine_version": raw_version or "unknown",
+        "min_engine_version": "{}.{}".format(*_MIN_ENGINE),
+        "version_supported": version_supported,
+        "required_apis": list(_REQUIRED_APIS),
+        "available_apis": available_apis,
+        "missing_apis": missing_apis,
+        "required_plugins": required_plugins,
+        "enabled_plugins": enabled_plugins,
+        "missing_plugins": missing_plugins,
+        "plugin_bridge_available": plugin_bridge_available,
+        "ready": ready,
+        "next_action": next_action,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reflection helpers (bounded real readback)
+# ---------------------------------------------------------------------------
+
+
+def _asset_class(asset: Any) -> str:
+    get_class = _method(asset, "get_class")
+    cls = get_class()
+    get_name = getattr(cls, "get_name", None) or getattr(cls, "get_path_name", None)
+    return str(get_name()) if callable(get_name) else str(getattr(cls, "__name__", ""))
+
+
+def _field(entry: Any, name: str) -> Any:
+    """Read a struct field via get_editor_property then plain attribute."""
+    get_property = getattr(entry, "get_editor_property", None)
+    if callable(get_property):
+        try:
+            return get_property(name)
+        except Exception:  # noqa: BLE001 - fall back to the plain attribute
+            pass
+    return getattr(entry, name, None)
+
+
+def _key_type_name(entry: Any) -> str:
+    key_type = _field(entry, "key_type")
+    if key_type is None:
+        return ""
+    get_class = getattr(key_type, "get_class", None)
+    if callable(get_class):
+        cls = get_class()
+        get_name = getattr(cls, "get_name", None)
+        if callable(get_name):
+            return str(get_name())
+    return str(getattr(key_type, "__class__", type(key_type)).__name__)
+
+
+def _read_keys(asset: Any) -> Tuple[List[Any], List[Dict[str, str]]]:
+    """Return ``(raw_entries, parsed_keys)`` through a bounded reflected readback."""
+    get_property = _method(asset, "get_editor_property")
+    try:
+        raw = list(get_property("keys") or [])
+    except AiBlackboardError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - reflected property may be absent
+        raise AiBlackboardError(
+            "Cannot read Blackboard 'keys' property on this host",
+            reason="unsupported_property",
+            detail=str(exc),
+        ) from exc
+    if len(raw) > _MAX_KEYS:
+        raise AiBlackboardError(
+            "Blackboard key count exceeds the {} inspection limit".format(_MAX_KEYS),
+            reason="inspection_limit",
+            limit=_MAX_KEYS,
+        )
+    parsed = [{"name": str(_field(entry, "entry_name") or ""), "key_type": _key_type_name(entry)} for entry in raw]
+    return raw, parsed
+
+
+def _load_asset(unreal: Any, asset_path: str) -> Any:
+    library = getattr(unreal, "EditorAssetLibrary", None)
+    exists = _method(library, "does_asset_exist")
+    load = _method(library, "load_asset")
+    if not exists(asset_path):
+        return None
+    return load(asset_path)
+
+
+def _create_asset(unreal: Any, asset_path: str) -> Any:
+    factory_class = _symbol(unreal, "BlackboardDataFactory")
+    asset_class = _symbol(unreal, "BlackboardData")
+    helpers = getattr(unreal, "AssetToolsHelpers", None)
+    tools = _method(helpers, "get_asset_tools")()
+    create = _method(tools, "create_asset")
+    package_path, _, asset_name = asset_path.rpartition("/")
+    return create(asset_name, package_path, asset_class, factory_class())
+
+
+def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, key_name: str) -> Any:
+    """Construct a typed Blackboard entry through the reflected Python surface."""
+    try:
+        entry = entry_cls()
+    except Exception as exc:  # noqa: BLE001 - struct construction may be unsupported
+        raise AiBlackboardError(
+            "BlackboardEntry construction failed on this host",
+            reason="entry_construction_unavailable",
+            detail=str(exc),
+        ) from exc
+    try:
+        key_type = key_cls()
+    except Exception as exc:  # noqa: BLE001
+        raise AiBlackboardError(
+            "BlackboardKeyType construction failed on this host",
+            reason="key_type_construction_unavailable",
+            detail=str(exc),
+        ) from exc
+    set_property = getattr(entry, "set_editor_property", None)
+    if callable(set_property):
+        try:
+            set_property("entry_name", key_name)
+            set_property("key_type", key_type)
+            return entry
+        except Exception as exc:  # noqa: BLE001
+            raise AiBlackboardError(
+                "Cannot set reflected BlackboardEntry fields on this host",
+                reason="entry_field_unavailable",
+                detail=str(exc),
+            ) from exc
+    try:
+        entry.entry_name = key_name
+        entry.key_type = key_type
+    except Exception as exc:  # noqa: BLE001
+        raise AiBlackboardError(
+            "Cannot assign BlackboardEntry fields on this host",
+            reason="entry_field_unavailable",
+            detail=str(exc),
+        ) from exc
+    return entry
+
+
+def _begin_transaction(unreal: Any) -> Any:
+    txn_cls = _symbol(unreal, "ScopedEditorTransaction")
+    txn = txn_cls("DCC MCP Author AI Blackboard Key")
+    enter = getattr(txn, "__enter__", None)
+    if callable(enter):
+        enter()
+    return txn
+
+
+def _finish_transaction(txn: Any, ok: bool) -> List[str]:
+    """Close a transaction; cancel it when *ok* is False. Returns recovery notes."""
+    notes: List[str] = []
+    if not ok:
+        cancel = getattr(txn, "cancel", None)
+        if callable(cancel):
+            try:
+                cancel()
+            except Exception as exc:  # noqa: BLE001
+                notes.append("transaction.cancel failed: {}".format(exc))
+    exit_ = getattr(txn, "__exit__", None)
+    if callable(exit_):
+        try:
+            exit_(None, None, None)
+        except Exception as exc:  # noqa: BLE001
+            notes.append("transaction.__exit__ failed: {}".format(exc))
+    return notes
+
+
+# ---------------------------------------------------------------------------
+# Public operations
+# ---------------------------------------------------------------------------
+
+
+def inspect_blackboard(unreal: Any, asset_path: str) -> Dict[str, Any]:
+    """Read-only bounded readback of a Blackboard asset (never mutates)."""
+    path = _validated_path(asset_path)
+    asset = _load_asset(unreal, path)
+    if asset is None:
+        return {
+            "exists": False,
+            "asset_path": path,
+            "asset_class": "",
+            "keys": [],
+            "key_count": 0,
+            "readback_verified": True,
+            "read_only": True,
+        }
+    cls = _asset_class(asset)
+    if "BlackboardData" not in cls:
+        raise AiBlackboardError(
+            "Asset is not a BlackboardData",
+            reason="wrong_asset_class",
+            asset_class=cls,
+            asset_path=path,
+        )
+    _, parsed = _read_keys(asset)
+    return {
+        "exists": True,
+        "asset_path": path,
+        "asset_class": cls,
+        "keys": parsed,
+        "key_count": len(parsed),
+        "readback_verified": True,
+        "read_only": True,
+    }
+
+
+def author_blackboard_key(
+    unreal: Any,
+    asset_path: str,
+    key_name: str,
+    key_type: str = "float",
+    create_if_missing: bool = True,
+) -> Dict[str, Any]:
+    """Author one typed key on a Blackboard asset (minimal action).
+
+    Ensures the asset (creating it only when explicitly allowed and absent),
+    appends a single typed key inside a scoped editor transaction, verifies the
+    mutation through a reflected readback, and only then saves.  Any failure or
+    readback mismatch cancels the transaction and restores the observed key
+    array (undo/cancel semantics), returning a typed error with recovery notes.
+    Existing assets and existing keys are never overwritten or duplicated.
+    """
+    preflight_result = preflight(unreal)
+    if not preflight_result["ready"]:
+        raise AiBlackboardError(
+            "AI Blackboard preflight is not ready",
+            reason="preflight_not_ready",
+            next_action=preflight_result["next_action"],
+            engine_version=preflight_result["engine_version"],
+            missing_apis=preflight_result["missing_apis"],
+        )
+
+    path = _validated_path(asset_path)
+    name = _validated_key_name(key_name)
+    key_cls_name = _KEY_TYPES.get(key_type)
+    if key_cls_name is None:
+        raise AiBlackboardError(
+            "Unsupported key_type",
+            reason="unsupported_key_type",
+            key_type=key_type,
+            allowed=sorted(_KEY_TYPES),
+        )
+
+    key_cls = _symbol(unreal, key_cls_name)
+    entry_cls = _symbol(unreal, "BlackboardEntry")
+
+    library = getattr(unreal, "EditorAssetLibrary", None)
+    save = _method(library, "save_loaded_asset")
+
+    created = False
+    asset = _load_asset(unreal, path)
+    if asset is None:
+        if not create_if_missing:
+            raise AiBlackboardError(
+                "Blackboard asset does not exist and create_if_missing is False",
+                reason="asset_not_found",
+                asset_path=path,
+            )
+        asset = _create_asset(unreal, path)
+        created = True
+    if asset is None:
+        raise AiBlackboardError(
+            "Engine returned no Blackboard asset",
+            reason="asset_unavailable",
+            asset_path=path,
+        )
+
+    cls = _asset_class(asset)
+    if "BlackboardData" not in cls:
+        raise AiBlackboardError(
+            "Existing asset is not a BlackboardData; refusing to overwrite",
+            reason="wrong_asset_class",
+            asset_class=cls,
+            asset_path=path,
+            created=created,
+        )
+
+    raw_before, parsed_before = _read_keys(asset)
+    if any(item["name"] == name for item in parsed_before):
+        raise AiBlackboardError(
+            "A key with this name already exists; refusing to duplicate",
+            reason="duplicate_key",
+            key_name=name,
+            asset_path=path,
+        )
+    if len(parsed_before) >= _MAX_KEYS:
+        raise AiBlackboardError(
+            "Blackboard key count is at the {} limit".format(_MAX_KEYS),
+            reason="limit_exceeded",
+            limit=_MAX_KEYS,
+        )
+
+    get_property = _method(asset, "get_editor_property")
+    set_property = _method(asset, "set_editor_property")
+    txn = _begin_transaction(unreal)
+    mutation_state = "not_started"
+    recovery_errors: List[str] = []
+    try:
+        new_entry = _build_entry(unreal, entry_cls, key_cls, name)
+        set_property("keys", list(raw_before) + [new_entry])
+        mutation_state = "in_transaction"
+
+        # Real result readback BEFORE any save.
+        _, parsed_after = _read_keys(asset)
+        matched = [item for item in parsed_after if item["name"] == name]
+        expected_type = key_cls_name
+        if not matched:
+            raise AiBlackboardError(
+                "Readback did not observe the authored key",
+                reason="readback_mismatch",
+                expected_key=name,
+                observed=[item["name"] for item in parsed_after],
+            )
+        observed_type = matched[0]["key_type"]
+        if observed_type and observed_type != expected_type and expected_type not in observed_type:
+            raise AiBlackboardError(
+                "Readback observed an unexpected key type",
+                reason="readback_type_mismatch",
+                expected=expected_type,
+                observed=observed_type,
+            )
+
+        # Undo/cancel: restore the observed array if anything above failed.
+        saved = bool(save(asset))
+        if not saved:
+            raise AiBlackboardError(
+                "Engine refused to save the Blackboard asset",
+                reason="save_failed",
+            )
+        mutation_state = "committed"
+    except AiBlackboardError as exc:
+        recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
+        recovery_errors.extend(_finish_transaction(txn, ok=False))
+        exc.context.update(
+            mutation_state="rolled_back",
+            recovery_errors=recovery_errors,
+            created=created,
+            asset_path=path,
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001 - convert to a typed result
+        recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
+        recovery_errors.extend(_finish_transaction(txn, ok=False))
+        raise AiBlackboardError(
+            "AI Blackboard authoring failed; transaction cancelled",
+            reason="unexpected_error",
+            detail="{}: {}".format(type(exc).__name__, exc)[:500],
+            mutation_state="rolled_back",
+            recovery_errors=recovery_errors,
+            created=created,
+            asset_path=path,
+        ) from exc
+    else:
+        recovery_errors.extend(_finish_transaction(txn, ok=True))
+
+    return {
+        "asset_path": path,
+        "created": created,
+        "key_name": name,
+        "key_type": key_type,
+        "key_type_class": key_cls_name,
+        "key_count_before": len(parsed_before),
+        "key_count_after": len(parsed_after),
+        "saved": True,
+        "readback_verified": True,
+        "mutation_state": mutation_state,
+        "recovery_errors": recovery_errors,
+        "generation_verified": False,
+        "reopen_verified": False,
+    }
+
+
+def _rollback(asset: Any, set_property: Any, get_property: Any, raw_before: List[Any]) -> List[str]:
+    """Best-effort restoration of the observed key array after a failure."""
+    try:
+        set_property("keys", list(raw_before))
+        current = list(get_property("keys") or [])
+        if len(current) != len(raw_before):
+            return ["restored key count differs from the observed snapshot"]
+    except Exception as exc:  # noqa: BLE001
+        return ["rollback failed: {}".format(exc)]
+    return []
+
+
+def capability_matrix() -> List[Dict[str, str]]:
+    """Return the concise, evidence-based capability matrix (see docs)."""
+    return [
+        {"capability": "ai_blackboard", "status": "supported", "via": "unreal-ai (this slice)"},
+        {"capability": "behavior_tree_graph", "status": "gap", "via": "needs C++ typed native bridge"},
+        {"capability": "state_tree", "status": "gap", "via": "needs StateTree plugin + C++ bridge"},
+        {"capability": "eqs", "status": "gap", "via": "needs C++ typed native bridge"},
+        {"capability": "ai_perception", "status": "partial", "via": "actor/component tools, no AI editor facade"},
+        {"capability": "gameplay_tags", "status": "partial", "via": "config editing, no tag registry tool"},
+    ]
