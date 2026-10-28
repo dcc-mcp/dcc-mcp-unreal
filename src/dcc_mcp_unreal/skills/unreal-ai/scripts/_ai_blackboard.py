@@ -598,7 +598,9 @@ def author_blackboard_key(
             )
 
         raw_before, parsed_before = _read_keys(asset)
-        if any(item["name"] == name for item in parsed_before):
+        # FName equality is case-insensitive: a different-case variant is the
+        # same key and must be rejected, not authored as a duplicate.
+        if any(item["name"].lower() == name.lower() for item in parsed_before):
             raise AiBlackboardError(
                 "A key with this name already exists; refusing to duplicate",
                 reason="duplicate_key",
@@ -622,7 +624,9 @@ def author_blackboard_key(
 
             # Real result readback BEFORE any save.
             _, parsed_after = _read_keys(asset)
-            matched = [item for item in parsed_after if item["name"] == name]
+            # The engine can return the authored key under a different case,
+            # so match with the same case-insensitive FName rule as above.
+            matched = [item for item in parsed_after if item["name"].lower() == name.lower()]
             expected_type = key_cls_name
             if not matched:
                 raise AiBlackboardError(

@@ -180,7 +180,7 @@ tools:
       - Cancellation is advisory; an already-running editor operation is not interrupted, and on failure the transaction is cancelled and the observed key array restored.
     expectations:
       - On success readback_verified=true, mutation_state=committed, and the readback observed the new key type before saving. An empty/unreadable observed key type is rejected as readback_type_mismatch, never saved.
-      - Every failure carries created and recovery_errors in its context. If created=true (this call made the asset) that asset is deleted on failure; a failed deletion is recorded in recovery_errors so no empty asset is silently left behind.
+      - Once authoring starts, every failure carries created in its context; recovery_errors is added when a rollback or asset cleanup actually ran (in-transaction failures and deletion of a created=true asset, where a failed deletion is recorded so no empty asset is silently left behind). Preflight and input-validation failures fail closed before any mutation and carry neither field.
       - In-transaction failures (readback mismatch, save failure, construction error) also cancel the transaction and restore the observed key array; an existing-but-unloadable asset fails closed with asset_load_failed and is never overwritten.
       - generation_verified and reopen_verified stay false; this is current-session readback, not disk-reopen proof.
     call_examples:
