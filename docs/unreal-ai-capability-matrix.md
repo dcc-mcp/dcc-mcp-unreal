@@ -33,7 +33,7 @@ architecture.
 | PCG | **supported** | `unreal-pcg-graph` (bounded topology inspection + explicit typed edits) and `unreal-pcg`. |
 | Cinematics / Sequencer | **supported** | `unreal-cinematics`: sequences, tracks, keyframes, render queue. |
 | Materials / Chaos / Level / Assets / PIE | **supported** | Dedicated domain skills with registered tools (see `skills/*/tools.yaml`). |
-| Native plugin discovery | **supported / reused** | `DccMcpAutomationLibrary.get_enabled_plugin_names` (C++) and `plugin_preflight.py` are reused by the AI preflight for the plugin gate. |
+| Native plugin discovery | **supported / reused** | The AI preflight calls `DccMcpAutomationLibrary.get_enabled_plugin_names` (the same C++ bridge that `plugin_preflight.py` uses) directly for its plugin gate; it does not import the `plugin_preflight.py` helper module. |
 | Cancel of an in-flight editor operation | **not applicable** | Cancellation is advisory (transaction rollback + restored state); the adapter never terminates a running editor operation, matching the reference design's advisory-cancel semantics. |
 
 ## Why one small slice
@@ -41,10 +41,12 @@ architecture.
 Rather than a mechanical one-to-one mapping of C++ modules to skills, this work
 implements a single, high-value, independently verifiable primitive - authoring
 one typed AI Blackboard key - with the full contract the design calls for:
-version/plugin preflight, a minimal action, real result readback, typed errors,
-and undo/cancel semantics. It reuses the adapter's thin server, main-thread
-dispatcher, plugin preflight and C++ automation bridge rather than adding a new
-discovery, threading or MCP service architecture.
+version/plugin/API preflight, a minimal action, real result readback, typed
+errors, and undo/cancel semantics. It reuses the adapter's thin server,
+main-thread dispatcher and the `DccMcpAutomationLibrary.get_enabled_plugin_names`
+C++ native bridge (called directly, not through the `plugin_preflight.py`
+helper) rather than adding a new discovery, threading or MCP service
+architecture.
 
 The deeper AI authoring (BT graph nodes, StateTree states, EQS queries) is left
 as a documented, coherent gap. Implementing it correctly requires Python-unexposed

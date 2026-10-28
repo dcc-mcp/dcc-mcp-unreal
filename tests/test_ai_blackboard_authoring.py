@@ -71,7 +71,7 @@ class FakeName:
 
 class FakeKeyType:
     def __init__(self, name="BlackboardKeyType_Float", get_class_name=None):
-        self._name = get_class_name or name
+        self._name = name if get_class_name is None else get_class_name
 
     def get_class(self):
         return types.SimpleNamespace(get_name=lambda: self._name)
@@ -100,15 +100,18 @@ class FakeClass:
 
 
 class FakeAsset:
-    def __init__(self, class_name="BlackboardData", keys=None, drop_writes=False):
+    def __init__(self, class_name="BlackboardData", keys=None, drop_writes=False, read_raises=False):
         self._class = FakeClass(class_name)
         self._props = {"keys": list(keys or [])}
         self.drop_writes = drop_writes
+        self.read_raises = read_raises
 
     def get_class(self):
         return self._class
 
     def get_editor_property(self, name):
+        if self.read_raises and name == "keys":
+            raise RuntimeError("keys property unavailable")
         if name not in self._props:
             raise AttributeError(name)
         return self._props[name]
@@ -142,30 +145,56 @@ class FakeTransaction:
 
 
 class FakeEditorAssetLibrary:
-    def __init__(self, assets=None, save_result=True):
+    def __init__(self, assets=None, save_result=True, delete_result=True, unloadable=None):
         self.assets = assets if assets is not None else {}
         self.save_result = save_result
+        self.delete_result = delete_result
+        # Paths that "exist" (does_asset_exist True) but fail to load -> None.
+        self.unloadable = set(unloadable or ())
         self.saved = []
+        self.deleted = []
+        self.delete_calls = []
 
     def does_asset_exist(self, path):
-        return path in self.assets
+        return path in self.assets or path in self.unloadable
 
     def load_asset(self, path):
+        if path in self.unloadable:
+            return None
         return self.assets.get(path)
 
     def save_loaded_asset(self, asset):
         self.saved.append(asset)
         return self.save_result
 
+    def delete_loaded_asset(self, asset):
+        self.delete_calls.append(asset)
+        for path, existing in list(self.assets.items()):
+            if existing is asset:
+                del self.assets[path]
+                self.deleted.append(path)
+                break
+        return self.delete_result
+
+    def delete_asset(self, path):
+        self.delete_calls.append(path)
+        if path in self.assets:
+            del self.assets[path]
+            self.deleted.append(path)
+        return self.delete_result
+
 
 class FakeAssetTools:
-    def __init__(self, editor_lib, created_class="BlackboardData"):
+    def __init__(self, editor_lib, created_class="BlackboardData", created_read_raises=False):
         self.editor_lib = editor_lib
         self.created_class = created_class
+        self.created_read_raises = created_read_raises
+        self.create_calls = []
 
     def create_asset(self, name, package_path, asset_class, factory):
         path = package_path + "/" + name
-        asset = FakeAsset(self.created_class)
+        self.create_calls.append((name, package_path))
+        asset = FakeAsset(self.created_class, read_raises=self.created_read_raises)
         self.editor_lib.assets[path] = asset
         return asset
 
@@ -182,13 +211,23 @@ class FakeUnreal:
         plugin_bridge=True,
         assets=None,
         save_result=True,
+        delete_result=True,
+        unloadable=None,
+        created_class="BlackboardData",
+        created_read_raises=False,
         drop_writes=False,
         entry_constructible=True,
         key_type_constructible=True,
         cancel_raises=False,
+        empty_key_type_class=False,
     ):
         self._module = types.ModuleType("unreal")
-        self.editor_lib = FakeEditorAssetLibrary(assets=assets, save_result=save_result)
+        self.editor_lib = FakeEditorAssetLibrary(
+            assets=assets, save_result=save_result, delete_result=delete_result, unloadable=unloadable
+        )
+        self.asset_tools = FakeAssetTools(
+            self.editor_lib, created_class=created_class, created_read_raises=created_read_raises
+        )
         self.transactions = []
         self.created_assets = {}
 
@@ -198,16 +237,19 @@ class FakeUnreal:
                 get_enabled_plugin_names=lambda: list(plugins if plugins is not None else ["AIModule"])
             )
         self._module.EditorAssetLibrary = self.editor_lib
-        self._module.AssetToolsHelpers = types.SimpleNamespace(get_asset_tools=lambda: FakeAssetTools(self.editor_lib))
+        self._module.AssetToolsHelpers = types.SimpleNamespace(get_asset_tools=lambda: self.asset_tools)
         self._module.BlackboardData = type("BlackboardData", (), {})
         self._module.BlackboardDataFactory = type("BlackboardDataFactory", (), {})
 
         for cls_name in KEY_TYPE_CLASSES:
-            setattr(
-                self._module,
-                cls_name,
-                (lambda n: lambda: FakeKeyType(n))(cls_name),
-            )
+            if empty_key_type_class:
+                setattr(self._module, cls_name, lambda: FakeKeyType(get_class_name=""))
+            else:
+                setattr(
+                    self._module,
+                    cls_name,
+                    (lambda n: lambda: FakeKeyType(n))(cls_name),
+                )
         if not key_type_constructible:
 
             def bad_key_type():
@@ -701,3 +743,217 @@ def test_all_new_python_files_parse_as_python_37():
     for path in new_files:
         source = path.read_text(encoding="utf-8")
         ast.parse(source, filename=str(path), feature_version=(3, 7))
+
+
+# ---------------------------------------------------------------------------
+# NACK regression contracts (F2/F3/F5/F6 blocking, F1/F4/F7/F8 follow-ups)
+# ---------------------------------------------------------------------------
+
+
+def test_f2_author_fails_closed_when_existing_asset_cannot_load():
+    core = _load_core()
+    fake = FakeUnreal(unloadable=["/Game/AI/BB_Occupied"])
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Occupied", "NewKey")
+    assert exc.value.reason == "asset_load_failed"
+    # create_asset must NEVER run on an occupied path (no overwrite).
+    assert fake.asset_tools.create_calls == []
+    assert fake.editor_lib.saved == []
+
+
+def test_f2_inspect_fails_closed_when_existing_asset_cannot_load():
+    core = _load_core()
+    fake = FakeUnreal(unloadable=["/Game/AI/BB_Occupied"])
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.inspect_blackboard(fake.module, "/Game/AI/BB_Occupied")
+    assert exc.value.reason == "asset_load_failed"
+
+
+def test_f3_created_asset_is_deleted_when_save_fails():
+    core = _load_core()
+    fake = FakeUnreal(save_result=False)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_New", "X")
+    assert exc.value.reason == "save_failed"
+    assert exc.value.context["created"] is True
+    assert exc.value.context["mutation_state"] == "rolled_back"
+    # The empty asset this call created must not be left behind.
+    assert "/Game/AI/BB_New" not in fake.editor_lib.assets
+    assert "/Game/AI/BB_New" in fake.editor_lib.deleted
+
+
+def test_f3_created_asset_deletion_is_recorded_when_delete_fails():
+    core = _load_core()
+    fake = FakeUnreal(save_result=False, delete_result=False)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_New", "X")
+    assert exc.value.context["created"] is True
+    assert any("delete" in note.lower() for note in exc.value.context["recovery_errors"])
+
+
+def test_f3_post_creation_failure_reports_created_flag():
+    core = _load_core()
+    # create_asset succeeds but the just-created asset cannot be read back,
+    # raising unsupported_property from _read_keys BEFORE the transaction.
+    fake = FakeUnreal(created_read_raises=True)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_New", "X")
+    assert exc.value.reason == "unsupported_property"
+    assert exc.value.context["created"] is True
+    assert "/Game/AI/BB_New" not in fake.editor_lib.assets
+    assert "/Game/AI/BB_New" in fake.editor_lib.deleted
+
+
+def test_f3_wrong_class_after_creation_is_cleaned_up_with_created_flag():
+    core = _load_core()
+    fake = FakeUnreal(created_class="StaticMesh")
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Wrong", "X")
+    assert exc.value.reason == "wrong_asset_class"
+    assert exc.value.context["created"] is True
+    assert "/Game/AI/BB_Wrong" not in fake.editor_lib.assets
+
+
+def test_f5_empty_readback_key_type_fails_closed():
+    core = _load_core()
+    fake = FakeUnreal(empty_key_type_class=True)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Empty", "X")
+    assert exc.value.reason == "readback_type_mismatch"
+    assert exc.value.context["mutation_state"] == "rolled_back"
+    # An empty observed type must never reach save with readback_verified=True.
+    assert fake.editor_lib.saved == []
+
+
+def test_f5_matching_key_type_still_commits():
+    core = _load_core()
+    fake = FakeUnreal()
+    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Ok", "X")
+    assert result["readback_verified"] is True
+    assert result["mutation_state"] == "committed"
+    assert result["saved"] is True
+
+
+def test_f6_output_schemas_are_response_envelopes():
+    tools = _tools()
+    for tool in tools:
+        schema = tool["output_schema"]
+        Draft202012Validator.check_schema(schema)
+        props = schema["properties"]
+        assert {"success", "message", "error", "prompt", "context"} <= set(props), tool["name"]
+        # Result fields live under context, not as top-level required keys.
+        assert set(schema["required"]) <= {"success", "message"}, tool["name"]
+        assert "context" in props and "properties" in props["context"]
+
+
+def test_f6_output_schemas_validate_success_and_error_responses():
+    from dcc_mcp_core.skill import skill_error  # noqa: PLC0415
+
+    tools = {t["name"]: t for t in _tools()}
+    success_responses = {
+        "ai_capability_preflight": _run_script("ai_capability_preflight.py", FakeUnreal(), capability="ai_blackboard"),
+        "inspect_ai_blackboard": _run_script(
+            "inspect_ai_blackboard.py", FakeUnreal(), asset_path="/Game/AI/BB_Missing"
+        ),
+        "author_ai_blackboard_key": _run_script(
+            "author_ai_blackboard_key.py", FakeUnreal(), asset_path="/Game/AI/BB_New", key_name="X"
+        ),
+    }
+    # A genuine skill_error envelope carries reason/typed context, not the
+    # result-field keys the old schema wrongly required on every response.
+    error_response = skill_error(
+        "rejected", "Engine error", reason="duplicate_key", mutation_state="rolled_back", recovery_errors=[]
+    )
+    for name, tool in tools.items():
+        schema = tool["output_schema"]
+        Draft202012Validator.check_schema(schema)
+        # Both a real success envelope and a real error envelope must validate.
+        Draft202012Validator(schema).validate(success_responses[name])
+        Draft202012Validator(schema).validate(error_response)
+
+
+def test_f6_author_error_response_validates():
+    tools = {t["name"]: t for t in _tools()}
+    schema = tools["author_ai_blackboard_key"]["output_schema"]
+    dup_fake = FakeUnreal()
+    _seed_asset(dup_fake, "/Game/AI/BB_Dup", keys=[_existing_key("Target")])
+    error = _run_script(
+        "author_ai_blackboard_key.py", dup_fake, asset_path="/Game/AI/BB_Dup", key_name="Target"
+    )
+    assert error["success"] is False
+    Draft202012Validator(schema).validate(error)
+
+
+def test_f7_preflight_fails_closed_when_required_method_missing():
+    core = _load_core()
+    fake = FakeUnreal()
+    fake.editor_lib.save_loaded_asset = None  # symbol present, method not callable
+    result = core.preflight(fake.module)
+    assert result["ready"] is False
+    assert "EditorAssetLibrary.save_loaded_asset" in result["missing_methods"]
+    assert result["next_action"]["action"] == "update_adapter_plugin"
+    assert "EditorAssetLibrary.save_loaded_asset" in result["next_action"]["missing_methods"]
+
+
+def test_f7_preflight_ready_when_all_required_methods_present():
+    core = _load_core()
+    result = core.preflight(FakeUnreal().module)
+    assert result["ready"] is True
+    assert result["missing_methods"] == []
+
+
+def test_f4_lookalike_class_name_is_rejected():
+    core = _load_core()
+    fake = FakeUnreal()
+    _seed_asset(fake, "/Game/AI/BB_Lookalike", class_name="NotBlackboardDataTable")
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.inspect_blackboard(fake.module, "/Game/AI/BB_Lookalike")
+    assert exc.value.reason == "wrong_asset_class"
+
+
+def test_f4_subclass_via_is_child_of_is_accepted():
+    core = _load_core()
+    fake = FakeUnreal()
+
+    class ChildClass(FakeClass):
+        def is_child_of(self, base):
+            return True
+
+    asset = FakeAsset()
+    asset._class = ChildClass("BlackboardData")
+    fake.editor_lib.assets["/Game/AI/BB_Child"] = asset
+    result = core.inspect_blackboard(fake.module, "/Game/AI/BB_Child")
+    assert result["exists"] is True
+
+
+def test_f1_docs_describe_direct_bridge_call_not_module_reuse():
+    matrix = MATRIX_DOC.read_text(encoding="utf-8")
+    skill = SKILL_MD.read_text(encoding="utf-8")
+    core_source = CORE.read_text(encoding="utf-8")
+    assert "get_enabled_plugin_names" in matrix
+    assert "get_enabled_plugin_names" in skill
+    # Docs must no longer claim plugin_preflight.py is reused as a helper.
+    assert "plugin_preflight.py` are reused" not in matrix
+    # The core calls the bridge directly and does not import plugin_preflight.
+    assert "import plugin_preflight" not in core_source
+    assert "from dcc_mcp_unreal.plugin_preflight" not in core_source
+
+
+def test_f8_commandlet_probe_is_idempotent_on_rerun():
+    # Load the probe module and drive run_probe twice against the same fake
+    # project; a second run must reuse the existing key instead of rejecting.
+    import importlib.util  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("ue_probe_idempotent", COMMANDLET_PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake = FakeUnreal()
+    with patch.dict(sys.modules, {"unreal": fake.module, "_ai_blackboard": _load_core()}):
+        first = module.run_probe()
+        second = module.run_probe()
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert second["author"].get("reused_existing_key") is True

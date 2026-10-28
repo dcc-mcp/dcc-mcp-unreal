@@ -26,9 +26,11 @@ An independently usable, runtime-gated Python route to the smallest high-value
 AI authoring primitive: **AI Blackboard data**. It gates the exact engine
 version, Python-exposed API symbols and adapter native bridge it needs before
 touching the editor, then performs one minimal, undoable action with a real
-reflected readback. It reuses the existing plugin discovery, main-thread
-dispatcher and `DccMcpAutomationLibrary.get_enabled_plugin_names` native bridge;
-it does not add a discovery, threading or service architecture.
+reflected readback. It reuses the existing main-thread dispatcher and calls the
+`DccMcpAutomationLibrary.get_enabled_plugin_names` C++ native bridge directly
+for plugin enumeration (the same bridge `plugin_preflight.py` uses, but it does
+not import that helper module); it adds no new discovery, threading or service
+architecture.
 
 ## Capability matrix (evidence-based)
 
@@ -75,20 +77,23 @@ shallow one-to-one C++-module-to-skill mapping.
 ## Preflight, errors, and undo/cancel
 
 - Preflight gates: Unreal Engine `>= 5.0`, the seven required Python-exposed
-  symbols, and the adapter's native plugin-enumeration bridge. A failed gate
-  yields `ready=false` and one machine-readable `next_action`.
+  symbols **and** the editor methods the write path calls, plus the adapter's
+  native plugin-enumeration bridge. A failed gate yields `ready=false` and one
+  machine-readable `next_action`.
 - Typed errors carry a `reason` such as `preflight_not_ready`,
   `unsupported_api`, `invalid_asset_path`, `invalid_key_name`,
   `unsupported_key_type`, `duplicate_key`, `wrong_asset_class`,
-  `readback_mismatch`, `save_failed` and `limit_exceeded`.
-- Undo/cancel: the mutation is wrapped in `ScopedEditorTransaction`. On an
-  in-transaction failure (readback mismatch, save failure, construction error)
-  the transaction is cancelled and the previously observed key array is
-  restored; the result reports `mutation_state=rolled_back` and any
-  `recovery_errors`. Pre-condition rejections (preflight not ready, invalid
-  input, duplicate key, wrong class, limit) fail before any mutation.
-  Cancellation is advisory for an operation already running in the editor - it
-  does not interrupt the editor process.
+  `asset_load_failed`, `readback_mismatch`, `readback_type_mismatch`,
+  `save_failed` and `limit_exceeded`.
+- Undo/cancel: the mutation is wrapped in `ScopedEditorTransaction`. On any
+  failure the error context carries `created` and `recovery_errors`. If this
+  call created the asset, that asset is deleted (best effort) so a
+  `rolled_back` result leaves no new empty asset behind; a failed deletion is
+  recorded in `recovery_errors`. An existing asset is never overwritten, and
+  an existing-but-unloadable asset fails closed with `asset_load_failed`. The
+  observed key array is restored and the transaction cancelled. Cancellation
+  is advisory for an operation already running in the editor - it does not
+  interrupt the editor process.
 
 ## Limits and honest boundaries
 
