@@ -1,0 +1,161 @@
+tools:
+  - name: ai_capability_preflight
+    description: >-
+      Read-only AI capability preflight. Gates the Unreal engine version (>=5.0),
+      the Python-exposed Blackboard editor API surface, and the adapter's native
+      plugin-enumeration bridge before any authoring. Never mutates the editor.
+    source_file: scripts/ai_capability_preflight.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        capability:
+          type: string
+          enum: [ai_blackboard]
+          default: ai_blackboard
+          description: The AI capability whose readiness should be inspected.
+    output_schema:
+      type: object
+      required: [ready, next_action]
+      properties:
+        ready: {type: boolean}
+        engine_version: {type: string}
+        version_supported: {type: boolean}
+        available_apis: {type: array, items: {type: string}}
+        missing_apis: {type: array, items: {type: string}}
+        required_apis: {type: array, items: {type: string}}
+        enabled_plugins: {type: array, items: {type: string}}
+        plugin_bridge_available: {type: boolean}
+        next_action: {type: object}
+    preconditions:
+      - The call is read-only and may run without the Unreal main thread.
+    expectations:
+      - A missing engine version, API symbol or plugin bridge yields ready=false with one deterministic next_action.
+    call_examples:
+      - arguments: {capability: ai_blackboard}
+        note: Returns proceed when the host can author a Blackboard, otherwise an update/unsupported action.
+    next-tools:
+      on-success: [unreal_ai__author_ai_blackboard_key]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: inspect_ai_blackboard
+    description: >-
+      Read-only bounded readback of an AI Blackboard asset. Returns the asset
+      class, its typed keys and a key count through reflected editor state.
+      Never creates, edits, saves or generates the asset.
+    source_file: scripts/inspect_ai_blackboard.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [asset_path]
+      additionalProperties: false
+      properties:
+        asset_path:
+          type: string
+          pattern: '^/Game/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+$'
+          maxLength: 240
+          description: /Game package path of the Blackboard asset to inspect.
+    output_schema:
+      type: object
+      required: [exists, readback_verified, read_only]
+      properties:
+        exists: {type: boolean}
+        asset_path: {type: string}
+        asset_class: {type: string}
+        keys: {type: array}
+        key_count: {type: integer}
+        readback_verified: {type: boolean}
+        read_only: {type: boolean}
+    preconditions:
+      - asset_path must be a /Game package path; a wrong-class asset is rejected, never overwritten.
+    expectations:
+      - A missing asset returns exists=false with readback_verified=true; existing assets return a bounded key list (<=128 keys).
+    call_examples:
+      - arguments: {asset_path: /Game/AI/BB_Enemy}
+        note: Returned key names are the identities used by author_ai_blackboard_key.
+    next-tools:
+      on-success: [unreal_ai__author_ai_blackboard_key]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: author_ai_blackboard_key
+    description: >-
+      Author exactly one typed key on an AI Blackboard asset. Creates an empty
+      Blackboard only when create_if_missing is true and the path is free; never
+      overwrites an existing asset or duplicates a key name. Wraps the mutation
+      in a scoped editor transaction, verifies it through a reflected readback
+      before saving, and cancels/rolls back on any failure or mismatch.
+    source_file: scripts/author_ai_blackboard_key.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 60
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [asset_path, key_name]
+      additionalProperties: false
+      properties:
+        asset_path:
+          type: string
+          pattern: '^/Game/(?:[A-Za-z0-9_]+/)*[A-Za-z0-9_]+$'
+          maxLength: 240
+        key_name:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,95}$'
+          maxLength: 96
+          description: Name of the Blackboard key; must be unique on the asset.
+        key_type:
+          type: string
+          enum: [bool, int, float, string, name, vector, rotator, object, class]
+          default: float
+          description: Typed Blackboard key class to construct (gated on the host).
+        create_if_missing:
+          type: boolean
+          default: true
+          description: Create an empty Blackboard asset when the path is free.
+    output_schema:
+      type: object
+      required: [readback_verified, mutation_state]
+      properties:
+        readback_verified: {type: boolean}
+        saved: {type: boolean}
+        created: {type: boolean}
+        key_name: {type: string}
+        key_type: {type: string}
+        key_type_class: {type: string}
+        key_count_before: {type: integer}
+        key_count_after: {type: integer}
+        mutation_state: {type: string, enum: [committed, rolled_back]}
+        recovery_errors: {type: array, items: {type: string}}
+        generation_verified: {type: boolean}
+        reopen_verified: {type: boolean}
+    preconditions:
+      - ai_capability_preflight must report ready=true; the operation otherwise fails closed.
+      - The Unreal main thread is required (enforce_thread_affinity=true).
+      - Cancellation is advisory; an already-running editor operation is not interrupted, and on failure the transaction is cancelled and the observed key array restored.
+    expectations:
+      - On success readback_verified=true, mutation_state=committed, and the readback observed the new key type before saving.
+      - In-transaction failures (readback mismatch, save failure, construction error) produce mutation_state=rolled_back with recovery_errors and no overwrite.
+      - Pre-condition rejections (preflight not ready, invalid input, duplicate key, wrong class, limit) fail before any mutation with their specific reason.
+      - generation_verified and reopen_verified stay false; this is current-session readback, not disk-reopen proof.
+    call_examples:
+      - arguments: {asset_path: /Game/AI/BB_Enemy, key_name: TargetDistance, key_type: float}
+        note: Adds one float key inside a transaction and verifies it through readback.
+    next-tools:
+      on-success: [unreal_ai__inspect_ai_blackboard]
+      on-failure: [dcc_diagnostics__audit_log, unreal_ai__ai_capability_preflight]
