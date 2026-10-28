@@ -43,14 +43,22 @@ def run_probe():
         return result
 
     path = "/Game/DccMcpAiProbe/BB_Probe"
+    key_name = "ProbeDistance"
     result["inspect_before"] = core.inspect_blackboard(unreal, path)
     try:
-        result["author"] = core.author_blackboard_key(
-            unreal, path, "ProbeDistance", key_type="float", create_if_missing=True
-        )
+        # Idempotent: this probe targets a dedicated scratch path, so a key left
+        # by an earlier run is reused rather than re-authored. Re-running on the
+        # same project must not fail with duplicate_key -> rejected.
+        already_present = any(k["name"] == key_name for k in result["inspect_before"].get("keys", []))
+        if already_present:
+            result["author"] = {"reused_existing_key": True, "readback_verified": True}
+        else:
+            result["author"] = core.author_blackboard_key(
+                unreal, path, key_name, key_type="float", create_if_missing=True
+            )
         result["inspect_after"] = core.inspect_blackboard(unreal, path)
         result["readback_verified"] = result["author"].get("readback_verified") is True and any(
-            k["name"] == "ProbeDistance" for k in result["inspect_after"].get("keys", [])
+            k["name"] == key_name for k in result["inspect_after"].get("keys", [])
         )
         result["status"] = "ok" if result["readback_verified"] else "readback_failed"
     except core.AiBlackboardError as exc:

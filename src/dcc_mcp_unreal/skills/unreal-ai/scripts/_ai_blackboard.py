@@ -10,8 +10,10 @@ exposes a particular editor API: every method, class and reflected property is
 resolved at call time and gated, and a missing surface fails closed with a typed
 :class:`AiBlackboardError` carrying a machine-readable ``reason`` and a
 ``next_action``.  This mirrors the runtime-gating philosophy of
-``dcc_mcp_unreal.pcg_graph`` and the preflight contract of
-``dcc_mcp_unreal.plugin_preflight``.
+``dcc_mcp_unreal.pcg_graph`` and follows the same preflight-contract style as
+``dcc_mcp_unreal.plugin_preflight`` (it calls the shared
+``get_enabled_plugin_names`` native bridge directly rather than importing that
+module).
 
 The slice deliberately targets AI *Blackboard data*, the smallest high-value AI
 authoring primitive.  Behaviour-tree graph node editing, StateTree states and
@@ -68,6 +70,15 @@ _REQUIRED_APIS: Tuple[str, ...] = (
     "EditorAssetLibrary",
     "AssetToolsHelpers",
 )
+
+# Methods that must be callable on the corresponding API object.  Checking the
+# symbol alone can report ready=True on a host whose EditorAssetLibrary is a
+# stub without the methods the write path needs, so preflight gates these too.
+_REQUIRED_API_METHODS: Dict[str, Tuple[str, ...]] = {
+    "SystemLibrary": ("get_engine_version",),
+    "EditorAssetLibrary": ("does_asset_exist", "load_asset", "save_loaded_asset"),
+    "AssetToolsHelpers": ("get_asset_tools",),
+}
 
 
 class AiBlackboardError(RuntimeError):
@@ -180,8 +191,19 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
 
     available_apis: List[str] = []
     missing_apis: List[str] = []
+    missing_methods: List[str] = []
     for name in _REQUIRED_APIS:
-        (available_apis if getattr(unreal, name, None) is not None else missing_apis).append(name)
+        symbol = getattr(unreal, name, None)
+        if symbol is None:
+            missing_apis.append(name)
+            continue
+        required_methods = _REQUIRED_API_METHODS.get(name, ())
+        absent = [method for method in required_methods if not callable(getattr(symbol, method, None))]
+        if absent:
+            missing_methods.extend("{}.{}".format(name, method) for method in absent)
+            missing_apis.append(name)
+        else:
+            available_apis.append(name)
 
     # AI Blackboard data lives in the always-on AIModule, so no optional plugin
     # is required for this slice.  We still enumerate plugins as preflight
@@ -193,7 +215,13 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
     enabled_plugins = plugins or []
     missing_plugins = [name for name in required_plugins if name not in enabled_plugins]
 
-    ready = version_supported and not missing_apis and plugin_bridge_available and not missing_plugins
+    ready = (
+        version_supported
+        and not missing_apis
+        and not missing_methods
+        and plugin_bridge_available
+        and not missing_plugins
+    )
 
     if not version_supported:
         next_action: Dict[str, Any] = {
@@ -202,10 +230,11 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
             "observed": raw_version or "unknown",
             "retry_tool": "unreal_ai__ai_capability_preflight",
         }
-    elif missing_apis or not plugin_bridge_available:
+    elif missing_apis or missing_methods or not plugin_bridge_available:
         next_action = {
             "action": "update_adapter_plugin",
             "missing_apis": missing_apis,
+            "missing_methods": missing_methods,
             "plugin_bridge_available": plugin_bridge_available,
             "retry_tool": "unreal_ai__ai_capability_preflight",
         }
@@ -220,6 +249,7 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
         "required_apis": list(_REQUIRED_APIS),
         "available_apis": available_apis,
         "missing_apis": missing_apis,
+        "missing_methods": missing_methods,
         "required_plugins": required_plugins,
         "enabled_plugins": enabled_plugins,
         "missing_plugins": missing_plugins,
@@ -239,6 +269,32 @@ def _asset_class(asset: Any) -> str:
     cls = get_class()
     get_name = getattr(cls, "get_name", None) or getattr(cls, "get_path_name", None)
     return str(get_name()) if callable(get_name) else str(getattr(cls, "__name__", ""))
+
+
+def _is_blackboard_data(unreal: Any, asset: Any, cls_name: str) -> bool:
+    """Return True only when *asset* is a BlackboardData (or a subclass).
+
+    Prefer the engine's real type relationship (``isinstance`` / ``is_child_of``)
+    and fall back to an exact reflected class-name match for hosts/doubles that
+    do not expose the type object.  A substring match is deliberately avoided:
+    a look-alike name such as ``NotBlackboardDataTable`` must not pass.
+    """
+    blackboard_data = getattr(unreal, "BlackboardData", None)
+    if isinstance(blackboard_data, type):
+        try:
+            if isinstance(asset, blackboard_data):
+                return True
+        except TypeError:  # noqa: BLE001 - some reflected types reject isinstance
+            pass
+    get_class = getattr(asset, "get_class", None)
+    cls = get_class() if callable(get_class) else None
+    is_child_of = getattr(cls, "is_child_of", None)
+    if callable(is_child_of) and blackboard_data is not None:
+        try:
+            return bool(is_child_of(blackboard_data))
+        except Exception:  # noqa: BLE001 - fall through to the exact name check
+            pass
+    return cls_name == "BlackboardData"
 
 
 def _field(entry: Any, name: str) -> Any:
@@ -294,7 +350,17 @@ def _load_asset(unreal: Any, asset_path: str) -> Any:
     load = _method(library, "load_asset")
     if not exists(asset_path):
         return None
-    return load(asset_path)
+    asset = load(asset_path)
+    if asset is None:
+        # The path is occupied but the engine could not load it.  Treating this
+        # as "missing" would let the create branch write over an existing asset,
+        # violating the "never overwrites an existing asset" contract.
+        raise AiBlackboardError(
+            "Asset exists but could not be loaded at {}".format(asset_path),
+            reason="asset_load_failed",
+            asset_path=asset_path,
+        )
+    return asset
 
 
 def _create_asset(unreal: Any, asset_path: str) -> Any:
@@ -305,6 +371,37 @@ def _create_asset(unreal: Any, asset_path: str) -> Any:
     create = _method(tools, "create_asset")
     package_path, _, asset_name = asset_path.rpartition("/")
     return create(asset_name, package_path, asset_class, factory_class())
+
+
+def _delete_created_asset(unreal: Any, asset: Any, asset_path: str) -> List[str]:
+    """Best-effort removal of an asset this action just created.
+
+    Returns recovery notes (empty on success).  A failed deletion is surfaced
+    to the caller so a "rolled_back" result never hides a leftover empty asset.
+    """
+    library = getattr(unreal, "EditorAssetLibrary", None)
+    notes: List[str] = []
+    delete_loaded = getattr(library, "delete_loaded_asset", None)
+    if callable(delete_loaded):
+        try:
+            if delete_loaded(asset):
+                return []
+            notes.append("delete_loaded_asset returned false for {}".format(asset_path))
+        except Exception as exc:  # noqa: BLE001 - surface deletion failure
+            notes.append("delete_loaded_asset failed: {}".format(exc))
+    else:
+        notes.append("delete_loaded_asset API unavailable")
+    delete_by_path = getattr(library, "delete_asset", None)
+    if callable(delete_by_path):
+        try:
+            if delete_by_path(asset_path):
+                return []
+            notes.append("delete_asset returned false for {}".format(asset_path))
+        except Exception as exc:  # noqa: BLE001 - surface deletion failure
+            notes.append("delete_asset failed: {}".format(exc))
+    else:
+        notes.append("delete_asset API unavailable")
+    return notes
 
 
 def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, key_name: str) -> Any:
@@ -397,7 +494,7 @@ def inspect_blackboard(unreal: Any, asset_path: str) -> Dict[str, Any]:
             "read_only": True,
         }
     cls = _asset_class(asset)
-    if "BlackboardData" not in cls:
+    if not _is_blackboard_data(unreal, asset, cls):
         raise AiBlackboardError(
             "Asset is not a BlackboardData",
             reason="wrong_asset_class",
@@ -428,9 +525,10 @@ def author_blackboard_key(
     Ensures the asset (creating it only when explicitly allowed and absent),
     appends a single typed key inside a scoped editor transaction, verifies the
     mutation through a reflected readback, and only then saves.  Any failure or
-    readback mismatch cancels the transaction and restores the observed key
-    array (undo/cancel semantics), returning a typed error with recovery notes.
-    Existing assets and existing keys are never overwritten or duplicated.
+    readback mismatch cancels the transaction, restores the observed key array
+    (undo/cancel semantics) and removes an asset this call created, returning a
+    typed error with recovery notes.  Existing assets and existing keys are
+    never overwritten or duplicated.
     """
     preflight_result = preflight(unreal)
     if not preflight_result["ready"]:
@@ -469,117 +567,144 @@ def author_blackboard_key(
                 asset_path=path,
             )
         asset = _create_asset(unreal, path)
-        created = True
+        created = asset is not None
     if asset is None:
         raise AiBlackboardError(
             "Engine returned no Blackboard asset",
             reason="asset_unavailable",
             asset_path=path,
-        )
-
-    cls = _asset_class(asset)
-    if "BlackboardData" not in cls:
-        raise AiBlackboardError(
-            "Existing asset is not a BlackboardData; refusing to overwrite",
-            reason="wrong_asset_class",
-            asset_class=cls,
-            asset_path=path,
             created=created,
         )
 
-    raw_before, parsed_before = _read_keys(asset)
-    if any(item["name"] == name for item in parsed_before):
-        raise AiBlackboardError(
-            "A key with this name already exists; refusing to duplicate",
-            reason="duplicate_key",
-            key_name=name,
-            asset_path=path,
-        )
-    if len(parsed_before) >= _MAX_KEYS:
-        raise AiBlackboardError(
-            "Blackboard key count is at the {} limit".format(_MAX_KEYS),
-            reason="limit_exceeded",
-            limit=_MAX_KEYS,
-        )
-
-    get_property = _method(asset, "get_editor_property")
-    set_property = _method(asset, "set_editor_property")
-    txn = _begin_transaction(unreal)
+    # Every failure after a possible creation is funnelled through this guard:
+    # it stamps ``created`` into the error context and, when this call created
+    # the asset, removes it so a "rolled_back" result never leaves a new empty
+    # asset behind.  This also covers pre-transaction rejections (wrong class,
+    # duplicate key, unsupported property, limit) that occur after creation.
+    txn = None
+    get_property: Any = None
+    set_property: Any = None
+    raw_before: List[Any] = []
     mutation_state = "not_started"
     recovery_errors: List[str] = []
     try:
-        new_entry = _build_entry(unreal, entry_cls, key_cls, name)
-        set_property("keys", list(raw_before) + [new_entry])
-        mutation_state = "in_transaction"
-
-        # Real result readback BEFORE any save.
-        _, parsed_after = _read_keys(asset)
-        matched = [item for item in parsed_after if item["name"] == name]
-        expected_type = key_cls_name
-        if not matched:
+        cls = _asset_class(asset)
+        if not _is_blackboard_data(unreal, asset, cls):
             raise AiBlackboardError(
-                "Readback did not observe the authored key",
-                reason="readback_mismatch",
-                expected_key=name,
-                observed=[item["name"] for item in parsed_after],
-            )
-        observed_type = matched[0]["key_type"]
-        if observed_type and observed_type != expected_type and expected_type not in observed_type:
-            raise AiBlackboardError(
-                "Readback observed an unexpected key type",
-                reason="readback_type_mismatch",
-                expected=expected_type,
-                observed=observed_type,
+                "Existing asset is not a BlackboardData; refusing to overwrite",
+                reason="wrong_asset_class",
+                asset_class=cls,
+                asset_path=path,
             )
 
-        # Undo/cancel: restore the observed array if anything above failed.
-        saved = bool(save(asset))
-        if not saved:
+        raw_before, parsed_before = _read_keys(asset)
+        if any(item["name"] == name for item in parsed_before):
             raise AiBlackboardError(
-                "Engine refused to save the Blackboard asset",
-                reason="save_failed",
+                "A key with this name already exists; refusing to duplicate",
+                reason="duplicate_key",
+                key_name=name,
+                asset_path=path,
             )
-        mutation_state = "committed"
+        if len(parsed_before) >= _MAX_KEYS:
+            raise AiBlackboardError(
+                "Blackboard key count is at the {} limit".format(_MAX_KEYS),
+                reason="limit_exceeded",
+                limit=_MAX_KEYS,
+            )
+
+        get_property = _method(asset, "get_editor_property")
+        set_property = _method(asset, "set_editor_property")
+        txn = _begin_transaction(unreal)
+        try:
+            new_entry = _build_entry(unreal, entry_cls, key_cls, name)
+            set_property("keys", list(raw_before) + [new_entry])
+            mutation_state = "in_transaction"
+
+            # Real result readback BEFORE any save.
+            _, parsed_after = _read_keys(asset)
+            matched = [item for item in parsed_after if item["name"] == name]
+            expected_type = key_cls_name
+            if not matched:
+                raise AiBlackboardError(
+                    "Readback did not observe the authored key",
+                    reason="readback_mismatch",
+                    expected_key=name,
+                    observed=[item["name"] for item in parsed_after],
+                )
+            observed_type = matched[0]["key_type"]
+            # Fail closed: an empty or unreadable observed type must NOT pass
+            # the readback gate.  Only the exact type (or a name that contains
+            # it, for derived key types) is accepted before saving.
+            if observed_type != expected_type and expected_type not in observed_type:
+                raise AiBlackboardError(
+                    "Readback observed an unexpected key type",
+                    reason="readback_type_mismatch",
+                    expected=expected_type,
+                    observed=observed_type,
+                )
+
+            saved = bool(save(asset))
+            if not saved:
+                raise AiBlackboardError(
+                    "Engine refused to save the Blackboard asset",
+                    reason="save_failed",
+                )
+            mutation_state = "committed"
+        except AiBlackboardError as exc:
+            recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
+            recovery_errors.extend(_finish_transaction(txn, ok=False))
+            exc.context.update(
+                mutation_state="rolled_back",
+                recovery_errors=recovery_errors,
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001 - convert to a typed result
+            recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
+            recovery_errors.extend(_finish_transaction(txn, ok=False))
+            raise AiBlackboardError(
+                "AI Blackboard authoring failed; transaction cancelled",
+                reason="unexpected_error",
+                detail="{}: {}".format(type(exc).__name__, exc)[:500],
+                mutation_state="rolled_back",
+                recovery_errors=recovery_errors,
+            ) from exc
+        else:
+            recovery_errors.extend(_finish_transaction(txn, ok=True))
+
+        return {
+            "asset_path": path,
+            "created": created,
+            "key_name": name,
+            "key_type": key_type,
+            "key_type_class": key_cls_name,
+            "key_count_before": len(parsed_before),
+            "key_count_after": len(parsed_after),
+            "saved": True,
+            "readback_verified": True,
+            "mutation_state": mutation_state,
+            "recovery_errors": recovery_errors,
+            "generation_verified": False,
+            "reopen_verified": False,
+        }
     except AiBlackboardError as exc:
-        recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
-        recovery_errors.extend(_finish_transaction(txn, ok=False))
-        exc.context.update(
-            mutation_state="rolled_back",
-            recovery_errors=recovery_errors,
-            created=created,
-            asset_path=path,
-        )
+        exc.context["created"] = created
+        exc.context.setdefault("asset_path", path)
+        if created:
+            notes = _delete_created_asset(unreal, asset, path)
+            if notes:
+                exc.context["recovery_errors"] = list(exc.context.get("recovery_errors") or []) + notes
         raise
-    except Exception as exc:  # noqa: BLE001 - convert to a typed result
-        recovery_errors.extend(_rollback(asset, set_property, get_property, raw_before))
-        recovery_errors.extend(_finish_transaction(txn, ok=False))
+    except Exception as exc:  # noqa: BLE001 - defensive: never leak an untyped error
+        notes = _delete_created_asset(unreal, asset, path) if created else []
         raise AiBlackboardError(
             "AI Blackboard authoring failed; transaction cancelled",
             reason="unexpected_error",
             detail="{}: {}".format(type(exc).__name__, exc)[:500],
-            mutation_state="rolled_back",
-            recovery_errors=recovery_errors,
             created=created,
             asset_path=path,
+            mutation_state="rolled_back" if txn is not None else "not_started",
+            recovery_errors=notes,
         ) from exc
-    else:
-        recovery_errors.extend(_finish_transaction(txn, ok=True))
-
-    return {
-        "asset_path": path,
-        "created": created,
-        "key_name": name,
-        "key_type": key_type,
-        "key_type_class": key_cls_name,
-        "key_count_before": len(parsed_before),
-        "key_count_after": len(parsed_after),
-        "saved": True,
-        "readback_verified": True,
-        "mutation_state": mutation_state,
-        "recovery_errors": recovery_errors,
-        "generation_verified": False,
-        "reopen_verified": False,
-    }
 
 
 def _rollback(asset: Any, set_property: Any, get_property: Any, raw_before: List[Any]) -> List[str]:

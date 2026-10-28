@@ -23,17 +23,30 @@ tools:
           description: The AI capability whose readiness should be inspected.
     output_schema:
       type: object
-      required: [ready, next_action]
+      required: [success, message]
       properties:
-        ready: {type: boolean}
-        engine_version: {type: string}
-        version_supported: {type: boolean}
-        available_apis: {type: array, items: {type: string}}
-        missing_apis: {type: array, items: {type: string}}
-        required_apis: {type: array, items: {type: string}}
-        enabled_plugins: {type: array, items: {type: string}}
-        plugin_bridge_available: {type: boolean}
-        next_action: {type: object}
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, 'null']}
+        prompt: {type: [string, 'null']}
+        context:
+          type: [object, 'null']
+          properties:
+            capability: {type: string}
+            engine_version: {type: string}
+            min_engine_version: {type: string}
+            version_supported: {type: boolean}
+            required_apis: {type: array, items: {type: string}}
+            available_apis: {type: array, items: {type: string}}
+            missing_apis: {type: array, items: {type: string}}
+            missing_methods: {type: array, items: {type: string}}
+            required_plugins: {type: array, items: {type: string}}
+            enabled_plugins: {type: array, items: {type: string}}
+            missing_plugins: {type: array, items: {type: string}}
+            plugin_bridge_available: {type: boolean}
+            ready: {type: boolean}
+            next_action: {type: object}
+            reason: {type: string}
     preconditions:
       - The call is read-only and may run without the Unreal main thread.
     expectations:
@@ -70,15 +83,23 @@ tools:
           description: /Game package path of the Blackboard asset to inspect.
     output_schema:
       type: object
-      required: [exists, readback_verified, read_only]
+      required: [success, message]
       properties:
-        exists: {type: boolean}
-        asset_path: {type: string}
-        asset_class: {type: string}
-        keys: {type: array}
-        key_count: {type: integer}
-        readback_verified: {type: boolean}
-        read_only: {type: boolean}
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, 'null']}
+        prompt: {type: [string, 'null']}
+        context:
+          type: [object, 'null']
+          properties:
+            exists: {type: boolean}
+            asset_path: {type: string}
+            asset_class: {type: string}
+            keys: {type: array}
+            key_count: {type: integer}
+            readback_verified: {type: boolean}
+            read_only: {type: boolean}
+            reason: {type: string}
     preconditions:
       - asset_path must be a /Game package path; a wrong-class asset is rejected, never overwritten.
     expectations:
@@ -130,28 +151,37 @@ tools:
           description: Create an empty Blackboard asset when the path is free.
     output_schema:
       type: object
-      required: [readback_verified, mutation_state]
+      required: [success, message]
       properties:
-        readback_verified: {type: boolean}
-        saved: {type: boolean}
-        created: {type: boolean}
-        key_name: {type: string}
-        key_type: {type: string}
-        key_type_class: {type: string}
-        key_count_before: {type: integer}
-        key_count_after: {type: integer}
-        mutation_state: {type: string, enum: [committed, rolled_back]}
-        recovery_errors: {type: array, items: {type: string}}
-        generation_verified: {type: boolean}
-        reopen_verified: {type: boolean}
+        success: {type: boolean}
+        message: {type: string}
+        error: {type: [string, 'null']}
+        prompt: {type: [string, 'null']}
+        context:
+          type: [object, 'null']
+          properties:
+            asset_path: {type: string}
+            created: {type: boolean}
+            key_name: {type: string}
+            key_type: {type: string}
+            key_type_class: {type: string}
+            key_count_before: {type: integer}
+            key_count_after: {type: integer}
+            saved: {type: boolean}
+            readback_verified: {type: boolean}
+            mutation_state: {type: string}
+            recovery_errors: {type: array, items: {type: string}}
+            generation_verified: {type: boolean}
+            reopen_verified: {type: boolean}
+            reason: {type: string}
     preconditions:
       - ai_capability_preflight must report ready=true; the operation otherwise fails closed.
       - The Unreal main thread is required (enforce_thread_affinity=true).
       - Cancellation is advisory; an already-running editor operation is not interrupted, and on failure the transaction is cancelled and the observed key array restored.
     expectations:
-      - On success readback_verified=true, mutation_state=committed, and the readback observed the new key type before saving.
-      - In-transaction failures (readback mismatch, save failure, construction error) produce mutation_state=rolled_back with recovery_errors and no overwrite.
-      - Pre-condition rejections (preflight not ready, invalid input, duplicate key, wrong class, limit) fail before any mutation with their specific reason.
+      - On success readback_verified=true, mutation_state=committed, and the readback observed the new key type before saving. An empty/unreadable observed key type is rejected as readback_type_mismatch, never saved.
+      - Every failure carries created and recovery_errors in its context. If created=true (this call made the asset) that asset is deleted on failure; a failed deletion is recorded in recovery_errors so no empty asset is silently left behind.
+      - In-transaction failures (readback mismatch, save failure, construction error) also cancel the transaction and restore the observed key array; an existing-but-unloadable asset fails closed with asset_load_failed and is never overwritten.
       - generation_verified and reopen_verified stay false; this is current-session readback, not disk-reopen proof.
     call_examples:
       - arguments: {asset_path: /Game/AI/BB_Enemy, key_name: TargetDistance, key_type: float}
