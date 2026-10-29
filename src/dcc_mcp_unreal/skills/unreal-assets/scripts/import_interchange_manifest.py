@@ -113,7 +113,7 @@ def import_interchange_manifest(
         )
 
     # --- import each asset via import_asset (inherits persistence + preflight) ---
-    object_paths: Dict[str, str] = {}
+    object_paths: Dict[int, str] = {}
     succeeded = 0
     failed = 0
     for record, view in zip(plan["assets"], assets_view):
@@ -121,7 +121,9 @@ def import_interchange_manifest(
         if isinstance(result, dict) and result.get("success"):
             context = result.get("context") or {}
             object_path = context.get("object_path") or context.get("asset_path") or ""
-            object_paths[record["source_path"]] = object_path
+            # Key by per-entry identity, not source_path: a duplicate source
+            # file must never overwrite another role's imported object path.
+            object_paths[record["entry_key"]] = object_path
             view["status"] = "imported"
             view["object_path"] = object_path
             succeeded += 1
@@ -133,6 +135,8 @@ def import_interchange_manifest(
 
     # --- optionally build the PBR material from imported texture roles ---
     material_result: Any = None
+    material_failed = False
+    material_error = ""
     material_spec = plan["material"]
     if build_material and material_spec and succeeded > 0:
         texture_kwargs = material_texture_kwargs(plan["assets"], object_paths)
@@ -142,6 +146,13 @@ def import_interchange_manifest(
             call_kwargs["destination_path"] = material_spec["destination_path"]
             call_kwargs["replace_existing"] = material_spec["replace_existing"]
             material_result = _create_material_tool(**call_kwargs)
+            if not (isinstance(material_result, dict) and material_result.get("success")):
+                material_failed = True
+                if isinstance(material_result, dict):
+                    material_error = str(material_result.get("message") or material_result.get("error") or "")
+                else:
+                    material_error = str(material_result)
+                warnings.append("Material '{}' creation failed: {}".format(material_spec["name"], material_error))
         else:
             warnings.append(
                 "Material '{}' declared but no base_color texture was imported; material not built".format(
@@ -154,22 +165,39 @@ def import_interchange_manifest(
         "expected": "all {} assets imported".format(len(assets_view)),
         "actual": "{} imported, {} failed".format(succeeded, failed),
     }
+    context: Dict[str, Any] = {
+        "schema_version": MANIFEST_VERSION,
+        "validate_only": False,
+        "coordinate_system": plan["coordinate_system"],
+        "destination_path": plan["destination_path"],
+        "producer": plan["producer"],
+        "assets": assets_view,
+        "material": material_result,
+        "imports_succeeded": succeeded,
+        "imports_failed": failed,
+        "warnings": warnings,
+    }
+
+    # A declared material that failed to build must never be reported as a
+    # verified success (false acceptance). Surface it as an error while keeping
+    # the import results available for inspection.
+    if material_failed:
+        return skill_error(
+            "Interchange manifest imported {} assets but PBR material '{}' creation failed".format(
+                succeeded, material_spec["name"]
+            ),
+            "material_creation_failed",
+            prompt="Inspect the material creation error; the baked assets were imported and remain available.",
+            material_error=material_error,
+            **context,
+        )
 
     return skill_success(
         "Interchange manifest processed: {} imported, {} failed".format(succeeded, failed),
         prompt="Use get_asset_info with include_details=true to verify imported bounds (cm) and colour space.",
         verified=failed == 0,
         postcondition=postcondition,
-        schema_version=MANIFEST_VERSION,
-        validate_only=False,
-        coordinate_system=plan["coordinate_system"],
-        destination_path=plan["destination_path"],
-        producer=plan["producer"],
-        assets=assets_view,
-        material=material_result,
-        imports_succeeded=succeeded,
-        imports_failed=failed,
-        warnings=warnings,
+        **context,
     )
 
 

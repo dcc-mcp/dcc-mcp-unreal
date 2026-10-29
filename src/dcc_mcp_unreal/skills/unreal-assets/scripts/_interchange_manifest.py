@@ -215,7 +215,8 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
 
 def _normalize_coordinate_system(coords: Any) -> Dict[str, Any]:
     """Validate coordinate metadata and compute unit/axis conversion readback."""
-    coords = coords or {}
+    if coords is None:
+        coords = {}
     if not isinstance(coords, dict):
         raise ManifestError("coordinate_system must be an object")
     source_unit = str(_first_present(coords, ("source_unit", "unit", "from_unit"), "cm")).strip().casefold()
@@ -294,6 +295,10 @@ def _normalize_asset(
         "asset_name": asset_name,
         "destination_path": destination_path,
         "kind": kind,
+        # Stable per-entry identity.  Keying imported object paths by this
+        # (instead of by source_path) means a manifest that lists the same
+        # file twice with different roles cannot cross-wire textures.
+        "entry_key": index,
         "import_kwargs": import_kwargs,
     }
 
@@ -324,6 +329,13 @@ def _normalize_asset(
         gamut = str(_first_present(entry, ("source_gamut", "gamut"), "")).strip().casefold()
         if gamut not in VALID_GAMUTS:
             raise ManifestError("assets[{}].source_gamut must be one of {}".format(index, list(VALID_GAMUTS)))
+        # A source gamut conversion only makes sense for colour (sRGB) maps.
+        # On linear data maps it would produce source_color_space="srgb" plus
+        # non_color_texture=True, a combination import_asset rejects.
+        if gamut and color_space == "linear":
+            raise ManifestError(
+                "assets[{}].source_gamut '{}' requires an srgb color_space, not a linear data map".format(index, gamut)
+            )
 
         result["color_space"] = color_space
         result["map_type_canonical"] = map_type
@@ -367,9 +379,9 @@ def validate_manifest(data: Dict[str, Any], manifest_path: str = "") -> Dict[str
         raise ManifestError("Manifest root must be a JSON object")
 
     version = _first_present(data, _MANIFEST_ALIASES["schema_version"], MANIFEST_VERSION)
-    try:
-        version = int(version)
-    except (TypeError, ValueError):
+    # Reject bool (a bool is an int subclass) and anything that is not already
+    # an int; int() would silently coerce 1.5 and True to 1.
+    if isinstance(version, bool) or not isinstance(version, int):
         raise ManifestError("schema_version must be an integer")
     if version != MANIFEST_VERSION:
         raise ManifestError("Unsupported schema_version {}; expected {}".format(version, MANIFEST_VERSION))
@@ -388,8 +400,19 @@ def validate_manifest(data: Dict[str, Any], manifest_path: str = "") -> Dict[str
 
     assets: List[Dict[str, Any]] = []
     warnings: List[str] = []
+    seen_sources: Dict[str, int] = {}
     for index, entry in enumerate(raw_assets):
         normalized, entry_warnings = _normalize_asset(entry, index, manifest_dir, destination_path)
+        # Duplicate source files are ambiguous: two entries could declare the
+        # same image with different roles, and the last import would win.
+        source = normalized["source_path"]
+        if source in seen_sources:
+            raise ManifestError(
+                "assets[{}] duplicates source_path '{}' already used by assets[{}]".format(
+                    index, source, seen_sources[source]
+                )
+            )
+        seen_sources[source] = index
         assets.append(normalized)
         warnings.extend(entry_warnings)
 
@@ -408,12 +431,13 @@ def validate_manifest(data: Dict[str, Any], manifest_path: str = "") -> Dict[str
     }
 
 
-def material_texture_kwargs(assets: List[Dict[str, Any]], object_paths: Dict[str, str]) -> Dict[str, str]:
+def material_texture_kwargs(assets: List[Dict[str, Any]], object_paths: Dict[int, str]) -> Dict[str, str]:
     """Build ``create_texture_material`` kwargs from imported texture object paths.
 
-    ``object_paths`` maps each asset's ``source_path`` to the Content Browser
-    object path returned by ``import_asset``.  Only canonical PBR roles are
-    wired into the material; unknown roles are ignored.
+    ``object_paths`` maps each asset's per-entry ``entry_key`` to the Content
+    Browser object path returned by ``import_asset``.  Keying by entry (not by
+    ``source_path``) avoids collisions when the same file appears more than once.
+    Only canonical PBR roles are wired into the material; unknown roles are ignored.
     """
     slot_to_param = {
         "base_color": "texture_path",
@@ -430,7 +454,7 @@ def material_texture_kwargs(assets: List[Dict[str, Any]], object_paths: Dict[str
         param = slot_to_param.get(map_type)
         if param is None:
             continue
-        object_path = object_paths.get(asset["source_path"])
+        object_path = object_paths.get(asset["entry_key"])
         if object_path and param not in kwargs:
             kwargs[param] = object_path
     return kwargs

@@ -50,10 +50,10 @@ so the consumer does not double-transform. `applied_by` is always
 | `kind` | `geometry` \| `texture` | no | Inferred from extension / presence of `map_type` when omitted. Alias: `type`. |
 | `asset_name` | string | no | Content Browser asset name; defaults to the file stem. Alias: `name`. |
 | `destination_path` | string | no | Per-asset override of the top-level destination. Alias: `destination`. |
-| `map_type` | string | textures | PBR role (below). Aliases: `map`, `slot`, `role`. |
+| `map_type` | string | no | PBR role (below). Missing on a texture: treated as linear data with a warning and excluded from material role wiring. Aliases: `map`, `slot`, `role`. |
 | `color_space` | `srgb` \| `linear` | textures | Overrides the map-type default. Aliases: `colorspace`, `color`. |
 | `non_color_texture` | bool | textures | Alternative to `color_space`; `true` => linear, `false` => srgb. Aliases: `non_color`, `linear`. |
-| `source_gamut` | `` \| `srgb` | textures | Optional source-gamut conversion for wide-gamut working spaces. Default empty. Alias: `gamut`. |
+| `source_gamut` | `` \| `srgb` | textures | Optional source-gamut conversion for wide-gamut working spaces. Default empty. Only valid on `srgb` (colour) maps; declaring it on a linear data map is a validation error. Alias: `gamut`. |
 | `import_as_geometry_cache` | bool | `.abc` geometry | Import Alembic as Geometry Cache. Alias: `geometry_cache`. |
 
 ### PBR map types and default colour space
@@ -72,6 +72,18 @@ so the consumer does not double-transform. `applied_by` is always
 
 Unknown `map_type` values are treated as generic linear data and produce a
 warning (never a hard failure), keeping the contract forward-tolerant.
+
+### Validation rules
+
+- `schema_version` must be the integer `1` (not a bool, float, or string).
+- Each `source_path` must be unique after path resolution. Listing the same
+  file twice (e.g. with two different roles) is rejected rather than letting
+  one import overwrite the other's material wiring.
+- `coordinate_system`, when present, must be an object; `null`/missing uses
+  defaults, but any other non-object value is an error.
+- `source_gamut: srgb` is accepted only on `srgb` (colour) maps. Declaring it
+  on a linear data map is rejected because it would yield an inconsistent
+  `source_color_space` + `non_color_texture` combination.
 
 ## `material`
 

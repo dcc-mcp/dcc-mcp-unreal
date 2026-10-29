@@ -182,16 +182,34 @@ class TestValidateManifest:
     def test_material_texture_kwargs(self, contract, sample_manifest):
         plan = contract.validate_manifest(sample_manifest, "/x.json")
         object_paths = {
-            plan["assets"][1]["source_path"]: "/Game/CityBank/city_bank_basecolor",
-            plan["assets"][2]["source_path"]: "/Game/CityBank/city_bank_normal",
-            plan["assets"][3]["source_path"]: "/Game/CityBank/city_bank_roughness",
-            plan["assets"][4]["source_path"]: "/Game/CityBank/city_bank_ao",
+            plan["assets"][1]["entry_key"]: "/Game/CityBank/city_bank_basecolor",
+            plan["assets"][2]["entry_key"]: "/Game/CityBank/city_bank_normal",
+            plan["assets"][3]["entry_key"]: "/Game/CityBank/city_bank_roughness",
+            plan["assets"][4]["entry_key"]: "/Game/CityBank/city_bank_ao",
         }
         kwargs = contract.material_texture_kwargs(plan["assets"], object_paths)
         assert kwargs["texture_path"] == "/Game/CityBank/city_bank_basecolor"
         assert kwargs["normal_texture_path"] == "/Game/CityBank/city_bank_normal"
         assert kwargs["roughness_texture_path"] == "/Game/CityBank/city_bank_roughness"
         assert kwargs["ambient_occlusion_texture_path"] == "/Game/CityBank/city_bank_ao"
+
+    def test_entry_key_is_unique_per_asset(self, contract, sample_manifest):
+        plan = contract.validate_manifest(sample_manifest, "/x.json")
+        keys = [a["entry_key"] for a in plan["assets"]]
+        assert keys == sorted(set(keys))
+        assert len(set(keys)) == len(plan["assets"])
+
+    def test_material_kwargs_no_crosswiring_for_shared_source(self, contract):
+        """CR-2: two texture entries sharing one source_path but distinct entry
+        keys must map to their own object paths, never overwrite each other."""
+        assets = [
+            {"kind": "texture", "source_path": "/t/x.png", "entry_key": 0, "map_type_canonical": "base_color"},
+            {"kind": "texture", "source_path": "/t/x.png", "entry_key": 1, "map_type_canonical": "normal"},
+        ]
+        object_paths = {0: "/Game/basecolor", 1: "/Game/normal"}
+        kwargs = contract.material_texture_kwargs(assets, object_paths)
+        assert kwargs["texture_path"] == "/Game/basecolor"
+        assert kwargs["normal_texture_path"] == "/Game/normal"
 
 
 class TestManifestErrors:
@@ -205,11 +223,51 @@ class TestManifestErrors:
             {"assets": [{"source_path": "/a.png", "map_type": "normal", "source_gamut": "bogus"}]},
             {"coordinate_system": {"source_unit": "parsec"}, "assets": [{"source_path": "/a.fbx"}]},
             {"material": {"name": ""}, "assets": [{"source_path": "/a.fbx"}]},
+            # CR-3: source_gamut on a linear data map is rejected.
+            {"assets": [{"source_path": "/a.png", "map_type": "normal", "source_gamut": "srgb"}]},
+            # CR-6: bool / float / string schema_version must not coerce to 1.
+            {"schema_version": True, "assets": [{"source_path": "/a.fbx"}]},
+            {"schema_version": 1.5, "assets": [{"source_path": "/a.fbx"}]},
+            {"schema_version": "1", "assets": [{"source_path": "/a.fbx"}]},
+            # CR-5: falsy non-object coordinate_system values are rejected.
+            {"coordinate_system": False, "assets": [{"source_path": "/a.fbx"}]},
+            {"coordinate_system": [], "assets": [{"source_path": "/a.fbx"}]},
+            {"coordinate_system": 0, "assets": [{"source_path": "/a.fbx"}]},
+            # CR-2: duplicate source_path is rejected.
+            {
+                "assets": [
+                    {"source_path": "/t/x.png", "map_type": "base_color"},
+                    {"source_path": "/t/x.png", "map_type": "normal"},
+                ]
+            },
         ],
     )
     def test_invalid_manifest_raises(self, contract, data):
         with pytest.raises(contract.ManifestError):
             contract.validate_manifest(data, "/x.json")
+
+    def test_source_gamut_allowed_on_srgb_map(self, contract):
+        # CR-3: the same gamut is fine on a colour (srgb) map.
+        data = {"assets": [{"source_path": "/t/x.png", "map_type": "base_color", "source_gamut": "srgb"}]}
+        plan = contract.validate_manifest(data, "/x.json")
+        assert plan["assets"][0]["import_kwargs"]["source_color_space"] == "srgb"
+        assert plan["assets"][0]["import_kwargs"]["non_color_texture"] is False
+
+    def test_null_coordinate_system_uses_defaults(self, contract):
+        # CR-5: None / missing still fall back to defaults (not rejected).
+        plan = contract.validate_manifest({"coordinate_system": None, "assets": [{"source_path": "/a.fbx"}]}, "/x.json")
+        assert plan["coordinate_system"]["source_unit"] == "cm"
+
+    def test_duplicate_source_path_resolves_after_normalization(self, contract, tmp_path):
+        # CR-2: two spellings that normalize to the same file are still duplicates.
+        data = {
+            "assets": [
+                {"source_path": "tex/x.png", "asset_name": "A", "map_type": "base_color"},
+                {"source_path": "tex/./x.png", "asset_name": "B", "map_type": "normal"},
+            ]
+        }
+        with pytest.raises(contract.ManifestError):
+            contract.validate_manifest(data, str(tmp_path / "bundle.json"))
 
     def test_load_manifest_missing_file(self, contract, tmp_path):
         with pytest.raises(contract.ManifestError):
@@ -237,7 +295,7 @@ class TestManifestErrors:
 
 
 @contextmanager
-def _orchestrator_env(contract, fail_on=None, inject_unreal=True):
+def _orchestrator_env(contract, fail_on=None, inject_unreal=True, material_fails=False):
     """Load the orchestrator with fake sibling tools kept in sys.modules."""
     calls = {"import_asset": [], "create_texture_material": []}
 
@@ -255,6 +313,8 @@ def _orchestrator_env(contract, fail_on=None, inject_unreal=True):
 
     def fake_create_material(**kwargs):
         calls["create_texture_material"].append(kwargs)
+        if material_fails:
+            return {"success": False, "message": "material boom", "error": "material_failed", "context": {}}
         return {"success": True, "message": "material ok", "error": None, "context": {"object_path": "/Game/M"}}
 
     mod_import = types.ModuleType("import_asset")
@@ -356,6 +416,30 @@ def test_partial_import_failure_is_reported(contract, sample_manifest, tmp_path)
     assert any("boom" in w for w in result["context"]["warnings"])
 
 
+def test_material_creation_failure_is_propagated(contract, sample_manifest, tmp_path):
+    """CR-1: a failed PBR material must not be reported as a verified success."""
+    path = _write_manifest(tmp_path, sample_manifest)
+    with _orchestrator_env(contract, material_fails=True) as (module, calls):
+        result = module.import_interchange_manifest(manifest_path=path)
+    assert result["success"] is False
+    assert result["error"] == "material_creation_failed"
+    assert result["context"]["imports_succeeded"] == 5  # assets did import
+    assert result["context"]["material"]["success"] is False
+    assert any("material" in w.lower() for w in result["context"]["warnings"])
+    # A failed material build must never carry a verified=True postcondition.
+    assert result.get("postcondition", {}).get("verified") is not True
+    assert len(calls["create_texture_material"]) == 1
+
+
+def test_material_creation_success_is_verified(contract, sample_manifest, tmp_path):
+    """CR-1 companion: a successful material build stays a verified success."""
+    path = _write_manifest(tmp_path, sample_manifest)
+    with _orchestrator_env(contract) as (module, _):
+        result = module.import_interchange_manifest(manifest_path=path)
+    assert result["success"] is True
+    assert result["postcondition"]["verified"] is True
+
+
 def test_validate_only_needs_no_unreal(contract, sample_manifest, tmp_path):
     """validate_only path must work even with no unreal importable at all."""
     path = _write_manifest(tmp_path, sample_manifest)
@@ -390,12 +474,23 @@ def test_tool_declared_in_tools_yaml():
     assert tool["input_schema"]["required"] == ["manifest_path"]
 
 
+def test_tool_is_marked_destructive():
+    """CR-4: material.replace_existing defaults to true, so the tool can mutate
+    an existing material's graph and must be flagged destructive for clients."""
+    data = yaml.safe_load(TOOLS_YAML.read_text(encoding="utf-8"))
+    tool = {t["name"]: t for t in data["tools"]}["import_interchange_manifest"]
+    assert tool["destructive"] is True
+
+
 def test_reference_doc_exists_and_linked():
     ref = ASSET_SKILL / "references" / "INTERCHANGE_MANIFEST.md"
     assert ref.is_file()
     skill_md = (ASSET_SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "references/INTERCHANGE_MANIFEST.md" in skill_md
     assert "import_interchange_manifest" in skill_md
+    # CR-7: the reference must not claim map_type is required for textures;
+    # it documents the "missing => linear data, excluded from material" behaviour.
+    assert "Missing on a texture" in ref.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("path", [CONTRACT_PATH, ORCHESTRATOR_PATH])
