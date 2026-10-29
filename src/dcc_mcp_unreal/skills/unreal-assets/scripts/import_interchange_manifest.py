@@ -143,16 +143,17 @@ def import_interchange_manifest(
         # CR-9: when a material is actually built, make a "same PBR role, many
         # textures" ambiguity explicit instead of silently wiring the first.
         # Import-only / validate_only / build_material=false paths never reach
-        # here, so those manifests stay valid.
-        duplicates = duplicate_wired_roles(plan["assets"], object_paths)
-        if duplicates:
-            warnings.append(
-                "Material '{}' has multiple imported textures for PBR role(s) {}; "
-                "only the first per role is wired. Declare one texture per role "
-                "for a deterministic material.".format(material_spec["name"], ", ".join(duplicates))
-            )
+        # here, so those manifests stay valid. Only warn once a base-color
+        # texture exists (CR-11): no base_color means no material is built.
         texture_kwargs = material_texture_kwargs(plan["assets"], object_paths)
         if texture_kwargs.get("texture_path"):
+            duplicates = duplicate_wired_roles(plan["assets"], object_paths)
+            if duplicates:
+                warnings.append(
+                    "Material '{}' has multiple imported textures for PBR role(s) {}; "
+                    "only the first per role is wired. Declare one texture per role "
+                    "for a deterministic material.".format(material_spec["name"], ", ".join(duplicates))
+                )
             call_kwargs = dict(texture_kwargs)
             call_kwargs["material_name"] = material_spec["name"]
             call_kwargs["destination_path"] = material_spec["destination_path"]

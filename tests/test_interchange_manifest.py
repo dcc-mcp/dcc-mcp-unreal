@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import ntpath
 import sys
 import types
 from contextlib import contextmanager
@@ -302,6 +303,29 @@ class TestManifestErrors:
         with pytest.raises(contract.ManifestError):
             contract.validate_manifest(data, "/x.json")
 
+    def test_duplicate_source_path_is_case_insensitive(self, contract, monkeypatch):
+        # CR-10: on case-insensitive platforms (Windows) normpath keeps case,
+        # so case-variant paths must collide. Force ntpath.normcase so this
+        # test is independent of the CI platform's os.path implementation.
+        monkeypatch.setattr(contract.os.path, "normcase", ntpath.normcase)
+        data = {
+            "assets": [
+                {"source_path": "/t/x.png", "map_type": "base_color"},
+                {"source_path": "/t/X.png", "map_type": "normal"},
+            ]
+        }
+        with pytest.raises(contract.ManifestError):
+            contract.validate_manifest(data, "/x.json")
+
+    def test_normcase_key_keeps_original_import_path(self, contract, monkeypatch):
+        # CR-10: normcase is only a comparison key; the normalized path (with
+        # its original case) must still be used for import.
+        monkeypatch.setattr(contract.os.path, "normcase", ntpath.normcase)
+        data = {"assets": [{"source_path": "/T/Mixed.png", "map_type": "base_color"}]}
+        plan = contract.validate_manifest(data, "/x.json")
+        assert "Mixed" in plan["assets"][0]["source_path"]
+        assert plan["assets"][0]["import_kwargs"]["source_path"] == plan["assets"][0]["source_path"]
+
     def test_load_manifest_missing_file(self, contract, tmp_path):
         with pytest.raises(contract.ManifestError):
             contract.load_manifest(str(tmp_path / "nope.json"))
@@ -450,6 +474,22 @@ def test_duplicate_wired_roles_silent_for_import_only(contract, tmp_path):
         result = module.import_interchange_manifest(manifest_path=path, build_material=False)
     assert result["success"] is True
     assert calls["create_texture_material"] == []
+    assert not any("multiple imported textures" in w for w in result["context"]["warnings"])
+
+
+def test_duplicate_wired_roles_silent_without_base_color(contract, tmp_path):
+    """CR-11: no base_color -> no material built -> no misleading role warning."""
+    data = {
+        "assets": [
+            {"source_path": "/t/n1.png", "map_type": "normal"},
+            {"source_path": "/t/n2.png", "map_type": "normal"},
+        ],
+        "material": {"name": "M_NoBase"},
+    }
+    path = _write_manifest(tmp_path, data)
+    with _orchestrator_env(contract) as (module, calls):
+        result = module.import_interchange_manifest(manifest_path=path, build_material=True)
+    assert calls["create_texture_material"] == []  # no base_color -> material not built
     assert not any("multiple imported textures" in w for w in result["context"]["warnings"])
 
 

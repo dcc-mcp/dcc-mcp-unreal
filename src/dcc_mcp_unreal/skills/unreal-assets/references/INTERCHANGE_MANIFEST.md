@@ -77,9 +77,11 @@ warning (never a hard failure), keeping the contract forward-tolerant.
 
 - `schema_version` must be the integer `1` (not a bool, float, or string).
 - Each `source_path` must be unique after path resolution (both relative and
-  absolute paths are normalized). Listing the same file twice (e.g. with two
-  different roles, or via `/t/x.png` vs `/t/./x.png`) is rejected rather than
-  letting one import overwrite the other's material wiring.
+  absolute paths are normalized; the comparison key is case-insensitive on
+  case-insensitive platforms such as Windows, while the original path is kept
+  for import). Listing the same file twice (e.g. with two different roles, via
+  `/t/x.png` vs `/t/./x.png`, or `C:/T/x.png` vs `c:/t/X.png` on Windows) is
+  rejected rather than letting one import overwrite the other's material wiring.
 - `coordinate_system`, when present, must be an object; `null`/missing uses
   defaults, but any other non-object value is an error.
 - `source_gamut: srgb` is accepted only on `srgb` (colour) maps. Declaring it

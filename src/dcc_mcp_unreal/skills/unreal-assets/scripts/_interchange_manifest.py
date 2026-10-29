@@ -408,14 +408,17 @@ def validate_manifest(data: Dict[str, Any], manifest_path: str = "") -> Dict[str
         normalized, entry_warnings = _normalize_asset(entry, index, manifest_dir, destination_path)
         # Duplicate source files are ambiguous: two entries could declare the
         # same image with different roles, and the last import would win.
+        # Compare a platform-aware key (case-insensitive on Windows) but keep
+        # the original normalized path for import and error messages.
         source = normalized["source_path"]
-        if source in seen_sources:
+        duplicate_key = os.path.normcase(source)
+        if duplicate_key in seen_sources:
             raise ManifestError(
                 "assets[{}] duplicates source_path '{}' already used by assets[{}]".format(
-                    index, source, seen_sources[source]
+                    index, source, seen_sources[duplicate_key]
                 )
             )
-        seen_sources[source] = index
+        seen_sources[duplicate_key] = index
         assets.append(normalized)
         warnings.extend(entry_warnings)
 
