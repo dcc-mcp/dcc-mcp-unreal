@@ -76,9 +76,10 @@ warning (never a hard failure), keeping the contract forward-tolerant.
 ### Validation rules
 
 - `schema_version` must be the integer `1` (not a bool, float, or string).
-- Each `source_path` must be unique after path resolution. Listing the same
-  file twice (e.g. with two different roles) is rejected rather than letting
-  one import overwrite the other's material wiring.
+- Each `source_path` must be unique after path resolution (both relative and
+  absolute paths are normalized). Listing the same file twice (e.g. with two
+  different roles, or via `/t/x.png` vs `/t/./x.png`) is rejected rather than
+  letting one import overwrite the other's material wiring.
 - `coordinate_system`, when present, must be an object; `null`/missing uses
   defaults, but any other non-object value is an error.
 - `source_gamut: srgb` is accepted only on `srgb` (colour) maps. Declaring it
@@ -96,6 +97,10 @@ warning (never a hard failure), keeping the contract forward-tolerant.
 The consumer wires imported textures into `create_texture_material` by canonical
 role: `base_color` -> `texture_path`, `normal` -> `normal_texture_path`, etc. A
 material is only built when a base-colour texture was successfully imported.
+When several imported textures declare the same wired PBR role, the build
+emits a warning and wires the first per role (declare one texture per role for
+a deterministic material). This ambiguity is only surfaced on the material path;
+import-only and `build_material=false` manifests stay valid.
 
 ## Example
 

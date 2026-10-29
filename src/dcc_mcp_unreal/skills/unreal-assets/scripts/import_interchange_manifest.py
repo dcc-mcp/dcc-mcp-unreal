@@ -25,6 +25,7 @@ from typing import Any, Dict, List
 from _interchange_manifest import (
     MANIFEST_VERSION,
     ManifestError,
+    duplicate_wired_roles,
     load_manifest,
     material_texture_kwargs,
     validate_manifest,
@@ -139,6 +140,17 @@ def import_interchange_manifest(
     material_error = ""
     material_spec = plan["material"]
     if build_material and material_spec and succeeded > 0:
+        # CR-9: when a material is actually built, make a "same PBR role, many
+        # textures" ambiguity explicit instead of silently wiring the first.
+        # Import-only / validate_only / build_material=false paths never reach
+        # here, so those manifests stay valid.
+        duplicates = duplicate_wired_roles(plan["assets"], object_paths)
+        if duplicates:
+            warnings.append(
+                "Material '{}' has multiple imported textures for PBR role(s) {}; "
+                "only the first per role is wired. Declare one texture per role "
+                "for a deterministic material.".format(material_spec["name"], ", ".join(duplicates))
+            )
         texture_kwargs = material_texture_kwargs(plan["assets"], object_paths)
         if texture_kwargs.get("texture_path"):
             call_kwargs = dict(texture_kwargs)

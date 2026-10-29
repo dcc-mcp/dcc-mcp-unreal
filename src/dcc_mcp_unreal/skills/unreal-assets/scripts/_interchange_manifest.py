@@ -259,9 +259,12 @@ def _normalize_asset(
     if not source_path or not isinstance(source_path, str):
         raise ManifestError("assets[{}].source_path is required and must be a string".format(index))
 
-    # Resolve relative source paths against the manifest's own directory.
+    # Resolve relative paths against the manifest directory, then canonicalize
+    # every path (absolute paths included) so the duplicate check compares
+    # resolved spellings rather than raw strings.
     if not os.path.isabs(source_path):
-        source_path = os.path.normpath(os.path.join(manifest_dir, source_path))
+        source_path = os.path.join(manifest_dir, source_path)
+    source_path = os.path.normpath(source_path)
 
     extension = os.path.splitext(source_path)[1].lower()
     kind = _first_present(entry, _ASSET_ALIASES["kind"])
@@ -431,6 +434,35 @@ def validate_manifest(data: Dict[str, Any], manifest_path: str = "") -> Dict[str
     }
 
 
+# Canonical PBR roles consumed by ``create_texture_material`` (role -> kwarg).
+_WIRED_ROLE_PARAMS = {
+    "base_color": "texture_path",
+    "normal": "normal_texture_path",
+    "roughness": "roughness_texture_path",
+    "metallic": "metallic_texture_path",
+    "ambient_occlusion": "ambient_occlusion_texture_path",
+}
+
+
+def duplicate_wired_roles(assets: List[Dict[str, Any]], object_paths: Dict[int, str]) -> List[str]:
+    """Return canonical roles wired by more than one *imported* texture.
+
+    A role fed by several textures is ambiguous: ``material_texture_kwargs``
+    keeps only the first per role. This ambiguity matters only when a material
+    is actually built, so callers consult it on the material-building path
+    alone; import-only and ``build_material=false`` flows never call it.
+    Roles without a successfully imported object path are ignored.
+    """
+    counts: Dict[str, int] = {}
+    for asset in assets:
+        if asset.get("kind") != "texture" or not object_paths.get(asset["entry_key"]):
+            continue
+        role = asset.get("map_type_canonical") or asset.get("map_type")
+        if role in _WIRED_ROLE_PARAMS:
+            counts[role] = counts.get(role, 0) + 1
+    return sorted(role for role, count in counts.items() if count > 1)
+
+
 def material_texture_kwargs(assets: List[Dict[str, Any]], object_paths: Dict[int, str]) -> Dict[str, str]:
     """Build ``create_texture_material`` kwargs from imported texture object paths.
 
@@ -439,19 +471,12 @@ def material_texture_kwargs(assets: List[Dict[str, Any]], object_paths: Dict[int
     ``source_path``) avoids collisions when the same file appears more than once.
     Only canonical PBR roles are wired into the material; unknown roles are ignored.
     """
-    slot_to_param = {
-        "base_color": "texture_path",
-        "normal": "normal_texture_path",
-        "roughness": "roughness_texture_path",
-        "metallic": "metallic_texture_path",
-        "ambient_occlusion": "ambient_occlusion_texture_path",
-    }
     kwargs: Dict[str, str] = {}
     for asset in assets:
         if asset.get("kind") != "texture":
             continue
         map_type = asset.get("map_type_canonical") or asset.get("map_type")
-        param = slot_to_param.get(map_type)
+        param = _WIRED_ROLE_PARAMS.get(map_type)
         if param is None:
             continue
         object_path = object_paths.get(asset["entry_key"])

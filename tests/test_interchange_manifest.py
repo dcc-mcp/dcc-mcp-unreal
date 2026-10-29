@@ -211,6 +211,27 @@ class TestValidateManifest:
         assert kwargs["texture_path"] == "/Game/basecolor"
         assert kwargs["normal_texture_path"] == "/Game/normal"
 
+    def test_duplicate_wired_roles_detects_repeats(self, contract):
+        # CR-9: two imported textures for the same wired role are ambiguous.
+        assets = [
+            {"kind": "texture", "source_path": "/a.png", "entry_key": 0, "map_type_canonical": "base_color"},
+            {"kind": "texture", "source_path": "/b.png", "entry_key": 1, "map_type_canonical": "base_color"},
+            {"kind": "texture", "source_path": "/n.png", "entry_key": 2, "map_type_canonical": "normal"},
+        ]
+        object_paths = {0: "/Game/a", 1: "/Game/b", 2: "/Game/n"}
+        assert contract.duplicate_wired_roles(assets, object_paths) == ["base_color"]
+
+    def test_duplicate_wired_roles_ignores_unimported_and_unwired(self, contract):
+        # CR-9: a role only counts when it was imported; unwired roles are ignored.
+        assets = [
+            {"kind": "texture", "source_path": "/a.png", "entry_key": 0, "map_type_canonical": "base_color"},
+            {"kind": "texture", "source_path": "/b.png", "entry_key": 1, "map_type_canonical": "base_color"},
+            {"kind": "texture", "source_path": "/d.png", "entry_key": 2, "map_type_canonical": "data"},
+            {"kind": "texture", "source_path": "/e.png", "entry_key": 3, "map_type_canonical": "data"},
+        ]
+        object_paths = {0: "/Game/a"}  # only one base_color imported, no data imported
+        assert contract.duplicate_wired_roles(assets, object_paths) == []
+
 
 class TestManifestErrors:
     @pytest.mark.parametrize(
@@ -268,6 +289,18 @@ class TestManifestErrors:
         }
         with pytest.raises(contract.ManifestError):
             contract.validate_manifest(data, str(tmp_path / "bundle.json"))
+
+    def test_duplicate_absolute_source_path_is_rejected(self, contract):
+        # CR-8: absolute paths must also be normalized before the duplicate
+        # check. /t/x.png and /t/./x.png resolve to the same file.
+        data = {
+            "assets": [
+                {"source_path": "/t/x.png", "map_type": "base_color"},
+                {"source_path": "/t/./x.png", "map_type": "normal"},
+            ]
+        }
+        with pytest.raises(contract.ManifestError):
+            contract.validate_manifest(data, "/x.json")
 
     def test_load_manifest_missing_file(self, contract, tmp_path):
         with pytest.raises(contract.ManifestError):
@@ -386,6 +419,38 @@ def test_build_material_false_skips_material(contract, sample_manifest, tmp_path
     with _orchestrator_env(contract) as (module, calls):
         module.import_interchange_manifest(manifest_path=path, build_material=False)
     assert calls["create_texture_material"] == []
+
+
+def _duplicate_role_manifest():
+    # Two distinct files both declare base_color: the material path must
+    # surface the ambiguity; import-only must stay valid.
+    return {
+        "assets": [
+            {"source_path": "/t/base_a.png", "map_type": "base_color"},
+            {"source_path": "/t/base_b.png", "map_type": "base_color"},
+            {"source_path": "/t/n.png", "map_type": "normal"},
+        ],
+        "material": {"name": "M_Dup"},
+    }
+
+
+def test_duplicate_wired_roles_warns_when_building_material(contract, tmp_path):
+    """CR-9: build_material path makes the ambiguous role explicit."""
+    path = _write_manifest(tmp_path, _duplicate_role_manifest())
+    with _orchestrator_env(contract) as (module, _):
+        result = module.import_interchange_manifest(manifest_path=path, build_material=True)
+    assert result["success"] is True  # ambiguity is surfaced, not a hard failure
+    assert any("base_color" in w and "multiple" in w for w in result["context"]["warnings"])
+
+
+def test_duplicate_wired_roles_silent_for_import_only(contract, tmp_path):
+    """CR-9: import-only / build_material=false manifests remain valid and quiet."""
+    path = _write_manifest(tmp_path, _duplicate_role_manifest())
+    with _orchestrator_env(contract) as (module, calls):
+        result = module.import_interchange_manifest(manifest_path=path, build_material=False)
+    assert result["success"] is True
+    assert calls["create_texture_material"] == []
+    assert not any("multiple imported textures" in w for w in result["context"]["warnings"])
 
 
 def test_missing_manifest_path_errors(contract):
