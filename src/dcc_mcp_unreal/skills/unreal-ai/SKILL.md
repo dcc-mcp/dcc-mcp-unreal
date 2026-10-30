@@ -78,8 +78,12 @@ shallow one-to-one C++-module-to-skill mapping.
 
 - Preflight gates: Unreal Engine `>= 5.0`, the seven required Python-exposed
   symbols **and** the editor methods the write path calls, plus the adapter's
-  native plugin-enumeration bridge. A failed gate yields `ready=false` and one
-  machine-readable `next_action`.
+  native plugin-enumeration bridge. It also resolves the requested
+  `BlackboardKeyType_*` UCLASS through `/Script/AIModule` (via `load_class`),
+  because UE 5.5/5.8 do not expose these classes as `unreal` module attributes;
+  a host that cannot resolve them must not report `ready=true`. Pass `key_type`
+  to gate a specific one (defaults to `float`). A failed gate yields
+  `ready=false` and one machine-readable `next_action`.
 - Typed errors carry a `reason` such as `preflight_not_ready`,
   `unsupported_api`, `invalid_asset_path`, `invalid_key_name`,
   `unsupported_key_type`, `duplicate_key`, `wrong_asset_class`,
@@ -99,9 +103,15 @@ shallow one-to-one C++-module-to-skill mapping.
 
 - At most 128 keys, 96-character key names, and a 240-character `/Game` package
   path; exceeding a limit rejects the operation rather than truncating.
-- Real result readback is reflected editor state in the current session. A
-  successful `save` is **not** proof of disk persistence or editor-restart
-  survival. `generation_verified` and `reopen_verified` stay false.
+- The key type is instantiated with `new_object(cls, asset)` so it is a
+  persistent subobject outered to the Blackboard asset; a transient-outer key
+  type would pass the in-session readback but read back empty after a
+  save/reopen (the outer-as-asset construction was validated in diagnostic
+  UE 5.5/5.8 commandlets).
+- Real result readback is reflected editor state in the current session; the
+  tool does not itself reopen the asset from disk, so `generation_verified` and
+  `reopen_verified` stay false. A separate real-host save-and-reopen probe is
+  the authoritative disk-persistence gate.
 - Real Unreal Editor / commandlet and GUI/PIE acceptance are separate gates and
   are not claimed here. The bounded unit contracts live in
   `tests/test_ai_blackboard_authoring.py`; a host commandlet probe is sketched

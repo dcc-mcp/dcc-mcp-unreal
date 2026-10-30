@@ -70,11 +70,29 @@ class FakeName:
 
 
 class FakeKeyType:
-    def __init__(self, name="BlackboardKeyType_Float", get_class_name=None):
+    def __init__(self, name="BlackboardKeyType_Float", get_class_name=None, outer=None):
         self._name = name if get_class_name is None else get_class_name
+        # Models the UObject Outer.  A key type outered to the Blackboard asset
+        # is serialized on save; a transient (None) outer is not (H2).
+        self.outer = outer
 
     def get_class(self):
         return types.SimpleNamespace(get_name=lambda: self._name)
+
+
+class FakeKeyTypeClass:
+    """Stand-in for the UClass returned by ``unreal.load_class`` on UE 5.5/5.8.
+
+    On those hosts ``BlackboardKeyType_*`` are not exposed as ``unreal.``
+    attributes; they are only reachable through ``load_class``.  Instances are
+    then built with ``unreal.new_object(cls, outer)``.
+    """
+
+    def __init__(self, name):
+        self._name = name
+
+    def get_name(self):
+        return self._name
 
 
 class FakeEntry:
@@ -200,7 +218,19 @@ class FakeAssetTools:
 
 
 class FakeUnreal:
-    """Configurable ``unreal`` module double."""
+    """Configurable ``unreal`` module double that models the real 5.5/5.8 host.
+
+    On those hosts the ``BlackboardKeyType_*`` UCLASSes are NOT exposed as
+    ``unreal.<Name>`` attributes; they are resolved through
+    ``unreal.load_class(None, "/Script/AIModule.<Name>")`` and instantiated via
+    ``unreal.new_object(cls, outer)``.  Previously this double hung the classes
+    on the module, which is why the CI suite missed the H1 host failure.  The
+    default model below uses ``load_class`` + ``new_object`` and records the
+    outer so persistence (H2) can be asserted; ``key_type_on_module=True``
+    re-enables the legacy attribute path for fallback-path tests.
+    """
+
+    _SCRIPT_PREFIX = "/Script/AIModule."
 
     def __init__(
         self,
@@ -218,6 +248,10 @@ class FakeUnreal:
         drop_writes=False,
         entry_constructible=True,
         key_type_constructible=True,
+        key_type_loadable=True,
+        key_type_on_module=False,
+        new_object_available=True,
+        new_object_transient=False,
         cancel_raises=False,
         empty_key_type_class=False,
     ):
@@ -230,6 +264,12 @@ class FakeUnreal:
         )
         self.transactions = []
         self.created_assets = {}
+        self.load_class_calls = []
+        self.new_object_calls = []
+        self._key_type_loadable = key_type_loadable
+        self._key_type_constructible = key_type_constructible
+        self._empty_key_type_class = empty_key_type_class
+        self._new_object_transient = new_object_transient
 
         self._module.SystemLibrary = types.SimpleNamespace(get_engine_version=lambda: version)
         if plugin_bridge:
@@ -241,22 +281,24 @@ class FakeUnreal:
         self._module.BlackboardData = type("BlackboardData", (), {})
         self._module.BlackboardDataFactory = type("BlackboardDataFactory", (), {})
 
-        for cls_name in KEY_TYPE_CLASSES:
-            if empty_key_type_class:
-                setattr(self._module, cls_name, lambda: FakeKeyType(get_class_name=""))
-            else:
-                setattr(
-                    self._module,
-                    cls_name,
-                    (lambda n: lambda: FakeKeyType(n))(cls_name),
-                )
-        if not key_type_constructible:
+        # Real-host key type resolution + construction surface.
+        self._module.load_class = self._load_class
+        if new_object_available:
+            self._module.new_object = self._new_object
 
-            def bad_key_type():
-                raise RuntimeError("cannot construct key type")
-
+        if key_type_on_module:
             for cls_name in KEY_TYPE_CLASSES:
-                setattr(self._module, cls_name, bad_key_type)
+                if empty_key_type_class:
+                    setattr(self._module, cls_name, lambda: FakeKeyType(get_class_name=""))
+                else:
+                    setattr(self._module, cls_name, (lambda n: lambda: FakeKeyType(n))(cls_name))
+            if not key_type_constructible:
+
+                def bad_key_type():
+                    raise RuntimeError("cannot construct key type")
+
+                for cls_name in KEY_TYPE_CLASSES:
+                    setattr(self._module, cls_name, bad_key_type)
 
         if entry_constructible:
             self._module.BlackboardEntry = FakeEntry
@@ -277,6 +319,26 @@ class FakeUnreal:
         for name in missing_symbols or []:
             if hasattr(self._module, name):
                 delattr(self._module, name)
+
+    def _load_class(self, outer, path):
+        self.load_class_calls.append((outer, path))
+        if not self._key_type_loadable:
+            return None
+        if isinstance(path, str) and path.startswith(self._SCRIPT_PREFIX):
+            name = path[len(self._SCRIPT_PREFIX) :]
+            if name in KEY_TYPE_CLASSES:
+                return FakeKeyTypeClass(name)
+        return None
+
+    def _new_object(self, cls, outer=None):
+        self.new_object_calls.append((cls, outer))
+        if not self._key_type_constructible:
+            raise RuntimeError("cannot construct key type")
+        name = cls.get_name() if isinstance(cls, FakeKeyTypeClass) else getattr(cls, "_name", "BlackboardKeyType_Float")
+        if self._empty_key_type_class:
+            name = ""
+        effective_outer = None if self._new_object_transient else outer
+        return FakeKeyType(name=name, outer=effective_outer)
 
     @property
     def module(self):
@@ -514,9 +576,12 @@ def test_author_rolls_back_on_save_failure():
 def test_author_rolls_back_when_key_type_construction_fails():
     core = _load_core()
     fake = FakeUnreal(key_type_constructible=False)
+    # The class is still resolvable via load_class; only new_object() fails.
+    assert core.preflight(fake.module, key_type="float")["key_type_available"] is True
     with pytest.raises(core.AiBlackboardError) as exc:
         core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X")
     # Construction happens inside the transaction, so rollback is exercised.
+    assert exc.value.reason == "key_type_construction_unavailable"
     assert exc.value.context["mutation_state"] == "rolled_back"
     assert fake.transactions and fake.transactions[0].cancelled
 
@@ -1027,3 +1092,150 @@ def test_n3_failure_context_matches_documented_expectations():
         core.author_blackboard_key(fake.module, "/Game/AI/BB", "X")
     assert exc.value.context["created"] is False
     assert "recovery_errors" in exc.value.context
+
+
+# ---------------------------------------------------------------------------
+# Real-host acceptance regressions (H1 load_class, H2 asset outer, H3 gates)
+# ---------------------------------------------------------------------------
+
+
+def test_h1_fake_unreal_models_real_host_key_type_surface():
+    # On UE 5.5/5.8 the BlackboardKeyType_* UCLASSes are NOT unreal module
+    # attributes; the double must reflect that (this is why CI missed H1).
+    fake = FakeUnreal()
+    assert getattr(fake.module, "BlackboardKeyType_Float", None) is None
+    # But they are resolvable through load_class from the AIModule package.
+    cls = fake.module.load_class(None, "/Script/AIModule.BlackboardKeyType_Float")
+    assert isinstance(cls, FakeKeyTypeClass)
+    assert cls.get_name() == "BlackboardKeyType_Float"
+    assert callable(fake.module.new_object)
+
+
+def test_h1_author_resolves_key_type_via_load_class_not_attribute():
+    core = _load_core()
+    fake = FakeUnreal()
+    # Authoring must succeed even though the class is not an unreal attribute.
+    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
+    assert result["saved"] is True
+    assert result["readback_verified"] is True
+    assert result["key_type_class"] == "BlackboardKeyType_Float"
+    # The AIModule load path was actually exercised.
+    assert any(path == "/Script/AIModule.BlackboardKeyType_Float" for _, path in fake.load_class_calls)
+
+
+def test_h1_author_fails_closed_when_key_type_class_unresolvable():
+    core = _load_core()
+    fake = FakeUnreal(key_type_loadable=False)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
+    # Preflight now gates the requested class, so it fails closed before any
+    # mutation with a machine-readable unsupported signal.
+    assert exc.value.reason == "preflight_not_ready"
+    assert exc.value.context["next_action"]["missing_key_types"] == ["BlackboardKeyType_Float"]
+    assert fake.editor_lib.assets == {}
+    assert fake.editor_lib.saved == []
+    assert fake.transactions == []
+
+
+def test_h1_author_falls_back_to_module_attribute_and_direct_constructor():
+    core = _load_core()
+    # Legacy host: class only as an unreal attribute, and no new_object().
+    fake = FakeUnreal(key_type_loadable=False, key_type_on_module=True, new_object_available=False)
+    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
+    assert result["saved"] is True
+    assert result["readback_verified"] is True
+
+
+def test_h2_key_type_is_outered_to_the_blackboard_asset():
+    core = _load_core()
+    fake = FakeUnreal()
+    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
+    assert result["saved"] is True
+    asset = fake.editor_lib.assets["/Game/AI/BB_Enemy"]
+    # new_object must be called with the resolved UClass and the asset as outer.
+    assert fake.new_object_calls, "key type must be constructed via new_object"
+    cls, outer = fake.new_object_calls[-1]
+    assert isinstance(cls, FakeKeyTypeClass)
+    assert cls.get_name() == "BlackboardKeyType_Float"
+    assert outer is asset
+    # The authored entry carries a key type whose Outer is the asset, which is
+    # what makes it persist across save/reopen on real UE 5.5/5.8.
+    entry = fake.editor_lib.assets["/Game/AI/BB_Enemy"].get_editor_property("keys")[-1]
+    key_type = entry.get_editor_property("key_type")
+    assert key_type.outer is asset
+
+
+def test_h2_transient_outer_key_type_does_not_pass_type_readback_after_reopen():
+    # Model the H2 defect: a key type with a transient (None) outer is lost on
+    # reopen, so a "name present but type empty" asset must fail closed in the
+    # commandlet probe reuse branch (H3) instead of reporting status=ok.
+    import importlib.util  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    core = _load_core()
+    spec = importlib.util.spec_from_file_location("ue_probe_h3", COMMANDLET_PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake = FakeUnreal()
+    # A previously-saved asset where the key name exists but its type was lost.
+    lost = FakeEntry(name="ProbeDistance", key_type=FakeKeyType(name="", outer=None))
+    _seed_asset(fake, "/Game/DccMcpAiProbe/BB_Probe", keys=[lost])
+    with patch.dict(sys.modules, {"unreal": fake.module, "_ai_blackboard": core}):
+        result = module.run_probe()
+    assert result["status"] == "rejected"
+    assert result["reason"] == "reused_key_type_mismatch"
+    assert result["readback_verified"] is False
+
+
+def test_h3_preflight_reports_key_type_availability():
+    core = _load_core()
+    fake = FakeUnreal()
+    result = core.preflight(fake.module)
+    assert result["ready"] is True
+    assert result["checked_key_types"] == ["BlackboardKeyType_Float"]
+    assert result["available_key_types"] == ["BlackboardKeyType_Float"]
+    assert result["missing_key_types"] == []
+    assert result["key_type_available"] is True
+    # A specific requested type is gated, not just the default.
+    int_result = core.preflight(fake.module, key_type="int")
+    assert int_result["checked_key_types"] == ["BlackboardKeyType_Int"]
+
+
+def test_h3_preflight_fails_closed_when_requested_key_type_unresolvable():
+    core = _load_core()
+    fake = FakeUnreal(key_type_loadable=False)
+    result = core.preflight(fake.module)
+    assert result["ready"] is False
+    assert result["missing_key_types"] == ["BlackboardKeyType_Float"]
+    assert result["key_type_available"] is False
+    assert result["next_action"]["action"] == "update_adapter_plugin"
+    assert result["next_action"]["missing_key_types"] == ["BlackboardKeyType_Float"]
+
+
+def test_h3_preflight_tool_threads_requested_key_type():
+    fake = FakeUnreal(key_type_loadable=False)
+    result = _run_script("ai_capability_preflight.py", fake, capability="ai_blackboard", key_type="float")
+    # Preflight itself succeeds; readiness is reported in context.
+    assert result["success"] is True
+    assert result["context"]["ready"] is False
+    assert result["context"]["missing_key_types"] == ["BlackboardKeyType_Float"]
+
+
+def test_h3_commandlet_probe_fails_closed_on_type_lost_asset():
+    import importlib.util  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    core = _load_core()
+    spec = importlib.util.spec_from_file_location("ue_probe_h3b", COMMANDLET_PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake = FakeUnreal()
+    lost = FakeEntry(name="ProbeDistance", key_type=FakeKeyType(name="", outer=None))
+    _seed_asset(fake, "/Game/DccMcpAiProbe/BB_Probe", keys=[lost])
+    with patch.dict(sys.modules, {"unreal": fake.module, "_ai_blackboard": core}):
+        result = module.run_probe()
+    # Must NOT report status=ok / readback_verified=true on a type-lost asset.
+    assert result["status"] != "ok"
+    assert result["readback_verified"] is False

@@ -7,12 +7,12 @@ from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry
-def ai_capability_preflight(capability: str = "ai_blackboard", **_kwargs) -> dict:
+def ai_capability_preflight(capability: str = "ai_blackboard", key_type: str = None, **_kwargs) -> dict:
     """Report typed readiness and one deterministic next action, without mutating."""
     try:
         import unreal  # noqa: PLC0415
 
-        result = preflight(unreal, capability)
+        result = preflight(unreal, capability, key_type=key_type)
     except AiBlackboardError as exc:
         return skill_error("AI capability preflight rejected", str(exc), **exc.context)
     except ImportError:

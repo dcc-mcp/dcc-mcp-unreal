@@ -44,24 +44,42 @@ def run_probe():
 
     path = "/Game/DccMcpAiProbe/BB_Probe"
     key_name = "ProbeDistance"
+    # The probe authors a "float" key, so its type must read back as this class.
+    expected_type = core._KEY_TYPES.get("float", "BlackboardKeyType_Float")
     try:
         # Keep the first inspection inside the guard: an occupied or
         # unloadable target must fail closed with JSON, never a traceback.
         result["inspect_before"] = core.inspect_blackboard(unreal, path)
         # Idempotent: this probe targets a dedicated scratch path, so a key left
-        # by an earlier run is reused rather than re-authored. Re-running on the
-        # same project must not fail with duplicate_key -> rejected.
-        already_present = any(k["name"] == key_name for k in result["inspect_before"].get("keys", []))
-        if already_present:
+        # by an earlier run is reused rather than re-authored. FName equality is
+        # case-insensitive, so match names case-insensitively (H3 follow-up).
+        matching = [
+            k for k in result["inspect_before"].get("keys", []) if str(k.get("name", "")).lower() == key_name.lower()
+        ]
+        if matching:
+            observed_type = matching[0].get("key_type") or ""
+            # A name-only match is NOT enough: an asset authored with a
+            # transient-outer key type (H2 defect) reads back with an empty type.
+            # Reusing it must fail closed, never report status=ok.
+            if not observed_type or expected_type not in observed_type:
+                result["author"] = {"reused_existing_key": False, "readback_verified": False}
+                result["inspect_after"] = result["inspect_before"]
+                result["readback_verified"] = False
+                result["status"] = "rejected"
+                result["reason"] = "reused_key_type_mismatch"
+                result["context"] = {"observed_key_type": observed_type, "expected_key_type": expected_type}
+                return result
             result["author"] = {"reused_existing_key": True, "readback_verified": True}
         else:
             result["author"] = core.author_blackboard_key(
                 unreal, path, key_name, key_type="float", create_if_missing=True
             )
         result["inspect_after"] = core.inspect_blackboard(unreal, path)
-        result["readback_verified"] = result["author"].get("readback_verified") is True and any(
-            k["name"] == key_name for k in result["inspect_after"].get("keys", [])
-        )
+        observed = [
+            k for k in result["inspect_after"].get("keys", []) if str(k.get("name", "")).lower() == key_name.lower()
+        ]
+        type_ok = bool(observed) and all(expected_type in (k.get("key_type") or "") for k in observed)
+        result["readback_verified"] = result["author"].get("readback_verified") is True and type_ok
         result["status"] = "ok" if result["readback_verified"] else "readback_failed"
     except core.AiBlackboardError as exc:
         result["status"] = "rejected"
