@@ -278,6 +278,13 @@ def _check_msvc_toolchain(version: str) -> None:
 
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
+    # AutomationTool guards itself with a global mutex derived from its own assembly path, so
+    # every matrix leg on one self-hosted runner contends for the same mutex. A leg that loses
+    # that race aborts with UnauthorizedAccessException unless uebp_UATMutexNoWait is set
+    # (see ProcessSingleton.cs), which makes it proceed instead. The build-uplugin matrix sets
+    # DCC_MCP_UAT_MUTEX_NO_WAIT=1 for exactly that reason.
+    if os.environ.get("DCC_MCP_UAT_MUTEX_NO_WAIT") == "1":
+        os.environ["uebp_UATMutexNoWait"] = "1"
     uat = resolve_uat(args.ue_root)
     cmd = [str(uat)]
     engine_tag = read_engine_tag(args.ue_root)
