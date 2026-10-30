@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.11](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.10...v0.3.11) (2026-10-30)
+
+
+### Features
+
+* **assets:** add typed Houdini to Unreal interchange manifest importer ([#268](https://github.com/dcc-mcp/dcc-mcp-unreal/issues/268)) ([0172d86](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0172d86157bb50758c5f38b7d9e779a9cb04ccf0))
+
 ## [0.3.10](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.9...v0.3.10) (2026-10-25)
 
 
