@@ -45,6 +45,30 @@ recursive dependency closure or proof of saved disk state. Native SpeedTree wind
 binding is not reflected by this contract; shader parameters are not dynamic wind
 validation. The tool does not save assets, change the level or render a preview.
 
+## Houdini -> Unreal interchange manifest
+
+`import_interchange_manifest` consumes a typed JSON sidecar manifest describing
+offline-baked Houdini outputs (baked HDA geometry and COPS/Copernicus PBR
+textures). It validates the manifest with a pure-Python contract, then delegates
+each import to `import_asset` and (optionally) the material build to
+`create_texture_material`. Colour space is derived from each texture's PBR map
+type: base colour / emissive are sRGB, while normal / roughness / metallic /
+AO / opacity / displacement are linear (`non_color_texture=true`). Naming and the
+target `/Game` folder come from the manifest.
+
+Unit scale (m -> cm) and up-axis (Y -> Z) conversions are baked by the Houdini
+producer at export time and **declared** in the manifest; the consumer validates
+and surfaces them as readback (`coordinate_system.unit_scale`,
+`unit_conversion_required`, `axis_conversion_required`) for `get_asset_info`
+verification, and never double-applies a scale. No Houdini Engine plugin, HAPI
+session, or live link is required on the Unreal side.
+
+Use `validate_only=true` to dry-run the contract without an Unreal runtime. The
+full, portable field reference is in
+[references/INTERCHANGE_MANIFEST.md](references/INTERCHANGE_MANIFEST.md); the
+authoritative constants and normalization live in
+`scripts/_interchange_manifest.py`.
+
 Tools for Content Browser asset discovery, import, export, inspection, and deletion.
 
 Static Groom imports require `HairStrands` and `AlembicHairImporter`. Generic
@@ -56,6 +80,7 @@ created, and failures include the exact missing plugin names.
 
 - `list_assets`
 - `import_asset`
+- `import_interchange_manifest`
 - `import_groom_cache`
 - `import_static_groom`
 - `export_asset`

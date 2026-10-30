@@ -1,0 +1,7 @@
+# Keep pull request descriptions free of auto-generated AI/vendor summary
+# blocks. Repository-level policy may be overridden by the organization-level
+# CodeRabbit configuration; verify on the next synchronize event.
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  high_level_summary: false
+  poem: false
