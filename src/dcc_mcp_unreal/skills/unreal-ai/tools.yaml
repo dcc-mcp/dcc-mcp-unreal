@@ -21,6 +21,10 @@ tools:
           enum: [ai_blackboard]
           default: ai_blackboard
           description: The AI capability whose readiness should be inspected.
+        key_type:
+          type: string
+          enum: [bool, int, float, string, name, vector, rotator, object, class]
+          description: Optional key_type whose BlackboardKeyType_* class resolvability should be gated; defaults to float.
     output_schema:
       type: object
       required: [success, message]
@@ -40,6 +44,10 @@ tools:
             available_apis: {type: array, items: {type: string}}
             missing_apis: {type: array, items: {type: string}}
             missing_methods: {type: array, items: {type: string}}
+            checked_key_types: {type: array, items: {type: string}}
+            available_key_types: {type: array, items: {type: string}}
+            missing_key_types: {type: array, items: {type: string}}
+            key_type_available: {type: boolean}
             required_plugins: {type: array, items: {type: string}}
             enabled_plugins: {type: array, items: {type: string}}
             missing_plugins: {type: array, items: {type: string}}
@@ -50,10 +58,13 @@ tools:
     preconditions:
       - The call is read-only and may run without the Unreal main thread.
     expectations:
-      - A missing engine version, API symbol or plugin bridge yields ready=false with one deterministic next_action.
+      - A missing engine version, API symbol, plugin bridge, or unresolvable requested BlackboardKeyType_* class yields ready=false with one deterministic next_action.
+      - Key type classes are resolved through /Script/AIModule (via load_class) because UE 5.5/5.8 do not expose them as unreal module attributes; ready=true requires the requested class to be resolvable.
     call_examples:
       - arguments: {capability: ai_blackboard}
         note: Returns proceed when the host can author a Blackboard, otherwise an update/unsupported action.
+      - arguments: {capability: ai_blackboard, key_type: float}
+        note: Gates resolvability of the specific key type class that will be authored.
     next-tools:
       on-success: [unreal_ai__author_ai_blackboard_key]
       on-failure: [dcc_diagnostics__audit_log]
@@ -179,10 +190,11 @@ tools:
       - The Unreal main thread is required (enforce_thread_affinity=true).
       - Cancellation is advisory; an already-running editor operation is not interrupted, and on failure the transaction is cancelled and the observed key array restored.
     expectations:
+      - The key type class is resolved through /Script/AIModule via load_class (UE 5.5/5.8 do not expose BlackboardKeyType_* as unreal attributes) and instantiated with new_object(cls, asset) so the key type is a persistent subobject outered to the asset; a transient-outer key type would be lost on save/reopen.
       - On success readback_verified=true, mutation_state=committed, and the readback observed the new key type before saving. An empty/unreadable observed key type is rejected as readback_type_mismatch, never saved.
       - Once authoring starts, every failure carries created in its context; recovery_errors is added when a rollback or asset cleanup actually ran (in-transaction failures and deletion of a created=true asset, where a failed deletion is recorded so no empty asset is silently left behind). Preflight and input-validation failures fail closed before any mutation and carry neither field.
       - In-transaction failures (readback mismatch, save failure, construction error) also cancel the transaction and restore the observed key array; an existing-but-unloadable asset fails closed with asset_load_failed and is never overwritten.
-      - generation_verified and reopen_verified stay false; this is current-session readback, not disk-reopen proof.
+      - generation_verified and reopen_verified stay false because the tool verifies reflected editor state, not an actual editor restart; a separate real-host commandlet probe covers save-and-reopen persistence.
     call_examples:
       - arguments: {asset_path: /Game/AI/BB_Enemy, key_name: TargetDistance, key_type: float}
         note: Adds one float key inside a transaction and verifies it through readback.

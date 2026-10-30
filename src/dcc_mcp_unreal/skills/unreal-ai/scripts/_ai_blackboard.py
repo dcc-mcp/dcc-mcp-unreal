@@ -59,6 +59,11 @@ _KEY_TYPES: Dict[str, str] = {
     "class": "BlackboardKeyType_Class",
 }
 
+# UE 5.5/5.8 do not expose ``BlackboardKeyType_*`` as ``unreal.`` attributes;
+# the UCLASSes live in the AIModule script package and are resolved through
+# ``unreal.load_class``.  See ``_load_key_type_class``.
+_AIMODULE_SCRIPT = "/Script/AIModule."
+
 # Python-exposed API symbols required for any editor mutation.  Each is gated
 # in :func:`preflight`; a missing one yields a deterministic next_action.
 _REQUIRED_APIS: Tuple[str, ...] = (
@@ -118,6 +123,64 @@ def _symbol(unreal: Any, name: str) -> Any:
     return symbol
 
 
+def _load_key_type_class(unreal: Any, key_cls_name: str) -> Any:
+    """Resolve a BlackboardKeyType_* UCLASS on this host (H1).
+
+    On UE 5.5/5.8 these classes are not exposed as ``unreal.<Name>``
+    attributes; they are reachable through
+    ``unreal.load_class(None, "/Script/AIModule.<Name>")`` (verified on real
+    hosts).  Prefer that path, and fall back to a direct attribute for hosts
+    / doubles that do expose the symbol.  Raises ``AiBlackboardError`` with
+    ``unsupported_api`` when neither path yields the class.
+    """
+    load_class = getattr(unreal, "load_class", None)
+    if callable(load_class):
+        try:
+            loaded = load_class(None, _AIMODULE_SCRIPT + key_cls_name)
+        except Exception:  # noqa: BLE001 - fall through to the attribute path
+            loaded = None
+        if loaded is not None:
+            return loaded
+    direct = getattr(unreal, key_cls_name, None)
+    if direct is not None:
+        return direct
+    raise AiBlackboardError(
+        "Required key type class {!r} is unavailable on this host".format(key_cls_name),
+        reason="unsupported_api",
+        api=key_cls_name,
+    )
+
+
+def _new_key_type(unreal: Any, key_cls: Any, asset: Any) -> Any:
+    """Construct a key type subobject outered to *asset* (H2 persistence).
+
+    A key type built with a transient outer survives the in-session readback
+    but is not serialized with the Blackboard asset, so the key type reads
+    back empty after a save/reopen.  Passing *asset* as the outer to
+    ``unreal.new_object`` makes it a persistent subobject (verified on UE
+    5.5/5.8).  Falls back to calling the class for hosts / doubles that do
+    not expose ``new_object``.
+    """
+    new_object = getattr(unreal, "new_object", None)
+    if callable(new_object):
+        instance = new_object(key_cls, asset)
+        if instance is not None:
+            return instance
+    return key_cls()
+
+
+def _key_type_resolvable(unreal: Any, key_cls_name: str) -> bool:
+    """Return whether *key_cls_name* can be obtained on this host (no raise)."""
+    load_class = getattr(unreal, "load_class", None)
+    if callable(load_class):
+        try:
+            if load_class(None, _AIMODULE_SCRIPT + key_cls_name) is not None:
+                return True
+        except Exception:  # noqa: BLE001 - fall through to the attribute path
+            pass
+    return getattr(unreal, key_cls_name, None) is not None
+
+
 def _engine_version(unreal: Any) -> Tuple[str, Optional[Tuple[int, int]]]:
     """Return ``(raw_string, (major, minor) | None)`` via SystemLibrary."""
     system = getattr(unreal, "SystemLibrary", None)
@@ -172,12 +235,13 @@ def _validated_key_name(key_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
+def preflight(unreal: Any, capability: str = "ai_blackboard", key_type: Optional[str] = None) -> Dict[str, Any]:
     """Return typed readiness and one deterministic next action.
 
     This is the ``search/describe`` preflight for the capability: it gates the
-    engine version, the Python-exposed API surface and the enabled-plugin
-    enumeration before any authoring action is attempted.  It never mutates.
+    engine version, the Python-exposed API surface, the enabled-plugin
+    enumeration and the resolvability of the requested BlackboardKeyType_*
+    class before any authoring action is attempted.  It never mutates.
     """
     if capability != "ai_blackboard":
         raise AiBlackboardError(
@@ -205,6 +269,17 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
         else:
             available_apis.append(name)
 
+    # H3: gate the key-type resolution path authoring actually uses.  A host
+    # that cannot resolve any BlackboardKeyType_* UCLASS (neither via
+    # ``load_class`` from /Script/AIModule nor as a direct attribute) can never
+    # author a typed key, so preflight must not report ready=true on it.  Check
+    # the requested type when given, otherwise the default "float" type.
+    requested_cls = _KEY_TYPES.get(key_type, _KEY_TYPES["float"]) if key_type else _KEY_TYPES["float"]
+    key_type_classes = [requested_cls]
+    available_key_types = [name for name in key_type_classes if _key_type_resolvable(unreal, name)]
+    missing_key_types = [name for name in key_type_classes if name not in available_key_types]
+    key_type_available = not missing_key_types
+
     # AI Blackboard data lives in the always-on AIModule, so no optional plugin
     # is required for this slice.  We still enumerate plugins as preflight
     # evidence and to gate the typed native bridge that deeper AI authoring
@@ -221,6 +296,7 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
         and not missing_methods
         and plugin_bridge_available
         and not missing_plugins
+        and key_type_available
     )
 
     if not version_supported:
@@ -230,11 +306,12 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
             "observed": raw_version or "unknown",
             "retry_tool": "unreal_ai__ai_capability_preflight",
         }
-    elif missing_apis or missing_methods or not plugin_bridge_available:
+    elif missing_apis or missing_methods or missing_key_types or not plugin_bridge_available:
         next_action = {
             "action": "update_adapter_plugin",
             "missing_apis": missing_apis,
             "missing_methods": missing_methods,
+            "missing_key_types": missing_key_types,
             "plugin_bridge_available": plugin_bridge_available,
             "retry_tool": "unreal_ai__ai_capability_preflight",
         }
@@ -250,6 +327,10 @@ def preflight(unreal: Any, capability: str = "ai_blackboard") -> Dict[str, Any]:
         "available_apis": available_apis,
         "missing_apis": missing_apis,
         "missing_methods": missing_methods,
+        "checked_key_types": key_type_classes,
+        "available_key_types": available_key_types,
+        "missing_key_types": missing_key_types,
+        "key_type_available": key_type_available,
         "required_plugins": required_plugins,
         "enabled_plugins": enabled_plugins,
         "missing_plugins": missing_plugins,
@@ -404,7 +485,7 @@ def _delete_created_asset(unreal: Any, asset: Any, asset_path: str) -> List[str]
     return notes
 
 
-def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, key_name: str) -> Any:
+def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, asset: Any, key_name: str) -> Any:
     """Construct a typed Blackboard entry through the reflected Python surface."""
     try:
         entry = entry_cls()
@@ -415,7 +496,9 @@ def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, key_name: str) -> An
             detail=str(exc),
         ) from exc
     try:
-        key_type = key_cls()
+        # H2: outering the key type to the Blackboard asset makes it a
+        # persistent subobject, so the type survives a save/reopen.
+        key_type = _new_key_type(unreal, key_cls, asset)
     except Exception as exc:  # noqa: BLE001
         raise AiBlackboardError(
             "BlackboardKeyType construction failed on this host",
@@ -530,7 +613,7 @@ def author_blackboard_key(
     typed error with recovery notes.  Existing assets and existing keys are
     never overwritten or duplicated.
     """
-    preflight_result = preflight(unreal)
+    preflight_result = preflight(unreal, key_type=key_type)
     if not preflight_result["ready"]:
         raise AiBlackboardError(
             "AI Blackboard preflight is not ready",
@@ -538,6 +621,7 @@ def author_blackboard_key(
             next_action=preflight_result["next_action"],
             engine_version=preflight_result["engine_version"],
             missing_apis=preflight_result["missing_apis"],
+            missing_key_types=preflight_result["missing_key_types"],
         )
 
     path = _validated_path(asset_path)
@@ -551,7 +635,9 @@ def author_blackboard_key(
             allowed=sorted(_KEY_TYPES),
         )
 
-    key_cls = _symbol(unreal, key_cls_name)
+    # H1: BlackboardKeyType_* classes are not ``unreal.`` attributes on UE
+    # 5.5/5.8; resolve them through the AIModule script package instead.
+    key_cls = _load_key_type_class(unreal, key_cls_name)
     entry_cls = _symbol(unreal, "BlackboardEntry")
 
     library = getattr(unreal, "EditorAssetLibrary", None)
@@ -618,7 +704,7 @@ def author_blackboard_key(
         set_property = _method(asset, "set_editor_property")
         txn = _begin_transaction(unreal)
         try:
-            new_entry = _build_entry(unreal, entry_cls, key_cls, name)
+            new_entry = _build_entry(unreal, entry_cls, key_cls, asset, name)
             set_property("keys", list(raw_before) + [new_entry])
             mutation_state = "in_transaction"
 
