@@ -11,7 +11,7 @@ The `unreal-pcg-graph` skill provides:
 
 - `inspect_pcg_graph`: observed node object paths, native settings-class paths,
   positions, pins, data-type masks, connection cardinality, exact topology and
-  optional scalar property readback.
+  optional scalar or allowlisted spline grammar property readback.
 - `edit_pcg_graph`: one explicit `create`, `add_node`, `update_node`, `connect`,
   `disconnect`, or `save` operation. Editing does not automatically save or
   request component generation.
@@ -30,8 +30,13 @@ resolved by another node in the inspected graph. External settings assets and
 settings instances fail closed; position-only edits do not change settings and
 remain available. This checks the mutated object's ownership, not every possible
 external reference to a node-owned object. Unknown properties,
-nonfinite floats, type coercions, enums, structs, arrays and object references
-are not silently accepted. Property-specific ranges remain engine-enforced,
+nonfinite floats, type coercions, enums, object references and arbitrary aggregates
+are not silently accepted. The only aggregate exceptions are the closed
+`grammar_selection` and `modules_info` codecs on exact native
+`PCGSubdivideSplineSettings`, described in [the grammar workflow](pcg-grammar-workflow.md).
+They use the same ownership, transaction and recovery path, with canonical typed
+observations and full bounded native struct export fingerprints. No export text
+is accepted as input or imported. Property-specific ranges remain engine-enforced,
 with exact readback and attempted recovery on rejection or normalization.
 
 Connections use the observed pin labels. Graph ownership, direction, overlapping
@@ -42,7 +47,7 @@ Topology is reconstructed from the shared edge objects in `PCGPin.edges`; no
 undocumented `PCGEdge` endpoint fields are assumed.
 
 Limits are 256 nodes including graph input/output, 64 pins per direction per
-node, 4096 edges, 8192 edge references, 32 selected scalar property names and a
+node, 4096 edges, 8192 edge references, 32 selected property names and a
 1 MiB serialized structural readback. A limit failure is not partial validation:
 inspection/edits stop rather than silently dropping topology from the result.
 
