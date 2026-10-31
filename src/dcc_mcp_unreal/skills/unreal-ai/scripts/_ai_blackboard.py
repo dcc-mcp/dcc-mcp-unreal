@@ -101,25 +101,41 @@ class AiBlackboardError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+def _host_api_next_action(api: str) -> Dict[str, Any]:
+    """Return one deterministic recovery step for a missing host-surface API."""
+    return {
+        "action": "update_adapter_plugin",
+        "api": api,
+        "retry_tool": "unreal_ai__ai_capability_preflight",
+    }
+
+
+def _unsupported_api(api: str, message: str) -> AiBlackboardError:
+    """Build a typed host-surface failure carrying one ``next_action``.
+
+    SKILL.md promises that every ``unsupported_api`` failure exposes a typed
+    reason and one recovery action. Keep that contract in one place so no
+    gating helper can silently omit it.
+    """
+    return AiBlackboardError(
+        message,
+        reason="unsupported_api",
+        api=api,
+        next_action=_host_api_next_action(api),
+    )
+
+
 def _method(owner: Any, name: str) -> Any:
     method = getattr(owner, name, None)
     if not callable(method):
-        raise AiBlackboardError(
-            "Required API {!r} is unavailable on this host".format(name),
-            reason="unsupported_api",
-            api=name,
-        )
+        raise _unsupported_api(name, "Required API {!r} is unavailable on this host".format(name))
     return method
 
 
 def _symbol(unreal: Any, name: str) -> Any:
     symbol = getattr(unreal, name, None)
     if symbol is None:
-        raise AiBlackboardError(
-            "Required Unreal symbol {!r} is unavailable on this host".format(name),
-            reason="unsupported_api",
-            api=name,
-        )
+        raise _unsupported_api(name, "Required Unreal symbol {!r} is unavailable on this host".format(name))
     return symbol
 
 
@@ -144,10 +160,9 @@ def _load_key_type_class(unreal: Any, key_cls_name: str) -> Any:
     direct = getattr(unreal, key_cls_name, None)
     if direct is not None:
         return direct
-    raise AiBlackboardError(
+    raise _unsupported_api(
+        key_cls_name,
         "Required key type class {!r} is unavailable on this host".format(key_cls_name),
-        reason="unsupported_api",
-        api=key_cls_name,
     )
 
 
@@ -158,15 +173,24 @@ def _new_key_type(unreal: Any, key_cls: Any, asset: Any) -> Any:
     but is not serialized with the Blackboard asset, so the key type reads
     back empty after a save/reopen.  Passing *asset* as the outer to
     ``unreal.new_object`` makes it a persistent subobject (verified on UE
-    5.5/5.8).  Falls back to calling the class for hosts / doubles that do
-    not expose ``new_object``.
+    5.5/5.8).  There is deliberately no ``key_cls()`` fallback: a host that
+    cannot provide ``new_object`` (or returns no instance) must fail closed
+    instead of reporting a saved key whose type is silently lost on reopen.
     """
     new_object = getattr(unreal, "new_object", None)
-    if callable(new_object):
-        instance = new_object(key_cls, asset)
-        if instance is not None:
-            return instance
-    return key_cls()
+    if not callable(new_object):
+        raise _unsupported_api(
+            "new_object",
+            "unreal.new_object is required to outer the key type to the Blackboard asset",
+        )
+    instance = new_object(key_cls, asset)
+    if instance is None:
+        raise AiBlackboardError(
+            "unreal.new_object returned no BlackboardKeyType instance",
+            reason="key_type_construction_unavailable",
+            next_action=_host_api_next_action("new_object"),
+        )
+    return instance
 
 
 def _key_type_resolvable(unreal: Any, key_cls_name: str) -> bool:
@@ -499,6 +523,10 @@ def _build_entry(unreal: Any, entry_cls: Any, key_cls: Any, asset: Any, key_name
         # H2: outering the key type to the Blackboard asset makes it a
         # persistent subobject, so the type survives a save/reopen.
         key_type = _new_key_type(unreal, key_cls, asset)
+    except AiBlackboardError:
+        # Preserve typed host-surface failures (e.g. unsupported_api with its
+        # next_action) instead of flattening them to a construction error.
+        raise
     except Exception as exc:  # noqa: BLE001
         raise AiBlackboardError(
             "BlackboardKeyType construction failed on this host",
