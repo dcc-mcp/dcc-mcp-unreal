@@ -1139,16 +1139,18 @@ def test_h1_author_fails_closed_when_key_type_class_unresolvable():
 
 def test_h1_author_fails_closed_when_persistent_outer_unavailable():
     core = _load_core()
-    # No unreal.new_object(): a key type cannot be outered to the Blackboard
-    # asset, so authoring must fail closed instead of saving a transient-outer
-    # key whose type is silently lost on reopen (CodeRabbit F1).
+    # No unreal.new_object(): preflight now gates the engine callable (CodeRabbit
+    # follow-up), so authoring fails closed at preflight instead of reaching the
+    # write path and saving a transient-outer key whose type is lost on reopen.
     fake = FakeUnreal(new_object_available=False)
     with pytest.raises(core.AiBlackboardError) as exc:
         core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
-    assert exc.value.reason == "unsupported_api"
-    assert exc.value.context["api"] == "new_object"
-    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+    assert exc.value.reason == "preflight_not_ready"
+    assert exc.value.context["missing_engine_callables"] == ["new_object"]
+    assert exc.value.context["next_action"]["action"] == "enable_engine_python_api"
+    assert fake.editor_lib.assets == {}
     assert fake.editor_lib.saved == []
+    assert fake.transactions == []
 
 
 def test_h2_key_type_is_outered_to_the_blackboard_asset():
@@ -1275,7 +1277,9 @@ def test_f1_new_key_type_fails_closed_when_new_object_unavailable():
         core._new_key_type(types.SimpleNamespace(), KeyCls(), object())
     assert exc.value.reason == "unsupported_api"
     assert exc.value.context["api"] == "new_object"
-    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+    # unreal.new_object is engine-supplied: the recovery must name/enable the
+    # engine Python API, not recommend an adapter update that cannot add it.
+    assert exc.value.context["next_action"]["action"] == "enable_engine_python_api"
     assert called["fallback"] is False
 
 
@@ -1285,7 +1289,7 @@ def test_f1_new_key_type_fails_closed_when_new_object_returns_none():
     with pytest.raises(core.AiBlackboardError) as exc:
         core._new_key_type(unreal, FakeKeyTypeClass("BlackboardKeyType_Float"), object())
     assert exc.value.reason == "key_type_construction_unavailable"
-    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+    assert exc.value.context["next_action"]["action"] == "enable_engine_python_api"
 
 
 def test_f1_new_key_type_returns_the_asset_outered_instance():
@@ -1316,7 +1320,11 @@ def test_f2_unsupported_api_errors_carry_next_action():
             call()
         assert exc.value.reason == "unsupported_api"
         next_action = exc.value.context["next_action"]
-        assert next_action["action"] == "update_adapter_plugin"
+        # Every gated symbol/method here is engine-supplied, so the recovery
+        # names the engine Python API; update_adapter_plugin is reserved for
+        # the adapter's own plugin-enumeration bridge (asserted in preflight).
+        assert next_action["action"] == "enable_engine_python_api"
+        assert next_action["api"] == exc.value.context["api"]
         assert next_action["retry_tool"] == "unreal_ai__ai_capability_preflight"
 
 
@@ -1366,3 +1374,64 @@ def test_f4_probe_reports_reopen_verified_false_when_reusing_key():
     assert first["status"] == "ok" and second["status"] == "ok"
     assert second["author"].get("reused_existing_key") is True
     assert second["reopen_verified"] is False
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit exact-head follow-ups: engine-supplied API recovery (G1) and
+# preflight gating of the new_object engine callable (G2).
+# ---------------------------------------------------------------------------
+
+
+def test_g1_engine_api_recovery_names_required_api():
+    core = _load_core()
+    # Engine-supplied symbols/callables are provided by Unreal's Python layer,
+    # not by the adapter's UDccMcpAutomationLibrary. An adapter update cannot
+    # add them, so the recovery must name/enable the engine Python API instead
+    # of recommending update_adapter_plugin (which retries into the same gap).
+    for api in ("new_object", "load_class", "BlackboardData", "get_asset_tools"):
+        action = core._host_api_next_action(api)
+        assert action["action"] == "enable_engine_python_api"
+        assert action["api"] == api
+        assert action["retry_tool"] == "unreal_ai__ai_capability_preflight"
+        assert action["action"] != "update_adapter_plugin"
+
+
+def test_g1_adapter_bridge_action_is_preserved_in_preflight():
+    core = _load_core()
+    # Finding G1 only corrects engine-supplied API recovery. The adapter's own
+    # plugin-enumeration bridge is genuinely provided by the adapter plugin, so
+    # a missing bridge must still yield update_adapter_plugin.
+    result = core.preflight(FakeUnreal(plugin_bridge=False).module)
+    assert result["ready"] is False
+    assert result["next_action"]["action"] == "update_adapter_plugin"
+
+
+def test_g2_preflight_gates_missing_new_object():
+    core = _load_core()
+    result = core.preflight(FakeUnreal(new_object_available=False).module)
+    assert result["ready"] is False
+    assert "new_object" in result["missing_engine_callables"]
+    assert result["missing_engine_callables"] == ["new_object"]
+    assert result["next_action"]["action"] == "enable_engine_python_api"
+    assert result["next_action"]["missing_engine_callables"] == ["new_object"]
+
+
+def test_g2_preflight_gates_noncallable_new_object():
+    core = _load_core()
+    # Presence is not enough: a stub attribute that is not callable must also
+    # fail the gate, matching the callable() check in _new_key_type.
+    fake = FakeUnreal()
+    fake.module.new_object = "not callable"
+    result = core.preflight(fake.module)
+    assert result["ready"] is False
+    assert result["missing_engine_callables"] == ["new_object"]
+    assert result["next_action"]["action"] == "enable_engine_python_api"
+
+
+def test_g2_preflight_ready_when_new_object_callable():
+    core = _load_core()
+    result = core.preflight(FakeUnreal().module)
+    assert result["missing_engine_callables"] == []
+    assert result["required_engine_callables"] == ["new_object"]
+    assert result["ready"] is True
+    assert result["next_action"]["action"] == "proceed"

@@ -2,8 +2,9 @@ tools:
   - name: ai_capability_preflight
     description: >-
       Read-only AI capability preflight. Gates the Unreal engine version (>=5.0),
-      the Python-exposed Blackboard editor API surface, and the adapter's native
-      plugin-enumeration bridge before any authoring. Never mutates the editor.
+      the Python-exposed Blackboard editor API surface, the unreal.new_object
+      engine callable, and the adapter's native plugin-enumeration bridge before
+      any authoring. Never mutates the editor.
     source_file: scripts/ai_capability_preflight.py
     execution: sync
     affinity: any
@@ -44,6 +45,8 @@ tools:
             available_apis: {type: array, items: {type: string}}
             missing_apis: {type: array, items: {type: string}}
             missing_methods: {type: array, items: {type: string}}
+            required_engine_callables: {type: array, items: {type: string}}
+            missing_engine_callables: {type: array, items: {type: string}}
             checked_key_types: {type: array, items: {type: string}}
             available_key_types: {type: array, items: {type: string}}
             missing_key_types: {type: array, items: {type: string}}
@@ -58,11 +61,12 @@ tools:
     preconditions:
       - The call is read-only and may run without the Unreal main thread.
     expectations:
-      - A missing engine version, API symbol, plugin bridge, or unresolvable requested BlackboardKeyType_* class yields ready=false with one deterministic next_action.
+      - A missing engine version, API symbol, engine callable (unreal.new_object), plugin bridge, or unresolvable requested BlackboardKeyType_* class yields ready=false with one deterministic next_action.
+      - A missing engine-supplied callable such as unreal.new_object yields an enable_engine_python_api next_action naming the required engine API; a missing API symbol, editor method, key type, or plugin bridge yields update_adapter_plugin. update_adapter_plugin is never prescribed for a core engine Python API that no adapter plugin can add.
       - Key type classes are resolved through /Script/AIModule (via load_class) because UE 5.5/5.8 do not expose them as unreal module attributes; ready=true requires the requested class to be resolvable.
     call_examples:
       - arguments: {capability: ai_blackboard}
-        note: Returns proceed when the host can author a Blackboard, otherwise an update/unsupported action.
+        note: Returns proceed when the host can author a Blackboard, otherwise an engine-API, update, or unsupported action.
       - arguments: {capability: ai_blackboard, key_type: float}
         note: Gates resolvability of the specific key type class that will be authored.
     next-tools:
