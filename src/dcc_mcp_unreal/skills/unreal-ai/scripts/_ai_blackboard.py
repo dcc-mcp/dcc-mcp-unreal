@@ -85,6 +85,11 @@ _REQUIRED_API_METHODS: Dict[str, Tuple[str, ...]] = {
     "AssetToolsHelpers": ("get_asset_tools",),
 }
 
+# Engine-provided callables the write path needs in addition to the class
+# symbols above.  ``unreal.new_object`` outers the key-type subobject to the
+# asset (H2); gating only its presence is not enough, it must be callable.
+_REQUIRED_ENGINE_CALLABLES: Tuple[str, ...] = ("new_object",)
+
 
 class AiBlackboardError(RuntimeError):
     """A rejected operation or a failure with explicit recovery evidence."""
@@ -102,9 +107,21 @@ class AiBlackboardError(RuntimeError):
 
 
 def _host_api_next_action(api: str) -> Dict[str, Any]:
-    """Return one deterministic recovery step for a missing host-surface API."""
+    """Return one deterministic recovery step for a missing host-surface API.
+
+    The symbols gated here (``unreal.new_object``, ``load_class``, the reflected
+    editor classes/methods and the ``BlackboardKeyType_*`` UCLASSes) are exposed
+    by the Unreal engine's Python layer, not by the DCC-MCP adapter plugin: the
+    adapter only adds its C++ ``DccMcpAutomationLibrary`` functions.  Updating
+    the adapter cannot add ``unreal.new_object``, so recommending
+    ``update_adapter_plugin`` here would be a dead end that retries into the same
+    failure.  ``api`` names the exact engine symbol the host must expose.  The
+    ``update_adapter_plugin`` recovery is still emitted by :func:`preflight` as
+    its coarse host-not-ready action (and for the adapter's plugin-enumeration
+    bridge), where an adapter/plugin update genuinely can help.
+    """
     return {
-        "action": "update_adapter_plugin",
+        "action": "enable_engine_python_api",
         "api": api,
         "retry_tool": "unreal_ai__ai_capability_preflight",
     }
@@ -293,6 +310,15 @@ def preflight(unreal: Any, capability: str = "ai_blackboard", key_type: Optional
         else:
             available_apis.append(name)
 
+    # Engine-provided callables the write path invokes directly (currently
+    # ``unreal.new_object`` for the H2 persistent outer) are core Unreal Python
+    # APIs: no adapter plugin can add them, and authoring fails closed without
+    # them. Gate callability (not mere presence) so preflight never reports
+    # ready=True on a host that would reject at key-type construction time.
+    missing_engine_callables = [
+        name for name in _REQUIRED_ENGINE_CALLABLES if not callable(getattr(unreal, name, None))
+    ]
+
     # H3: gate the key-type resolution path authoring actually uses.  A host
     # that cannot resolve any BlackboardKeyType_* UCLASS (neither via
     # ``load_class`` from /Script/AIModule nor as a direct attribute) can never
@@ -318,6 +344,7 @@ def preflight(unreal: Any, capability: str = "ai_blackboard", key_type: Optional
         version_supported
         and not missing_apis
         and not missing_methods
+        and not missing_engine_callables
         and plugin_bridge_available
         and not missing_plugins
         and key_type_available
@@ -328,6 +355,15 @@ def preflight(unreal: Any, capability: str = "ai_blackboard", key_type: Optional
             "action": "unsupported_engine_version",
             "requires": ">={}.{}".format(*_MIN_ENGINE),
             "observed": raw_version or "unknown",
+            "retry_tool": "unreal_ai__ai_capability_preflight",
+        }
+    elif missing_engine_callables:
+        # Core engine Python callables are not supplied by the adapter plugin;
+        # name them so the host enables its Python API rather than retrying an
+        # adapter update that cannot add unreal.new_object.
+        next_action = {
+            "action": "enable_engine_python_api",
+            "missing_engine_callables": missing_engine_callables,
             "retry_tool": "unreal_ai__ai_capability_preflight",
         }
     elif missing_apis or missing_methods or missing_key_types or not plugin_bridge_available:
@@ -351,6 +387,8 @@ def preflight(unreal: Any, capability: str = "ai_blackboard", key_type: Optional
         "available_apis": available_apis,
         "missing_apis": missing_apis,
         "missing_methods": missing_methods,
+        "required_engine_callables": list(_REQUIRED_ENGINE_CALLABLES),
+        "missing_engine_callables": missing_engine_callables,
         "checked_key_types": key_type_classes,
         "available_key_types": available_key_types,
         "missing_key_types": missing_key_types,
@@ -649,6 +687,7 @@ def author_blackboard_key(
             next_action=preflight_result["next_action"],
             engine_version=preflight_result["engine_version"],
             missing_apis=preflight_result["missing_apis"],
+            missing_engine_callables=preflight_result["missing_engine_callables"],
             missing_key_types=preflight_result["missing_key_types"],
         )
 

@@ -60,8 +60,9 @@ shallow one-to-one C++-module-to-skill mapping.
 ## Workflow
 
 1. Call `ai_capability_preflight` first. It is read-only and returns `ready`,
-   the engine version, available/missing API symbols, enabled plugins, and one
-   deterministic `next_action` (`proceed`, `update_adapter_plugin`, or
+   the engine version, available/missing API symbols and engine callables,
+   enabled plugins, and one deterministic `next_action` (`proceed`,
+   `update_adapter_plugin`, `enable_engine_python_api`, or
    `unsupported_engine_version`). Proceed only when `ready` is true.
 2. Call `inspect_ai_blackboard` to read the asset's typed keys. A missing asset
    returns `exists=false` with `readback_verified=true`; an existing wrong-class asset is
@@ -77,13 +78,20 @@ shallow one-to-one C++-module-to-skill mapping.
 ## Preflight, errors, and undo/cancel
 
 - Preflight gates: Unreal Engine `>= 5.0`, the seven required Python-exposed
-  symbols **and** the editor methods the write path calls, plus the adapter's
-  native plugin-enumeration bridge. It also resolves the requested
+  symbols **and** the editor methods the write path calls, the
+  `unreal.new_object` engine callable (callability, not just presence), plus the
+  adapter's native plugin-enumeration bridge. It also resolves the requested
   `BlackboardKeyType_*` UCLASS through `/Script/AIModule` (via `load_class`),
   because UE 5.5/5.8 do not expose these classes as `unreal` module attributes;
   a host that cannot resolve them must not report `ready=true`. Pass `key_type`
   to gate a specific one (defaults to `float`). A failed gate yields
-  `ready=false` and one machine-readable `next_action`.
+  `ready=false` and one machine-readable `next_action`: a missing engine-supplied
+  callable such as `new_object` yields `enable_engine_python_api` (name the
+  engine Python API to enable), while a missing symbol, method, key type or
+  plugin bridge yields `update_adapter_plugin`. An adapter update is never
+  prescribed for a core engine Python API (for example `unreal.new_object`) that
+  no adapter plugin can add; typed `unsupported_api` failures name that engine
+  API instead.
 - Typed errors carry a `reason` such as `preflight_not_ready`,
   `unsupported_api`, `invalid_asset_path`, `invalid_key_name`,
   `unsupported_key_type`, `duplicate_key`, `wrong_asset_class`,
