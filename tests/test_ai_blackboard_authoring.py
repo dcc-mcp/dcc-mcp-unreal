@@ -1137,13 +1137,18 @@ def test_h1_author_fails_closed_when_key_type_class_unresolvable():
     assert fake.transactions == []
 
 
-def test_h1_author_falls_back_to_module_attribute_and_direct_constructor():
+def test_h1_author_fails_closed_when_persistent_outer_unavailable():
     core = _load_core()
-    # Legacy host: class only as an unreal attribute, and no new_object().
-    fake = FakeUnreal(key_type_loadable=False, key_type_on_module=True, new_object_available=False)
-    result = core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
-    assert result["saved"] is True
-    assert result["readback_verified"] is True
+    # No unreal.new_object(): a key type cannot be outered to the Blackboard
+    # asset, so authoring must fail closed instead of saving a transient-outer
+    # key whose type is silently lost on reopen (CodeRabbit F1).
+    fake = FakeUnreal(new_object_available=False)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core.author_blackboard_key(fake.module, "/Game/AI/BB_Enemy", "X", key_type="float")
+    assert exc.value.reason == "unsupported_api"
+    assert exc.value.context["api"] == "new_object"
+    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+    assert fake.editor_lib.saved == []
 
 
 def test_h2_key_type_is_outered_to_the_blackboard_asset():
@@ -1239,3 +1244,125 @@ def test_h3_commandlet_probe_fails_closed_on_type_lost_asset():
     # Must NOT report status=ok / readback_verified=true on a type-lost asset.
     assert result["status"] != "ok"
     assert result["readback_verified"] is False
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit follow-up findings (F1 fail-closed, F2 next_action, F3 JSON guard,
+# F4 reopen_verified) — resolved against the exact-head review.
+# ---------------------------------------------------------------------------
+
+
+def _load_probe(name):
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(name, COMMANDLET_PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_f1_new_key_type_fails_closed_when_new_object_unavailable():
+    core = _load_core()
+    # No new_object at all: must raise unsupported_api, never call key_cls().
+    called = {"fallback": False}
+
+    class KeyCls:
+        def __call__(self):
+            called["fallback"] = True
+            return FakeKeyType()
+
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core._new_key_type(types.SimpleNamespace(), KeyCls(), object())
+    assert exc.value.reason == "unsupported_api"
+    assert exc.value.context["api"] == "new_object"
+    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+    assert called["fallback"] is False
+
+
+def test_f1_new_key_type_fails_closed_when_new_object_returns_none():
+    core = _load_core()
+    unreal = types.SimpleNamespace(new_object=lambda cls, outer=None: None)
+    with pytest.raises(core.AiBlackboardError) as exc:
+        core._new_key_type(unreal, FakeKeyTypeClass("BlackboardKeyType_Float"), object())
+    assert exc.value.reason == "key_type_construction_unavailable"
+    assert exc.value.context["next_action"]["action"] == "update_adapter_plugin"
+
+
+def test_f1_new_key_type_returns_the_asset_outered_instance():
+    core = _load_core()
+    asset = object()
+    captured = {}
+
+    def new_object(cls, outer=None):
+        captured["outer"] = outer
+        return FakeKeyType(name="BlackboardKeyType_Float", outer=outer)
+
+    unreal = types.SimpleNamespace(new_object=new_object)
+    instance = core._new_key_type(unreal, FakeKeyTypeClass("BlackboardKeyType_Float"), asset)
+    assert instance.get_class().get_name() == "BlackboardKeyType_Float"
+    assert captured["outer"] is asset
+
+
+def test_f2_unsupported_api_errors_carry_next_action():
+    core = _load_core()
+    bare = types.SimpleNamespace()
+    calls = (
+        lambda: core._method(bare, "missing"),
+        lambda: core._symbol(bare, "Missing"),
+        lambda: core._load_key_type_class(bare, "BlackboardKeyType_Float"),
+    )
+    for call in calls:
+        with pytest.raises(core.AiBlackboardError) as exc:
+            call()
+        assert exc.value.reason == "unsupported_api"
+        next_action = exc.value.context["next_action"]
+        assert next_action["action"] == "update_adapter_plugin"
+        assert next_action["retry_tool"] == "unreal_ai__ai_capability_preflight"
+
+
+def test_f3_probe_returns_json_error_when_preflight_raises():
+    import json  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    module = _load_probe("ue_probe_f3")
+    fake = FakeUnreal()
+
+    def exploding_version():
+        raise RuntimeError("host getter exploded")
+
+    fake.module.SystemLibrary = types.SimpleNamespace(get_engine_version=exploding_version)
+    with patch.dict(sys.modules, {"unreal": fake.module}):
+        result = module.run_probe()
+    assert result["status"] == "error"
+    assert "host getter exploded" in result["error"]
+    assert result["reopen_verified"] is False
+    json.dumps(result)  # must be JSON-serializable, never a raw traceback
+
+
+def test_f4_probe_reports_reopen_verified_false_on_success():
+    import json  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    module = _load_probe("ue_probe_f4")
+    fake = FakeUnreal()
+    with patch.dict(sys.modules, {"unreal": fake.module}):
+        result = module.run_probe()
+    assert result["status"] == "ok"
+    assert result["readback_verified"] is True
+    # A single in-process readback is NOT a disk-persistence verdict.
+    assert result["reopen_verified"] is False
+    assert "reopen_note" in result
+    json.dumps(result)
+
+
+def test_f4_probe_reports_reopen_verified_false_when_reusing_key():
+    from unittest.mock import patch  # noqa: PLC0415
+
+    module = _load_probe("ue_probe_f4_reuse")
+    fake = FakeUnreal()
+    with patch.dict(sys.modules, {"unreal": fake.module}):
+        first = module.run_probe()
+        second = module.run_probe()
+    assert first["status"] == "ok" and second["status"] == "ok"
+    assert second["author"].get("reused_existing_key") is True
+    assert second["reopen_verified"] is False

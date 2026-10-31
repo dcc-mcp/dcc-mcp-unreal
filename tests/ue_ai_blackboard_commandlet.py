@@ -5,7 +5,10 @@ inside a real Unreal Editor (for example via ``-run=pythonscript``) on a scratch
 project before claiming native/host qualification. It loads the exact skill
 core by file path, drives it against the live ``unreal`` module, and fails
 closed: it asserts the preflight, authors one typed key, and verifies the
-readback. It never ships as a pytest test because a live Editor is required.
+in-session reflected readback. It never ships as a pytest test because a live
+Editor is required.  A single invocation cannot reopen the saved package from
+disk, so every result carries ``reopen_verified: false``; confirming key-type
+persistence across a real save/reopen needs a separate commandlet process.
 
 The probe deliberately uses a scratch /Game/DccMcpAiProbe path. It must not run
 against a user's production content. If the host does not expose the
@@ -36,8 +39,25 @@ def run_probe():
     import unreal  # noqa: PLC0415
 
     core = _load_core()
-    result = {"preflight": core.preflight(unreal)}
+    # Preflight getters can raise on a degraded host; never leak a traceback
+    # into the Editor with no JSON result. Report a serializable error instead.
+    try:
+        result = {"preflight": core.preflight(unreal)}
+    except Exception as exc:  # noqa: BLE001 - report, never raise into the Editor
+        return {
+            "status": "error",
+            "error": "preflight failed: {}: {}".format(type(exc).__name__, exc),
+            "reopen_verified": False,
+        }
     result["preflight_ready"] = result["preflight"]["ready"]
+    # A single commandlet process verifies in-session reflected readback only.
+    # A fresh process is required to reopen the saved package from disk, so
+    # never let status="ok" be read as proof of disk persistence.
+    result["reopen_verified"] = False
+    result["reopen_note"] = (
+        "In-session reflected readback only; reopen the saved asset in a "
+        "separate commandlet process to confirm key-type persistence."
+    )
     if not result["preflight_ready"]:
         result["status"] = "blocked_preflight"
         return result
@@ -80,6 +100,9 @@ def run_probe():
         ]
         type_ok = bool(observed) and all(expected_type in (k.get("key_type") or "") for k in observed)
         result["readback_verified"] = result["author"].get("readback_verified") is True and type_ok
+        # "ok" means the in-session reflected readback passed. It is NOT a
+        # disk-persistence verdict: result["reopen_verified"] stays False and a
+        # separate commandlet process must reopen the saved asset to confirm it.
         result["status"] = "ok" if result["readback_verified"] else "readback_failed"
     except core.AiBlackboardError as exc:
         result["status"] = "rejected"
