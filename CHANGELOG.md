@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.12](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.11...v0.3.12) (2026-11-01)
+
+
+### Features
+
+* **ai:** add runtime-gated AI Blackboard authoring domain skill ([8fc2cd7](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/8fc2cd7cb515b6393118197c16808983311cb6f1))
+* **pcg:** inspect capabilities and safely opt in to official tools ([d739dfc](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/d739dfcd63efc32d781df2eec5845057f5c8e6b8))
+
+
+### Bug Fixes
+
+* **ai-blackboard:** address remaining bot review findings ([0635123](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0635123395aa4b6e8357c7e3b1aed56a0afc9d77))
+* **ai-blackboard:** gate engine callables in preflight and correct engine-API recovery ([4a31828](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4a318288c674fd1350e1a36db46f3ee9db9d3ec1))
+* **ai-blackboard:** resolve key types via load_class and persist with asset outer ([19f645a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/19f645a0a2a77f3e6d99d37cecdf4db0eca5850c))
+* **ai:** harden blackboard authoring review findings ([7b68c26](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7b68c2650543b2e51d00fd1291b3c1057d6d7b58))
+* **ai:** reject case-insensitive duplicate blackboard keys ([a92be05](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a92be054eccb7abffb5a42ac480b73dc7e753416))
+* **ai:** satisfy ruff format check in blackboard authoring tests ([f8d8899](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f8d8899e6b7a745d6f9963d8e547341f3efcc3ad))
+* **mcp:** configure and verify explicit official server ports ([c350dd7](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/c350dd7805061989f89f528ce2b8f6922b908efb))
+* **mcp:** preflight configuration batches and sanitize INI diagnostics ([caea39d](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/caea39d39dfc5ee05db61923070f822604716e99))
+* **pcg:** verify installed ToolsetRegistry dependency ([c914bc4](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/c914bc4fe98726b2a77f584b2a6d8f6a4c8a26bc))
+
 ## [0.3.11](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.10...v0.3.11) (2026-10-30)
 
 
