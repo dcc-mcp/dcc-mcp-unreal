@@ -20,7 +20,6 @@ if ($UEVersion -notin @("5.5", "5.6", "5.7", "5.8")) {
 if ($UEVersion -in @("5.7", "5.8")) {
     # Modern engines load these job-scoped settings after user XML files.
     @(
-        "UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest"
         "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false"
         "UnrealBuildTool_BuildConfiguration__MaxParallelActions=1"
     ) | Out-File -FilePath $EnvironmentFile -Encoding utf8 -Append

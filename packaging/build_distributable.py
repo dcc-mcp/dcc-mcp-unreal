@@ -24,7 +24,9 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -38,9 +40,28 @@ GENERATED_HEADER_COMPAT_ENV = "DCC_MCP_UNREAL_GENERATED_HEADER_COMPAT"
 PACKAGE_HEADER_ID = "FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h"
 
 
-def run(cmd: List[str], *, cwd: Optional[Path] = None) -> None:
+def run(cmd: List[str], *, cwd: Optional[Path] = None, log_path: Optional[Path] = None) -> None:
     print("[build-uplugin] " + " ".join(_quote(part) for part in cmd))
-    subprocess.run(cmd, cwd=str(cwd or REPO_ROOT), check=True)
+    if log_path is None:
+        subprocess.run(cmd, cwd=str(cwd or REPO_ROOT), check=True)
+        return
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log:
+        with subprocess.Popen(
+            cmd,
+            cwd=str(cwd or REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        ) as process:
+            for line in process.stdout:
+                print(line, end="", flush=True)
+                log.write(line)
+            result = process.wait()
+        if result:
+            raise subprocess.CalledProcessError(result, cmd)
 
 
 def _quote(value: str) -> str:
@@ -173,34 +194,128 @@ def resolve_uat(ue_root: Path) -> Path:
 
 
 @contextlib.contextmanager
-def temporarily_clear_legacy_ubt_user_config(work_dir: Path):
-    """Hide cross-version UBT settings while an old engine is running."""
+def ubt_user_config_lock(timeout: float = 120):
+    """Serialize this repository's UAT jobs sharing one user configuration."""
     appdata = os.environ.get("APPDATA")
     if not appdata:
         yield
         return
+    directory = Path(appdata) / "Unreal Engine" / "UnrealBuildTool"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "dcc-mcp-build.lock").open("a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
 
-    config_path = Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
-    if not config_path.is_file():
-        yield
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Another UAT job owns {}".format(directory)) from exc
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+EMPTY_UBT_CONFIG = (
+    '<?xml version="1.0" encoding="utf-8" ?>\n'
+    '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">\n'
+    "</Configuration>\n"
+).encode("utf-8")
+
+
+def recover_legacy_ubt_user_config(config_path: Path) -> None:
+    backup_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-backup")
+    active_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-active")
+    created_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-created")
+    if not backup_path.exists():
+        # A restore can complete before journal cleanup. Never use an orphaned
+        # absence marker to decide ownership of a later user configuration.
+        created_path.unlink(missing_ok=True)
+        active_path.unlink(missing_ok=True)
+        config_path.with_name("BuildConfiguration.xml.dcc-mcp-new").unlink(missing_ok=True)
         return
-
-    backup_path = work_dir / "legacy-ubt-user-BuildConfiguration.xml.backup"
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(config_path), str(backup_path))
-    config_path.write_text(
-        '<?xml version="1.0" encoding="utf-8" ?>\n'
-        '<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">\n'
-        "</Configuration>\n",
-        encoding="utf-8",
-    )
-    print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
-    try:
-        yield
-    finally:
-        shutil.copy2(str(backup_path), str(config_path))
+    # Do not overwrite a change from a user or an unrelated build during our job.
+    expected = active_path.read_bytes() if active_path.exists() else EMPTY_UBT_CONFIG
+    if config_path.exists() and config_path.read_bytes() not in (expected, backup_path.read_bytes()):
+        raise RuntimeError("UBT configuration changed while guarded; original preserved at {}".format(backup_path))
+    if created_path.exists():
+        # Delete our new config before the backup: every crash boundary keeps
+        # either a recoverable absence transaction or no owned configuration.
+        config_path.unlink(missing_ok=True)
         backup_path.unlink()
-        print("[build-uplugin] Restored UBT config: {}".format(config_path))
+        created_path.unlink()
+    else:
+        os.replace(str(backup_path), str(config_path))
+    active_path.unlink(missing_ok=True)
+    config_path.with_name("BuildConfiguration.xml.dcc-mcp-new").unlink(missing_ok=True)
+    print("[build-uplugin] Restored UBT config: {}".format(config_path))
+
+
+@contextlib.contextmanager
+def temporarily_clear_legacy_ubt_user_config(work_dir: Path, compiler: str = "", sdk: str = ""):
+    """Hide cross-version UBT settings, with a durable crash-recovery backup."""
+    with ubt_user_config_lock():
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            yield
+            return
+        config_path = Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+        recover_legacy_ubt_user_config(config_path)
+        if not config_path.is_file() and not compiler and not sdk:
+            yield
+            return
+        backup_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-backup")
+        active_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-active")
+        original_exists = config_path.is_file()
+        if original_exists:
+            config_path.with_name("BuildConfiguration.xml.dcc-mcp-created").unlink(missing_ok=True)
+            shutil.copy2(str(config_path), str(backup_path))
+        else:
+            backup_path.write_bytes(b"")
+            config_path.with_name("BuildConfiguration.xml.dcc-mcp-created").touch()
+        # The backup lives beside the configuration, outside the disposable build directory.
+        with backup_path.open("r+b") as backup:
+            os.fsync(backup.fileno())
+        try:
+            content = EMPTY_UBT_CONFIG
+            if compiler or sdk:
+                configuration = ET.Element("Configuration", xmlns="https://www.unrealengine.com/BuildConfiguration")
+                platform = ET.SubElement(configuration, "WindowsPlatform")
+                for name, value in (("CompilerVersion", compiler), ("WindowsSdkVersion", sdk)):
+                    if value:
+                        ET.SubElement(platform, name).text = value
+                content = ET.tostring(configuration, encoding="utf-8", xml_declaration=True)
+            active_path.write_bytes(content)
+            with active_path.open("r+b") as active:
+                os.fsync(active.fileno())
+            temporary_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-new")
+            temporary_path.write_bytes(content)
+            with temporary_path.open("r+b") as temporary:
+                os.fsync(temporary.fileno())
+            os.replace(str(temporary_path), str(config_path))
+            print("[build-uplugin] Temporarily cleared cross-version UBT config: {}".format(config_path))
+            yield
+        finally:
+            recover_legacy_ubt_user_config(config_path)
+            if not original_exists:
+                config_path.unlink(missing_ok=True)
 
 
 def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
@@ -238,13 +353,23 @@ def build_python_payload(args: argparse.Namespace, payload_dir: Path) -> None:
 
 
 def _msvc_toolchain_roots() -> List[Path]:
-    """Return paths to installed MSVC toolchains under VS Build Tools."""
-    candidates = [
-        Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"),
-        Path(r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"),
-        Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"),
-        Path(r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"),
-    ]
+    """Discover all editions and custom locations through Microsoft's Setup API."""
+    vswhere = shutil.which("vswhere")
+    if not vswhere:
+        vswhere = str(
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+            / "Microsoft Visual Studio"
+            / "Installer"
+            / "vswhere.exe"
+        )
+    if not Path(vswhere).is_file():
+        raise FileNotFoundError(
+            "vswhere is required to verify an explicit compiler; install Visual Studio Build Tools."
+        )
+    output = subprocess.check_output(
+        [vswhere, "-all", "-products", "*", "-format", "json", "-utf8"], text=True, encoding="utf-8-sig"
+    )
+    candidates = [Path(instance["installationPath"]) / "VC" / "Tools" / "MSVC" for instance in json.loads(output)]
     roots = []
     for p in candidates:
         if p.is_dir():
@@ -253,31 +378,61 @@ def _msvc_toolchain_roots() -> List[Path]:
 
 
 def _check_msvc_toolchain(version: str) -> None:
-    """Verify the requested MSVC toolchain version is installed.
-
-    Prints available toolchains and a helpful install suggestion when the
-    requested version is not found. This is best-effort — UBT does its own
-    resolution and may fall back to a different version.
-    """
+    """Fail before UAT when an explicitly requested compiler is not registered."""
     if not version:
         return
-    installed = [d.name for d in _msvc_toolchain_roots() if d.is_dir()]
-    if not installed:
-        # Runner may be configured differently — skip check
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
+        raise ValueError("Compiler selection must be a numeric version, not Latest or Preview")
+    roots = _msvc_toolchain_roots()
+    installed = [d.name for d in roots if (d / "bin" / "Hostx64" / "x64" / "cl.exe").is_file()]
+    if not any(v == version or v.startswith(version + ".") for v in installed):
+        raise RuntimeError(
+            "Requested MSVC {} is not registered with a usable x64 compiler. Available: {}. "
+            "Provision the compatible VS C++ toolset or explicitly register msvc-kit before building.".format(
+                version, ", ".join(sorted(installed)) or "none"
+            )
+        )
+
+
+def verify_ubt_toolchain(log_path: Path, compiler: str = "", sdk: str = "") -> None:
+    """Require evidence of UBT's actual selection for explicitly pinned builds."""
+    if not compiler and not sdk:
         return
-    if not any(v.startswith(version) for v in installed):
-        print("[build-uplugin] WARNING: MSVC toolchain {} not found".format(version), file=sys.stderr)
-        print("[build-uplugin] Installed: {}".format(", ".join(sorted(installed))), file=sys.stderr)
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    selections = re.findall(r"Using .*? (14\.\d+\.\d+) toolchain \((.+?)\) and Windows (\d+(?:\.\d+){1,3}) SDK", text)
+    if not selections:
+        raise RuntimeError("UBT did not report its compiler/SDK selection; see {}".format(log_path))
+    for actual_compiler, toolset_path, actual_sdk in selections:
+        family = re.split(r"[/\\]", toolset_path.rstrip("/\\"))[-1]
+        actual_family = family if re.fullmatch(r"14\.\d+\.\d+", family) else actual_compiler
+        for label, expected, actual in (("compiler", compiler, actual_family), ("SDK", sdk, actual_sdk)):
+            if expected and not (actual == expected or actual.startswith(expected + ".")):
+                raise RuntimeError("UBT selected {} {}, expected {}; see {}".format(label, actual, expected, log_path))
         print(
-            "[build-uplugin] Install: vs_BuildTools.exe modify --add Microsoft.VisualStudio.Component.VC.{}.17.6.x86.x64".format(
-                version.replace(".", ".")
-            ),
-            file=sys.stderr,
+            "[build-uplugin] Verified toolset family {}, compiler {}, SDK {}".format(
+                actual_family, actual_compiler, actual_sdk
+            )
         )
 
 
 def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     _check_msvc_toolchain(args.vctoolchain_version)
+    sdk_version = getattr(args, "sdk_version", "")
+    msvc_kit = getattr(args, "msvc_kit", "")
+    if msvc_kit:
+        diagnostics = [msvc_kit, "doctor", "--format", "json", "--compile", "--arch", "x64", "--host-arch", "x64"]
+        for flag, value in (
+            ("--msvc-version", args.vctoolchain_version),
+            ("--sdk-version", sdk_version),
+            ("--dir", getattr(args, "msvc_kit_dir", "")),
+        ):
+            if value:
+                diagnostics += [flag, value]
+        report = json.loads(subprocess.check_output(diagnostics, text=True, encoding="utf-8"))
+        if report.get("schema") != "msvc-kit.doctor.v1" or report.get("status") != "passed":
+            raise RuntimeError("Requested msvc-kit doctor did not report a supported, passing toolchain")
+        uat_dir.parent.mkdir(parents=True, exist_ok=True)
+        (uat_dir.parent / "toolchain-diagnostics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     uat = resolve_uat(args.ue_root)
     cmd = [str(uat)]
     engine_tag = read_engine_tag(args.ue_root)
@@ -302,7 +457,11 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     ]
     ubtargs = []
     if args.vctoolchain_version:
-        ubtargs.append("-VCToolchainVersion={}".format(args.vctoolchain_version))
+        ubtargs.append("-CompilerVersion={}".format(args.vctoolchain_version))
+    if sdk_version:
+        if not re.fullmatch(r"\d+(?:\.\d+){3}", sdk_version):
+            raise ValueError("SDK selection must be a complete numeric version")
+        ubtargs.append("-WindowsSdkVersion={}".format(sdk_version))
     if args.patched_headers_dir:
         patched = Path(args.patched_headers_dir)
         if patched.is_dir():
@@ -325,8 +484,13 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
             print("[build-uplugin] Force-include header: {}".format(fi_header))
         else:
             print("[build-uplugin] WARNING: patched headers dir not found: {}".format(patched))
-    if ubtargs:
-        cmd.append("-ubtargs=" + " ".join(ubtargs))
+    # BuildPlugin does not forward -ubtargs. Use the installed UBT entrypoint's
+    # native argument environment contract, or the guarded legacy XML fallback.
+    entrypoint = args.ue_root / "Engine" / "Source" / "Programs" / "UnrealBuildTool" / "UnrealBuildTool.cs"
+    supports_extra_args = entrypoint.is_file() and "UBT_EXTRA_ARGS" in entrypoint.read_text(encoding="utf-8-sig")
+    previous_extra_args = os.environ.get("UBT_EXTRA_ARGS")
+    if supports_extra_args and ubtargs:
+        os.environ["UBT_EXTRA_ARGS"] = " ".join(filter(None, [previous_extra_args, " ".join(ubtargs)]))
     # _CL_ tells MSVC cl.exe to suppress C4668 unconditionally,
     # bypassing UBT's internal compiler argument management.
     # /FI ensures suppress_msvc_has_feature.h is included in EVERY
@@ -347,12 +511,33 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
     else:
         os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
     try:
-        if uses_legacy_ubt_config:
-            with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):
+        log_path = uat_dir.parent / "uat-toolchain.log"
+
+        def run_uat():
+            if args.vctoolchain_version or sdk_version:
+                run(cmd, log_path=log_path)
+                verify_ubt_toolchain(log_path, args.vctoolchain_version, sdk_version)
+            else:
                 run(cmd)
+
+        if uses_legacy_ubt_config or (ubtargs and not supports_extra_args):
+            legacy_compiler = "" if supports_extra_args else args.vctoolchain_version
+            legacy_sdk = "" if supports_extra_args else sdk_version
+            with temporarily_clear_legacy_ubt_user_config(uat_dir.parent, legacy_compiler, legacy_sdk):
+                run_uat()
         else:
-            run(cmd)
+            with ubt_user_config_lock():
+                appdata = os.environ.get("APPDATA")
+                if appdata:
+                    recover_legacy_ubt_user_config(
+                        Path(appdata) / "Unreal Engine" / "UnrealBuildTool" / "BuildConfiguration.xml"
+                    )
+                run_uat()
     finally:
+        if previous_extra_args is None:
+            os.environ.pop("UBT_EXTRA_ARGS", None)
+        else:
+            os.environ["UBT_EXTRA_ARGS"] = previous_extra_args
         if previous_compat is None:
             os.environ.pop(GENERATED_HEADER_COMPAT_ENV, None)
         else:
@@ -432,7 +617,22 @@ def main() -> None:
     parser.add_argument(
         "--vctoolchain-version",
         default=os.environ.get("VCTOOLCHAIN_VERSION", ""),
-        help="MSVC toolchain version passed to UBT via -VCToolchainVersion=",
+        help="Required MSVC compiler version passed to UBT via -CompilerVersion= and verified in its log",
+    )
+    parser.add_argument(
+        "--sdk-version",
+        default=os.environ.get("DCC_MCP_UNREAL_SDK_VERSION", ""),
+        help="Required Windows SDK version passed to UBT and verified in its log",
+    )
+    parser.add_argument(
+        "--msvc-kit",
+        default=os.environ.get("DCC_MCP_UNREAL_MSVC_KIT", ""),
+        help="Optional explicit msvc-kit executable for a JSON doctor/compile preflight",
+    )
+    parser.add_argument(
+        "--msvc-kit-dir",
+        default=os.environ.get("DCC_MCP_UNREAL_MSVC_KIT_DIR", ""),
+        help="Optional toolchain directory for the requested msvc-kit preflight",
     )
     parser.add_argument(
         "--patched-headers-dir",
