@@ -52,6 +52,15 @@ The bridge accepts loopback HTTP endpoints only. Run it with `affinity:any`;
 never block Unreal's game thread while making an HTTP request back into the
 same editor process.
 
+The adapter's `describe_toolset` operation remains the same across engine
+versions. When Epic advertises `describe_toolsets` (documented in UE 5.9),
+the bridge uses its input schema to select one unambiguous string-array
+parameter and requests `include_schemas=true`. Unsupported schemas or extra
+required arguments return an error. Older endpoints that advertise only
+`describe_toolset` retain the singular call. A failed plural call is not retried
+through the older tool. This discovery compatibility does not establish native
+UE 5.9 acceptance.
+
 ## Explicit ports and verification boundaries
 
 `server_port` must be an integer from 1 through 65535; booleans, strings,
