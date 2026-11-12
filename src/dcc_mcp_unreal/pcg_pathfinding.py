@@ -13,6 +13,14 @@ from typing import Any
 MAX_POINTS = 4096
 MAX_ENDPOINTS = 64
 MAX_PINS = 64
+# Native scalar settings are float32 UPROPERTYs. A JSON double such as 0.9 is
+# written and widened back as 0.8999999761581421, so exact equality would reject
+# a correctly written value as a host failure (false negative). The numeric
+# readback contract accepts values within float32 rounding (max relative error
+# ~6e-8, leaving a ~16x safety margin) while still rejecting genuinely different
+# numbers; the existing type checks (bool/str never masquerade as numbers) stay.
+_NATIVE_FLOAT_REL_TOL = 1e-6
+_NATIVE_FLOAT_ABS_TOL = 1e-9
 _ATTRIBUTE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 _ENUM = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
 _MODES = ("DISTANCE", "FITNESS_SCORE", "COST_MULTIPLIER")
@@ -243,10 +251,17 @@ def _readback(settings: Any, name: str, expected: Any) -> Any:
     elif isinstance(expected, bool):
         if not isinstance(value, bool) or value != expected:
             raise PathfindingHostError(f"Native {name} boolean readback differs")
-    elif isinstance(expected, (int, float)) and (
-        isinstance(value, bool) or not isinstance(value, (int, float)) or value != expected
-    ):
-        raise PathfindingHostError(f"Native {name} numeric readback differs")
+    elif isinstance(expected, (int, float)):
+        # Numeric settings are float32 on the host; compare with a documented
+        # tolerance instead of exact equality. Keep the type checks so a bool or
+        # string never masquerades as a number. This branch must not fall
+        # through to the final exact-equality catch-all below.
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isclose(value, expected, rel_tol=_NATIVE_FLOAT_REL_TOL, abs_tol=_NATIVE_FLOAT_ABS_TOL)
+        ):
+            raise PathfindingHostError(f"Native {name} numeric readback differs")
     elif value != expected:
         raise PathfindingHostError(f"Native {name} readback differs")
     return value

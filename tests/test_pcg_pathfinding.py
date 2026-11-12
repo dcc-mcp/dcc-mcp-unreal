@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import struct
 import sys
 from enum import Enum
 from pathlib import Path
@@ -15,6 +16,11 @@ import pytest
 import yaml
 
 from dcc_mcp_unreal import pcg_pathfinding as pf
+
+
+def _f32(value: float) -> float:
+    """Widen a double through float32, as a native scalar UPROPERTY readback does."""
+    return struct.unpack("f", struct.pack("f", value))[0]
 
 
 def _request():
@@ -31,7 +37,7 @@ def _input_endpoints(request):
     request["goal"] = {"attribute": "Goals", "values": [[100, 0, 0], [200, 0, 0]]}
 
 
-def _host(*, missing=(), package="/Engine/Transient", corrupt=None, malformed_copy=False, pin_count=1):
+def _host(*, missing=(), package="/Engine/Transient", corrupt=None, malformed_copy=False, pin_count=1, float32=False):
     events = []
     outermost = SimpleNamespace(get_path_name=lambda: package)
 
@@ -75,6 +81,8 @@ def _host(*, missing=(), package="/Engine/Transient", corrupt=None, malformed_co
             events.append(("write", name))
             if name not in self.properties:
                 raise RuntimeError("unexposed")
+            if float32 and isinstance(value, float) and not isinstance(value, bool):
+                value = _f32(value)
             self.properties[name] = -1 if corrupt == name else value
 
     def pin(label):
@@ -346,6 +354,40 @@ def test_host_errors_and_pin_text_are_bounded():
 def test_native_scalar_readback_does_not_coerce_types(expected, actual):
     with pytest.raises(pf.PathfindingHostError):
         pf._readback(SimpleNamespace(get_editor_property=lambda name: actual), "test", expected)
+
+
+@pytest.mark.parametrize("expected", [0.9, 333.3, 0.1, 1e-6, 1.0])
+def test_native_scalar_readback_tolerates_float32_rounding(expected):
+    # A native float32 property widens a written double on readback (0.9 ->
+    # 0.8999999761581421). The value was written correctly, so this must not be
+    # treated as a host failure.
+    actual = _f32(expected)
+    result = pf._readback(SimpleNamespace(get_editor_property=lambda name: actual), "test", expected)
+    assert result == actual
+
+
+@pytest.mark.parametrize(
+    "expected,actual",
+    [(0.9, 0.5), (0.9, 0.8), (333.3, 1.0), (0.9, 0.7)],
+)
+def test_native_scalar_readback_still_rejects_wrong_number(expected, actual):
+    # The tolerance covers float32 rounding only; a genuinely different number
+    # is still a host failure.
+    with pytest.raises(pf.PathfindingHostError, match="numeric readback differs"):
+        pf._readback(SimpleNamespace(get_editor_property=lambda name: actual), "test", expected)
+
+
+def test_float32_settings_readback_keeps_configuration_verified():
+    # Full preflight path with a fake host that stores scalars as float32, which
+    # is the real Unreal behavior. A legal fractional setting must still verify.
+    host = _host(float32=True)
+    request = _request()
+    request["settings"].update(search_distance=333.3, heuristic_weight=0.9, maximum_fitness_penalty_factor=0.7)
+    result = pf.preflight_pathfinding(host, **request)
+    assert result["configuration_verified"] is True
+    assert result["settings_readback"]["heuristic_weight"] == _f32(0.9)
+    assert result["settings_readback"]["search_distance"] == _f32(333.3)
+    assert result["settings_readback"]["maximum_fitness_penalty_factor"] == _f32(0.7)
 
 
 def _skill():
