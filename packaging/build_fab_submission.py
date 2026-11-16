@@ -93,7 +93,9 @@ def validate_plugin(root: Path) -> dict:
     return {"version": descriptor["VersionName"], "files": len(files), "code_modules": descriptor["Modules"]}
 
 
-def build_submission(release_package: Path, expected_sha256: str, output_dir: Path, repo_root: Path = REPO_ROOT) -> Path:
+def build_submission(
+    release_package: Path, expected_sha256: str, output_dir: Path, repo_root: Path = REPO_ROOT
+) -> Path:
     expected_sha256 = expected_sha256.removeprefix("sha256:").lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
         raise ValueError("An exact official release SHA-256 is required")
@@ -127,7 +129,10 @@ def build_submission(release_package: Path, expected_sha256: str, output_dir: Pa
                 package = path.parts[2]
                 if package != "dcc_mcp_core" and not package.startswith("dcc_mcp_core-"):
                     continue
-                if path.name in {"direct_url.json", "RECORD", "INSTALLER", "REQUESTED"} or path.suffix in {".pyc", ".pyo"}:
+                if path.name in {"direct_url.json", "RECORD", "INSTALLER", "REQUESTED"} or path.suffix in {
+                    ".pyc",
+                    ".pyo",
+                }:
                     continue
                 payload = archive.read(member)
                 write_file(stage, DEPENDENCY_ROOT.joinpath(*path.parts[2:]), payload)
@@ -146,15 +151,26 @@ def build_submission(release_package: Path, expected_sha256: str, output_dir: Pa
         filter_path = stage / "Config/FilterPlugin.ini"
         with filter_path.open("a", encoding="utf-8") as handle:
             handle.write("\n/Content/Python/...\n/Documentation/...\n")
-        write_file(stage, PurePosixPath("Documentation/README.txt"), (repo_root / "packaging/fab/README.txt").read_bytes())
-        write_file(stage, PurePosixPath("Documentation/License.txt"), (repo_root / "packaging/fab/License.txt").read_bytes())
+        write_file(
+            stage, PurePosixPath("Documentation/README.txt"), (repo_root / "packaging/fab/README.txt").read_bytes()
+        )
+        write_file(
+            stage, PurePosixPath("Documentation/License.txt"), (repo_root / "packaging/fab/License.txt").read_bytes()
+        )
         notices = b"DCC MCP Unreal: MIT license; source: https://github.com/dcc-mcp/dcc-mcp-unreal\n\n"
-        notices += b"dcc-mcp-core: MIT license; native Rust Python extension and Python package.\nSource: https://github.com/dcc-mcp/dcc-mcp-core\n\n" + b"\n\n".join(licenses)
+        notices += (
+            b"dcc-mcp-core: MIT license; native Rust Python extension and Python package.\nSource: https://github.com/dcc-mcp/dcc-mcp-core\n\n"
+            + b"\n\n".join(licenses)
+        )
         write_file(stage, PurePosixPath("Documentation/ThirdPartyNotices.txt"), notices)
         report = validate_plugin(stage)
         report["files"] += 1  # Include the manifest written immediately below.
-        report.update({"release_sha256": actual, "source_release": "v" + version, "platform": "Win64", "layout": "fab-source"})
-        write_file(stage, PurePosixPath("Documentation/BuildManifest.json"), (json.dumps(report, indent=2) + "\n").encode())
+        report.update(
+            {"release_sha256": actual, "source_release": "v" + version, "platform": "Win64", "layout": "fab-source"}
+        )
+        write_file(
+            stage, PurePosixPath("Documentation/BuildManifest.json"), (json.dumps(report, indent=2) + "\n").encode()
+        )
         with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(stage.rglob("*")):
                 if path.is_file():

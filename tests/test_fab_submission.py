@@ -24,7 +24,13 @@ def source(tmp_path):
         "Resources/Icon128.png": "icon",
         "Source/DccMcpUnreal/DccMcpUnreal.Build.cs": "// module\n",
         "Source/DccMcpUnreal/Private/Module.cpp": "// source\n",
-        "DccMcpUnreal.uplugin": json.dumps({"VersionName": "1.2.3", "Modules": [{"Name": "DccMcpUnreal", "Type": "Editor"}], "Plugins": [{"Name": "PythonScriptPlugin", "Enabled": True, "Optional": True}]}),
+        "DccMcpUnreal.uplugin": json.dumps(
+            {
+                "VersionName": "1.2.3",
+                "Modules": [{"Name": "DccMcpUnreal", "Type": "Editor"}],
+                "Plugins": [{"Name": "PythonScriptPlugin", "Enabled": True, "Optional": True}],
+            }
+        ),
     }
     for relative, content in files.items():
         target = plugin / relative
@@ -82,10 +88,21 @@ def test_submission_keeps_one_source_plugin_with_loadable_python_locations(sourc
         assert b"/Content/Python/..." in archive.read("DccMcpUnreal/Config/FilterPlugin.ini")
         manifest = json.loads(archive.read("DccMcpUnreal/Documentation/BuildManifest.json"))
         assert manifest["files"] == len(names)
-    assert json.loads(result.with_suffix(".json").read_text())["submission_sha256"] == hashlib.sha256(result.read_bytes()).hexdigest()
+    assert (
+        json.loads(result.with_suffix(".json").read_text())["submission_sha256"]
+        == hashlib.sha256(result.read_bytes()).hexdigest()
+    )
 
 
-@pytest.mark.parametrize("member", ["DccMcpUnreal/../escape.py", "/absolute.py", "DccMcpUnreal/python/C:/escape.py", "DccMcpUnreal\\python\\escape.py"])
+@pytest.mark.parametrize(
+    "member",
+    [
+        "DccMcpUnreal/../escape.py",
+        "/absolute.py",
+        "DccMcpUnreal/python/C:/escape.py",
+        "DccMcpUnreal\\python\\escape.py",
+    ],
+)
 def test_submission_rejects_unsafe_archive_paths(source, tmp_path, member):
     payload, digest = release(tmp_path, {member: "unsafe"})
     with pytest.raises(ValueError, match="Unsafe release member"):

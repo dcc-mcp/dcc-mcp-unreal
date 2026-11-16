@@ -19,7 +19,9 @@ jobs:
       max-parallel: 5
       matrix:
         # Supported runtime matrix: Python 3.9+
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Ubuntu 26.04 has no setup-python 3.9 distribution; retain the
+        # supported Python matrix on the compatible Ubuntu 24.04 image.
+        os: [ubuntu-24.04, windows-latest, macos-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
