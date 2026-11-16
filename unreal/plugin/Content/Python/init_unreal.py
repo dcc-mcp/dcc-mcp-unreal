@@ -114,6 +114,7 @@ def _ensure_package_importable() -> None:
     """
     plugin_root = _plugin_root()
     python_dir = plugin_root / "python"
+    fab_python_dir = plugin_root / "Content" / "Python"
 
     # Development fallback for this repository's local test project:
     # <repo>/Plugins/DccMcpUnreal/Content/Python/init_unreal.py
@@ -130,6 +131,10 @@ def _ensure_package_importable() -> None:
     # code instead of the distributable plugin.
     if python_dir.is_dir():
         _add_sys_path(python_dir, prepend=True)
+    # Fab places plugin Python in Content/Python and external Python packages
+    # in its Lib/site-packages child. Keep both distributions importable.
+    _add_sys_path(fab_python_dir / "Lib" / "site-packages", prepend=True)
+    _add_sys_path(fab_python_dir, prepend=True)
 
     try:
         import dcc_mcp_unreal  # noqa: F401, PLC0415
