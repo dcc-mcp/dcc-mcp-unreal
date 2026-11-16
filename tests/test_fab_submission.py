@@ -80,6 +80,8 @@ def test_submission_keeps_one_source_plugin_with_loadable_python_locations(sourc
         assert "EngineVersion" not in descriptor
         assert descriptor["SupportedTargetPlatforms"] == ["Win64"]
         assert b"/Content/Python/..." in archive.read("DccMcpUnreal/Config/FilterPlugin.ini")
+        manifest = json.loads(archive.read("DccMcpUnreal/Documentation/BuildManifest.json"))
+        assert manifest["files"] == len(names)
     assert json.loads(result.with_suffix(".json").read_text())["submission_sha256"] == hashlib.sha256(result.read_bytes()).hexdigest()
 
 

@@ -152,6 +152,7 @@ def build_submission(release_package: Path, expected_sha256: str, output_dir: Pa
         notices += b"dcc-mcp-core: MIT license; native Rust Python extension and Python package.\nSource: https://github.com/dcc-mcp/dcc-mcp-core\n\n" + b"\n\n".join(licenses)
         write_file(stage, PurePosixPath("Documentation/ThirdPartyNotices.txt"), notices)
         report = validate_plugin(stage)
+        report["files"] += 1  # Include the manifest written immediately below.
         report.update({"release_sha256": actual, "source_release": "v" + version, "platform": "Win64", "layout": "fab-source"})
         write_file(stage, PurePosixPath("Documentation/BuildManifest.json"), (json.dumps(report, indent=2) + "\n").encode())
         with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
