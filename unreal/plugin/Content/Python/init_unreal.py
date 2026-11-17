@@ -114,6 +114,7 @@ def _ensure_package_importable() -> None:
     """
     plugin_root = _plugin_root()
     python_dir = plugin_root / "python"
+    fab_python_dir = plugin_root / "Content" / "Python"
 
     # Development fallback for this repository's local test project:
     # <repo>/Plugins/DccMcpUnreal/Content/Python/init_unreal.py
@@ -130,6 +131,10 @@ def _ensure_package_importable() -> None:
     # code instead of the distributable plugin.
     if python_dir.is_dir():
         _add_sys_path(python_dir, prepend=True)
+    # Fab places plugin Python in Content/Python and external Python packages
+    # in its Lib/site-packages child. Keep both distributions importable.
+    _add_sys_path(fab_python_dir / "Lib" / "site-packages", prepend=True)
+    _add_sys_path(fab_python_dir, prepend=True)
 
     try:
         import dcc_mcp_unreal  # noqa: F401, PLC0415
@@ -145,12 +150,12 @@ def _ensure_package_importable() -> None:
 def _add_sys_path(path: Path, *, prepend: bool = True) -> None:
     if path.is_dir():
         path_str = str(path)
-        if path_str not in sys.path:
-            if prepend:
-                sys.path.insert(0, path_str)
-            else:
-                sys.path.append(path_str)
-            logger.debug("[dcc-mcp-unreal] Added %s to sys.path", path_str)
+        if prepend:
+            sys.path[:] = [entry for entry in sys.path if entry != path_str]
+            sys.path.insert(0, path_str)
+        elif path_str not in sys.path:
+            sys.path.append(path_str)
+        logger.debug("[dcc-mcp-unreal] Ensured %s on sys.path (prepend=%s)", path_str, prepend)
 
 
 _runtime_mode = _resolve_bootstrap_runtime()
