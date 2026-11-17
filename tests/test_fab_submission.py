@@ -130,3 +130,43 @@ def test_submission_refuses_to_replace_a_reviewed_archive(source, tmp_path):
     with pytest.raises(FileExistsError, match="Refusing to replace"):
         fab.build_submission(payload, digest, tmp_path / "out", source)
     assert result.read_bytes() == original
+
+
+def test_submission_write_failure_leaves_no_partial_archive_and_can_retry(source, tmp_path, monkeypatch):
+    payload, digest = release(tmp_path)
+    output = tmp_path / "out"
+    write = zipfile.ZipFile.writestr
+    writes = []
+
+    def fail_after_first_member(archive, *args, **kwargs):
+        if writes:
+            raise OSError("injected archive write failure")
+        writes.append(True)
+        return write(archive, *args, **kwargs)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(zipfile.ZipFile, "writestr", fail_after_first_member)
+        with pytest.raises(OSError, match="injected archive write failure"):
+            fab.build_submission(payload, digest, output, source)
+    assert list(output.iterdir()) == []
+    assert fab.build_submission(payload, digest, output, source).is_file()
+
+
+def test_submission_publication_race_preserves_the_other_complete_archive(source, tmp_path, monkeypatch):
+    payload, digest = release(tmp_path)
+    output = tmp_path / "out"
+    link = fab.os.link
+    competing = b"already reviewed submission"
+
+    def publish_race(staged, destination):
+        with zipfile.ZipFile(staged) as archive:
+            assert archive.testzip() is None
+        destination.write_bytes(competing)
+        return link(staged, destination)
+
+    monkeypatch.setattr(fab.os, "link", publish_race)
+    with pytest.raises(FileExistsError):
+        fab.build_submission(payload, digest, output, source)
+    remaining = list(output.iterdir())
+    assert len(remaining) == 1
+    assert remaining[0].read_bytes() == competing

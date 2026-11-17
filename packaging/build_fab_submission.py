@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import stat
 import tempfile
@@ -171,13 +172,17 @@ def build_submission(
         write_file(
             stage, PurePosixPath("Documentation/BuildManifest.json"), (json.dumps(report, indent=2) + "\n").encode()
         )
-        with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+        staged_archive = Path(temporary) / "submission.zip"
+        with zipfile.ZipFile(staged_archive, "x", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(stage.rglob("*")):
                 if path.is_file():
                     info = zipfile.ZipInfo(path.relative_to(stage.parent).as_posix(), (2026, 1, 1, 0, 0, 0))
                     info.compress_type = zipfile.ZIP_DEFLATED
                     info.external_attr = 0o100644 << 16
                     archive.writestr(info, path.read_bytes())
+        # Stage on the destination filesystem, then publish a complete archive
+        # atomically without replacing a submission created by another writer.
+        os.link(staged_archive, destination)
     report["submission_sha256"] = hashlib.sha256(destination.read_bytes()).hexdigest()
     report["archive"] = destination.name
     destination.with_suffix(".json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

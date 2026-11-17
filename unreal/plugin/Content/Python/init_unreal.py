@@ -150,12 +150,12 @@ def _ensure_package_importable() -> None:
 def _add_sys_path(path: Path, *, prepend: bool = True) -> None:
     if path.is_dir():
         path_str = str(path)
-        if path_str not in sys.path:
-            if prepend:
-                sys.path.insert(0, path_str)
-            else:
-                sys.path.append(path_str)
-            logger.debug("[dcc-mcp-unreal] Added %s to sys.path", path_str)
+        if prepend:
+            sys.path[:] = [entry for entry in sys.path if entry != path_str]
+            sys.path.insert(0, path_str)
+        elif path_str not in sys.path:
+            sys.path.append(path_str)
+        logger.debug("[dcc-mcp-unreal] Ensured %s on sys.path (prepend=%s)", path_str, prepend)
 
 
 _runtime_mode = _resolve_bootstrap_runtime()

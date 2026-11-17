@@ -587,6 +587,40 @@ def test_unreal_bootstrap_resolves_plugin_root_without_file_global(monkeypatch, 
     assert len(callbacks) == 1
 
 
+def test_unreal_bootstrap_promotes_existing_fab_paths_ahead_of_older_packages(monkeypatch, tmp_path):
+    plugin_root = tmp_path / "DccMcpUnreal"
+    fab_python = plugin_root / "Content/Python"
+    dependencies = fab_python / "Lib/site-packages"
+    old_python = tmp_path / "old-install"
+    for package, current in [("dcc_mcp_unreal", fab_python), ("dcc_mcp_core", dependencies)]:
+        for directory, marker in [(current, "bundled"), (old_python, "old")]:
+            target = directory / package / "__init__.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("ORIGIN = {!r}\n".format(marker), encoding="utf-8")
+        monkeypatch.delitem(sys.modules, package, raising=False)
+    monkeypatch.setattr(sys, "path", [str(old_python), str(fab_python), str(dependencies), *sys.path])
+    monkeypatch.setitem(
+        sys.modules,
+        "unreal",
+        types.SimpleNamespace(
+            PluginBlueprintLibrary=types.SimpleNamespace(get_plugin_base_dir=lambda _name: str(plugin_root)),
+            SystemLibrary=types.SimpleNamespace(get_engine_version=lambda: "5.8.1"),
+            is_editor=lambda: True,
+            register_slate_post_tick_callback=lambda _callback: "tick-handle",
+        ),
+    )
+    script = Path(__file__).parents[1] / "unreal/plugin/Content/Python/init_unreal.py"
+    runpy.run_path(str(script), run_name="dcc_mcp_fab_path_test")
+    import dcc_mcp_core
+
+    import dcc_mcp_unreal
+
+    assert dcc_mcp_unreal.ORIGIN == "bundled"
+    assert dcc_mcp_core.ORIGIN == "bundled"
+    assert sys.path[:2] == [str(fab_python), str(dependencies)]
+    assert sys.path.count(str(fab_python)) == sys.path.count(str(dependencies)) == 1
+
+
 def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(monkeypatch):
     """Worker dispatch must queue work without touching Slate from that worker."""
     from dcc_mcp_unreal.server import UnrealMainThreadDispatcher
