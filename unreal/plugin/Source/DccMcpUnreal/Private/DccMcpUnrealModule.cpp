@@ -1,4 +1,5 @@
 #include "Editor.h"
+#include "DccMcpEditorLifecycleLibrary.h"
 #include "Runtime/Launch/Resources/Version.h"
 #if ENGINE_MAJOR_VERSION >= 5
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -32,6 +33,7 @@ class FDccMcpUnrealModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
+		DccMcpInitializeEditorLifecycle();
 		const FString RuntimeMode = GetEnvironmentVariable(TEXT("DCC_MCP_UNREAL_RUNTIME"));
 #if ENGINE_MAJOR_VERSION >= 5
 		const bool bAutoPythonSupported = true;
@@ -74,6 +76,7 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		DccMcpShutdownEditorLifecycle();
 		if (TickHandle.IsValid())
 		{
 #if ENGINE_MAJOR_VERSION >= 5
