@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.14](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.13...v0.3.14) (2026-11-19)
+
+
+### Features
+
+* **pcg:** preflight native Pathfinding inputs and settings ([f2623a3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f2623a3394cf03e1770b1897315c185ad145680a))
+
+
+### Bug Fixes
+
+* enforce native toolchain selection and verification ([20d1aa0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/20d1aa02cdb4d7a9613f709b587eaecdd5fd2a4a))
+
 ## [0.3.13](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.12...v0.3.13) (2026-11-19)
 
 
