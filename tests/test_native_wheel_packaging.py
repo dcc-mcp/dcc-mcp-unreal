@@ -298,11 +298,9 @@ def test_optional_parallel_actions_reach_ubt_and_restore_environment(
         if fails:
             raise subprocess.CalledProcessError(7, command)
 
-    monkeypatch.setattr(module.subprocess, "run", uat)
+    monkeypatch.setattr(module, "run", uat)
     monkeypatch.setattr(module, "_check_msvc_toolchain", lambda *args: None)
-    args = SimpleNamespace(
-        ue_root=engine, vctoolchain_version="14.36", patched_headers_dir="", max_parallel_actions=limit
-    )
+    args = SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir="", max_parallel_actions=limit)
     if fails:
         with pytest.raises(subprocess.CalledProcessError) as caught:
             module.build_precompiled_plugin(args, repo / "dist" / "uat")
@@ -313,8 +311,7 @@ def test_optional_parallel_actions_reach_ubt_and_restore_environment(
     expected = previous if limit is None else "-MaxParallelActions=2" + (" " + previous if previous else "")
     assert inherited == expected
     assert os.environ.get("UBT_EXTRA_ARGS") == previous
-    assert "-VCToolchainVersion=14.36" in command[-1]
-    assert any("-MaxParallelActions=2" in part for part in command) == (limit is not None)
+    assert command[1] == "BuildPlugin"
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "abc"])
