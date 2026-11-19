@@ -175,6 +175,39 @@ def test_vswhere_handles_custom_installations_and_editions(tmp_path, monkeypatch
     assert "-products" in calls[0] and "*" in calls[0]
 
 
+def test_vswhere_timeout_reports_a_bounded_failure(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    vswhere = tmp_path / "vswhere.exe"
+    vswhere.touch()
+    monkeypatch.setattr(module.shutil, "which", lambda _command: str(vswhere))
+
+    def discover(_command, **_kwargs):
+        raise subprocess.TimeoutExpired("vswhere", module.VSWHERE_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(module.subprocess, "check_output", discover)
+    with pytest.raises(RuntimeError, match="vswhere timed out"):
+        module._msvc_toolchain_roots()
+
+
+def test_msvc_kit_timeout_reports_a_bounded_failure(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    args = SimpleNamespace(
+        msvc_kit="msvc-kit",
+        vctoolchain_version="",
+        sdk_version="",
+        msvc_kit_dir="",
+        ue_root=tmp_path,
+    )
+    uat_dir = tmp_path / "uat"
+
+    def doctor(_command, **_kwargs):
+        raise subprocess.TimeoutExpired("msvc-kit", module.MSVC_KIT_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(module.subprocess, "check_output", doctor)
+    with pytest.raises(RuntimeError, match="msvc-kit doctor timed out"):
+        module.build_precompiled_plugin(args, uat_dir)
+
+
 def test_ubt_selection_must_match_every_compiled_target(tmp_path):
     module = _load_build_distributable_module()
     log = tmp_path / "uat.log"

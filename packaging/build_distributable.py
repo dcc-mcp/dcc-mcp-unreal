@@ -38,6 +38,8 @@ DEFAULT_CORE_WHEEL_URL = os.environ.get("DCC_MCP_CORE_WHEEL_URL")
 DEFAULT_CORE_SPEC = os.environ.get("DCC_MCP_CORE_SPEC", "dcc-mcp-core>=0.20.13,<0.21.0")
 GENERATED_HEADER_COMPAT_ENV = "DCC_MCP_UNREAL_GENERATED_HEADER_COMPAT"
 PACKAGE_HEADER_ID = "FID_Engine_Source_Runtime_CoreUObject_Public_UObject_Package_h"
+VSWHERE_TIMEOUT_SECONDS = 120
+MSVC_KIT_TIMEOUT_SECONDS = 600
 
 
 def run(cmd: List[str], *, cwd: Optional[Path] = None, log_path: Optional[Path] = None) -> None:
@@ -288,8 +290,9 @@ def temporarily_clear_legacy_ubt_user_config(work_dir: Path, compiler: str = "",
             config_path.with_name("BuildConfiguration.xml.dcc-mcp-created").unlink(missing_ok=True)
             shutil.copy2(str(config_path), str(backup_path))
         else:
+            created_path = config_path.with_name("BuildConfiguration.xml.dcc-mcp-created")
+            created_path.touch()
             backup_path.write_bytes(b"")
-            config_path.with_name("BuildConfiguration.xml.dcc-mcp-created").touch()
         # The backup lives beside the configuration, outside the disposable build directory.
         with backup_path.open("r+b") as backup:
             os.fsync(backup.fileno())
@@ -366,9 +369,15 @@ def _msvc_toolchain_roots() -> List[Path]:
         raise FileNotFoundError(
             "vswhere is required to verify an explicit compiler; install Visual Studio Build Tools."
         )
-    output = subprocess.check_output(
-        [vswhere, "-all", "-products", "*", "-format", "json", "-utf8"], text=True, encoding="utf-8-sig"
-    )
+    try:
+        output = subprocess.check_output(
+            [vswhere, "-all", "-products", "*", "-format", "json", "-utf8"],
+            text=True,
+            encoding="utf-8-sig",
+            timeout=VSWHERE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("vswhere timed out after {} seconds".format(VSWHERE_TIMEOUT_SECONDS)) from exc
     candidates = [Path(instance["installationPath"]) / "VC" / "Tools" / "MSVC" for instance in json.loads(output)]
     roots = []
     for p in candidates:
@@ -435,7 +444,17 @@ def build_precompiled_plugin(args: argparse.Namespace, uat_dir: Path) -> None:
         ):
             if value:
                 diagnostics += [flag, value]
-        report = json.loads(subprocess.check_output(diagnostics, text=True, encoding="utf-8"))
+        try:
+            report = json.loads(
+                subprocess.check_output(
+                    diagnostics,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=MSVC_KIT_TIMEOUT_SECONDS,
+                )
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("msvc-kit doctor timed out after {} seconds".format(MSVC_KIT_TIMEOUT_SECONDS)) from exc
         if report.get("schema") != "msvc-kit.doctor.v1" or report.get("status") != "passed":
             raise RuntimeError("Requested msvc-kit doctor did not report a supported, passing toolchain")
         uat_dir.parent.mkdir(parents=True, exist_ok=True)
