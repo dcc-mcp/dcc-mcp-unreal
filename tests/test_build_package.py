@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -315,6 +316,55 @@ def test_ue4_installed_engine_uses_precompiled_uat(tmp_path, monkeypatch):
     )
 
     assert "-nocompile" in observed[0]
+
+
+def test_uat_mutex_no_wait_opt_in_sets_the_automationtool_variable(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_5.5"
+    batch_files = engine / "Engine" / "Build" / "BatchFiles"
+    batch_files.mkdir(parents=True)
+    (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
+    (engine / "Engine" / "Build" / "Build.version").write_text(
+        json.dumps({"MajorVersion": 5, "MinorVersion": 5}),
+        encoding="utf-8",
+    )
+
+    observed = []
+    monkeypatch.setattr(module, "run", lambda command: observed.append(command))
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
+    monkeypatch.delenv("uebp_UATMutexNoWait", raising=False)
+    monkeypatch.setenv("DCC_MCP_UAT_MUTEX_NO_WAIT", "1")
+
+    module.build_precompiled_plugin(
+        SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir=""),
+        tmp_path / "uat" / "DccMcpUnreal",
+    )
+
+    assert os.environ["uebp_UATMutexNoWait"] == "1"
+
+
+def test_uat_mutex_no_wait_stays_off_without_the_opt_in(tmp_path, monkeypatch):
+    module = _load_build_distributable_module()
+    engine = tmp_path / "UE_5.5"
+    batch_files = engine / "Engine" / "Build" / "BatchFiles"
+    batch_files.mkdir(parents=True)
+    (batch_files / "RunUAT.bat").write_text("@echo off\n", encoding="utf-8")
+    (engine / "Engine" / "Build" / "Build.version").write_text(
+        json.dumps({"MajorVersion": 5, "MinorVersion": 5}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "run", lambda command: None)
+    monkeypatch.setattr(module, "_check_msvc_toolchain", lambda version: None)
+    monkeypatch.delenv("uebp_UATMutexNoWait", raising=False)
+    monkeypatch.delenv("DCC_MCP_UAT_MUTEX_NO_WAIT", raising=False)
+
+    module.build_precompiled_plugin(
+        SimpleNamespace(ue_root=engine, vctoolchain_version="", patched_headers_dir=""),
+        tmp_path / "uat" / "DccMcpUnreal",
+    )
+
+    assert "uebp_UATMutexNoWait" not in os.environ
 
 
 def test_package_project_executable_builds_fixed_uat_command(tmp_path, monkeypatch):

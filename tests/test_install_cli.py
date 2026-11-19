@@ -1377,6 +1377,34 @@ def test_target_runtime_does_not_execute_a_shadowed_probe(monkeypatch, tmp_path:
     assert accepted["plugin_payload"]["root"] != str(forged_payload)
 
 
+def test_target_runtime_retries_one_transient_probe_failure(monkeypatch) -> None:
+    real_probe = install_cli._run_bounded_probe
+    attempts: list[list[str]] = []
+
+    def flaky_probe(command: list[str], **_kwargs: object) -> dict:
+        attempts.append(command)
+        if len(attempts) == 1:
+            return {"success": False, "reason": "probe timed out", "stdout": "", "stderr": "", "truncated": False}
+        return real_probe(command)
+
+    monkeypatch.setattr(install_cli, "_run_bounded_probe", flaky_probe)
+
+    accepted = install_cli._target_runtime(Path(sys.executable))
+
+    assert len(attempts) == 2
+    assert accepted["adapter_version"] == install_cli.__version__
+
+
+def test_target_runtime_surfaces_a_persistent_probe_failure(monkeypatch) -> None:
+    def failing_probe(_command: list[str], **_kwargs: object) -> dict:
+        return {"success": False, "reason": "probe timed out", "stdout": "", "stderr": "", "truncated": False}
+
+    monkeypatch.setattr(install_cli, "_run_bounded_probe", failing_probe)
+
+    with pytest.raises(ValueError, match="cannot import the adapter and Core"):
+        install_cli._target_runtime(Path(sys.executable))
+
+
 def _distribution_identity(
     origin: Path,
     root: Path,

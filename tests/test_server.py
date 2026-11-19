@@ -632,17 +632,17 @@ def test_main_thread_dispatcher_registers_one_tick_callback_on_the_game_thread(m
     worker = threading.Thread(target=run_worker)
     worker.start()
     for _ in range(100):
-        if dispatcher._pending.qsize() == 1:
+        if dispatcher.queue_size() == 1:
             break
         time.sleep(0.001)
-    assert dispatcher._pending.qsize() == 1
+    assert dispatcher.queue_size() == 1
     callbacks[0](0.0)
     worker.join(timeout=1.0)
 
     assert not worker.is_alive()
     assert result["thread_id"] == main_thread_id
     assert len(callbacks) == 1
-    assert native_ticks == [(main_thread_id, 16)]
+    assert native_ticks == [(main_thread_id, 1)]
 
     dispatcher.close()
     assert unregistered == ["tick-handle"]
