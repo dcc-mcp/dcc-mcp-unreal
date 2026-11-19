@@ -1,4 +1,4 @@
-"""Optional bridge to Unreal Engine 5.8's built-in MCP server."""
+"""Optional bridge to Unreal Engine 5.8+ built-in MCP servers."""
 
 from __future__ import annotations
 
@@ -173,7 +173,7 @@ def bridge_official_mcp(
     arguments: Optional[Mapping[str, Any]] = None,
     timeout: float = 15.0,
 ) -> Dict[str, Any]:
-    """Execute one bounded operation against Epic's optional UE 5.8 MCP server."""
+    """Execute one bounded operation against Epic's optional UE 5.8+ MCP server."""
     operation = operation.strip().lower()
     client = OfficialMcpClient(endpoint, timeout=timeout)
     with client.connected():
@@ -188,7 +188,41 @@ def bridge_official_mcp(
         if operation == "describe_toolset":
             if not toolset_name:
                 raise OfficialMcpError("toolset_name is required for describe_toolset")
-            return client.call_tool("describe_toolset", {"toolset_name": toolset_name})
+            if "describe_toolsets" in names:
+                tool = next(
+                    item
+                    for item in tool_list["tools"]
+                    if isinstance(item, dict) and item.get("name") == "describe_toolsets"
+                )
+                schema = tool.get("inputSchema")
+                properties = schema.get("properties") if isinstance(schema, dict) else None
+                if not isinstance(properties, dict) or schema.get("type", "object") != "object":
+                    raise OfficialMcpError("Epic MCP describe_toolsets has an unsupported input schema")
+                selectors = [
+                    name
+                    for name, prop in properties.items()
+                    if isinstance(prop, dict)
+                    and prop.get("type") == "array"
+                    and isinstance(prop.get("items"), dict)
+                    and prop["items"].get("type") == "string"
+                ]
+                include_schemas = properties.get("include_schemas")
+                required = schema.get("required", [])
+                if (
+                    len(selectors) != 1
+                    or not isinstance(include_schemas, dict)
+                    or include_schemas.get("type") != "boolean"
+                    or not isinstance(required, list)
+                    or any(not isinstance(name, str) for name in required)
+                ):
+                    raise OfficialMcpError("Epic MCP describe_toolsets has an unsupported input schema")
+                description_arguments = {selectors[0]: [toolset_name], "include_schemas": True}
+                if set(required).difference(description_arguments):
+                    raise OfficialMcpError("Epic MCP describe_toolsets schema requires unsupported arguments")
+                return client.call_tool("describe_toolsets", description_arguments)
+            if "describe_toolset" in names:
+                return client.call_tool("describe_toolset", {"toolset_name": toolset_name})
+            raise OfficialMcpError("Epic MCP did not advertise a toolset description tool")
         if operation == "call_tool":
             if not tool_name:
                 raise OfficialMcpError("tool_name is required for call_tool")
