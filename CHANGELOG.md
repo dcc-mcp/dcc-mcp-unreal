@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.13](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.12...v0.3.13) (2026-11-19)
+
+
+### Bug Fixes
+
+* adapt official MCP toolset discovery ([79808e3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/79808e35bbe1bc9e77945507dbf8549fb01e99c2))
+* share Unreal dispatch and isolate runtime identity ([0376d5f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0376d5f79159a58aa79b5a424008a1211b80e410))
+
 ## [0.3.12](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.11...v0.3.12) (2026-11-01)
 
 
