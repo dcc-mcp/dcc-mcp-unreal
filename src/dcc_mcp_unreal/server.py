@@ -16,10 +16,10 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
-from dcc_mcp_core import ChunkedRunner, HostUiDispatcherBase
-
 if TYPE_CHECKING:
     from dcc_mcp_core.server import UiControlRuntimeOptions
+
+from dcc_mcp_core import ChunkedRunner, HostUiDispatcherBase
 
 try:
     from dcc_mcp_core import DccServerBase
@@ -235,6 +235,10 @@ class UnrealMainThreadDispatcher(HostUiDispatcherBase):
     def _on_tick(self, _delta: float) -> None:
         if not self.is_host_thread():
             raise RuntimeError("Unreal Slate callback must run on the host thread")
+        if self._draining:
+            # Engine operations may pump Slate recursively. The outer drain
+            # owns queue advancement, scene publication and deferred cleanup.
+            return
         if self.is_shutdown:
             self._unregister_tick_callback()
             return
@@ -504,6 +508,7 @@ def start_server(
     eager_load: bool = True,
     gateway_port: Optional[int] = None,
     registry_dir: Optional[str] = None,
+    enable_gateway_failover: bool = True,
     ui_control: Optional["UiControlRuntimeOptions"] = None,
     dcc_window_handle: Optional[int] = None,
 ) -> Any:
@@ -521,6 +526,7 @@ def start_server(
                 server_version=server_version,
                 gateway_port=gateway_port,
                 registry_dir=registry_dir,
+                enable_gateway_failover=enable_gateway_failover,
                 ui_control=ui_control,
                 dcc_window_handle=dcc_window_handle,
             )

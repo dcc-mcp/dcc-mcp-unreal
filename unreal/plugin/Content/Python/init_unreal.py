@@ -312,7 +312,7 @@ def _owner_ui_control_kwargs() -> dict:
 
     import unreal  # noqa: PLC0415
 
-    actual_project = str(unreal.Paths.project_file_path())
+    actual_project = str(unreal.Paths.get_project_file_path())
     if not Path(actual_project).is_absolute():
         actual_project = str(unreal.Paths.convert_relative_path_to_full(actual_project))
     if os.path.normcase(str(_ordinary_owner_path(actual_project).resolve())) != os.path.normcase(
@@ -362,7 +362,11 @@ def _owner_ui_control_kwargs() -> dict:
         or not re.fullmatch(r"[1-9][0-9]{0,19}", identity["window_handle"])
     ):
         raise ValueError("Editor MainFrame identity must bind the exact current process and canonical HWND")
-    return {"ui_control": options, "dcc_window_handle": int(identity["window_handle"])}
+    return {
+        "ui_control": options,
+        "dcc_window_handle": int(identity["window_handle"]),
+        "enable_gateway_failover": False,
+    }
 
 
 def _start() -> None:

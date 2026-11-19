@@ -21,6 +21,21 @@ and callback removal is reported as pending until the next tick. Repeated
 close is idempotent. Queued Python work that times out is cancelled before a
 later tick can execute it. A running call remains cooperative.
 
+An engine operation can pump Slate while an outer queue drain is active. Such
+nested callbacks return before advancing work, publishing scene state, or
+detaching the callback. The outer tick completes that work and any requested
+cleanup. Direct recursive queue drains and calls from the wrong thread still
+fail explicitly.
+
+The any-affinity self-check dispatches its bounded engine identity reads to
+this same main-thread queue. HTTP health/readiness waits stay on the caller's
+worker so the host can continue pumping. A main-thread caller must select
+`check_http=False`; requesting self-HTTP there returns an explicit error.
+
+Default level loading saves the current level and stops if that save fails.
+It keeps no old World reference across the map switch. New World inspection
+starts only after the engine reports a successful load.
+
 The declared Core floor, `0.20.13`, already exports the required dispatcher,
 native HTTP queue attachment, bridge, and `ChunkedRunner` terminal callback
 APIs. CI exercises that actual published dependency; no Core source overlay
@@ -28,21 +43,21 @@ or new minimum version is required for this adapter change.
 
 ## Candidate installation and host acceptance
 
-Build a wheel with `python -m build --wheel`. Install the exact wheel into a
-new, isolated Python payload directory with the host-compatible Python:
+Build the complete native adapter wheel through the
+[normal native packaging entry](native-wheel-packaging.md). Install the exact
+generated wheel and selected Core wheel into a new isolated interpreter:
 
 ```text
-python -m pip install --no-deps --target <candidate-python> <exact-adapter-wheel>
+<private-python> -m pip install <qualified-core-wheel> <native-adapter-wheel>
+<private-python> -m dcc_mcp_unreal.install_cli install --project <project.uproject> --dcc-path <ue-root> --python <private-python>
 ```
 
-The fresh Editor must already have a supported, verified Core installation.
-Use the existing project/plugin bootstrap in that fresh candidate only;
-prepend `<candidate-python>` before importing `dcc_mcp_unreal`. Record the
-wheel SHA256, source commit, imported `server.__file__`, Core version, engine
-version, and fresh PID/project identity. Do not reload this module underneath
-a running server or replace the active project's installed Python payload.
-The wheel includes plugin source; this Python dispatcher change does not
-claim a newly compiled native plugin.
+The installer validates the wheel's distribution ownership and complete plugin
+payload before its receipt transaction. The fresh Editor consumes that installed
+plugin through its normal bootstrap. Record the wheel SHA256, source commit,
+imported `server.__file__`, Core version, engine version, receipt and fresh
+PID/project identity. Source-wheel CI and synthetic scheduling tests establish
+separate evidence from native compilation, installation and live Editor load.
 
 Before running a sampler, verify `issubclass(UnrealMainThreadDispatcher,
 HostUiDispatcherBase)` and the public `submit_chunked_runner` entry, then
