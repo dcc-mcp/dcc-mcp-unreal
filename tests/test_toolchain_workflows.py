@@ -63,14 +63,13 @@ def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
 
 
 @pytest.mark.parametrize("ue_version", ["5.7", "5.8"])
-def test_toolchain_script_selects_latest_valid_compiler_for_modern_ue(
+def test_toolchain_script_preserves_engine_compiler_selection_for_modern_ue(
     tmp_path: Path,
     ue_version: str,
 ) -> None:
     environment = _configure_toolchain(ue_version, tmp_path)
 
     assert environment == (
-        "UnrealBuildTool_WindowsPlatform__CompilerVersion=Latest\n"
         "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false\n"
         "UnrealBuildTool_BuildConfiguration__MaxParallelActions=1\n"
     )
@@ -207,7 +206,7 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
     assert '"AutomationTool.exe"' in builder
     assert 'cmd.append("-nocompile")' in builder
     assert 'os.environ["uebp_LogFolder"] = str(uat_log_dir)' in builder
-    assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent):" in builder
+    assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent," in builder
 
 
 def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:

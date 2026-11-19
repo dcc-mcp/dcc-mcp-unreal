@@ -31,7 +31,7 @@ Packaging is driven by environment variables, not by editing the `Justfile`:
 | `DCC_MCP_UNREAL_PYTHON_PLUGIN` | `PythonScriptPlugin` | Python plugin name (override on internal forks) |
 
 `vx.toml` also pins `UE_5_ROOT`, `UE_5_2_ROOT`, `UE_4_ROOT`, `UE_4_26_ROOT` and
-`VCTOOLCHAIN_VERSION`, and exposes `build-ue5.7` / `build-ue5.2` /
+exposes `build-ue5.7` / `build-ue5.2` /
 `build-ue4.18` / `build-ue4.26` scripts over `packaging/build_distributable.py`.
 
 ## Agent control path
