@@ -44,11 +44,18 @@ def test_capability_probe_is_read_only_and_reports_host_evidence():
 
 
 def test_manual_override_requires_project_owned_dcc_cua_binding():
-    request = {"owned_window": {"provider": "dcc-cua", "runtime_version": "0.4.0", "target_pid": 42, "hwnd": 99}, "expected_revision": "abc"}
+    request = {
+        "owned_window": {"provider": "dcc-cua", "runtime_version": "0.4.0", "target_pid": 42, "hwnd": 99},
+        "expected_revision": "abc",
+    }
     result = validate_request("pcg_manual_overrides", "exclude", request)
     assert result["plan"]["routing"] == "dcc-cua"
     with pytest.raises(ProceduralWorkflowError, match="dcc-cua"):
-        validate_request("pcg_manual_overrides", "exclude", {**request, "owned_window": {**request["owned_window"], "provider": "generic"}})
+        validate_request(
+            "pcg_manual_overrides",
+            "exclude",
+            {**request, "owned_window": {**request["owned_window"], "provider": "generic"}},
+        )
 
 
 def test_pve_rejects_cross_version_implicit_migration():
@@ -74,9 +81,16 @@ def test_mesh_terrain_rejects_unsafe_pcg_write_and_preview_is_explicit():
         validate_request(
             "mesh_terrain",
             "edit",
-            {"world_partition": True, "source_type": "heightmap", "pcg_write": True, "source_point_correspondence": False},
+            {
+                "world_partition": True,
+                "source_type": "heightmap",
+                "pcg_write": True,
+                "source_point_correspondence": False,
+            },
         )
-    result = validate_request("mesh_terrain", "build", {"world_partition": True, "source_type": "mesh", "build_state": "preview"})
+    result = validate_request(
+        "mesh_terrain", "build", {"world_partition": True, "source_type": "mesh", "build_state": "preview"}
+    )
     assert result["plan"]["preview_only"] is True
 
 
@@ -84,18 +98,31 @@ def test_megalights_requires_a_declared_target_budget_and_deferred_renderer():
     result = validate_request(
         "megalights",
         "qualify",
-        {"engine_version": "5.8", "renderer": "deferred", "target_rhi": "dx12", "target_budget": {"gpu_ms": 16.6, "memory_mb": 2048}},
+        {
+            "engine_version": "5.8",
+            "renderer": "deferred",
+            "target_rhi": "dx12",
+            "target_budget": {"gpu_ms": 16.6, "memory_mb": 2048},
+        },
     )
     assert result["plan"]["qualification_requires_measurement"] is True
 
 
 def test_substrate_conversion_requires_explicit_recovery_contract():
     with pytest.raises(ProceduralWorkflowError, match="disposable_copy"):
-        validate_request("substrate", "convert", {"material_path": "/Game/Materials/M_My", "root": "slab", "conversion_intent": True})
+        validate_request(
+            "substrate", "convert", {"material_path": "/Game/Materials/M_My", "root": "slab", "conversion_intent": True}
+        )
     result = validate_request(
         "substrate",
         "convert",
-        {"material_path": "/Game/Materials/M_My", "root": "slab", "conversion_intent": True, "disposable_copy": True, "backup_required": True},
+        {
+            "material_path": "/Game/Materials/M_My",
+            "root": "slab",
+            "conversion_intent": True,
+            "disposable_copy": True,
+            "backup_required": True,
+        },
     )
     assert result["plan"]["legacy_preserved"] is False
 
@@ -109,8 +136,12 @@ def test_validation_skill_uses_normal_skill_error_without_unreal():
     result = module.validate_procedural_workflow(
         feature="megalights",
         operation="qualify",
-        request={"engine_version": "5.8", "renderer": "forward", "target_rhi": "dx12", "target_budget": {"gpu_ms": 1, "memory_mb": 1}},
+        request={
+            "engine_version": "5.8",
+            "renderer": "forward",
+            "target_rhi": "dx12",
+            "target_budget": {"gpu_ms": 1, "memory_mb": 1},
+        },
     )
     assert result["success"] is False
     assert result["context"]["error_kind"] == "invalid_input"
-

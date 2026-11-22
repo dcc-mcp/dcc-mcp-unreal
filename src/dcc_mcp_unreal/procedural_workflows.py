@@ -284,4 +284,3 @@ def validate_request(feature: str, operation: str, request: Mapping[str, Any]) -
         "execution_verified": False,
         "readback_required": operation not in {"inspect", "qualify"},
     }
-

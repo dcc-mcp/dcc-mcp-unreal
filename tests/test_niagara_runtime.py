@@ -32,4 +32,3 @@ def test_gpu_path_is_reported_as_partial_until_its_own_observation_exists():
     )
     assert result["status"] == "partial_gpu_unverified"
     assert result["execution_verified"] is False
-

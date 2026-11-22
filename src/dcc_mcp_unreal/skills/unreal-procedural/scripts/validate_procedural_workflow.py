@@ -16,4 +16,3 @@ def validate_procedural_workflow(feature: str, operation: str, request: dict, **
     except ProceduralWorkflowError as exc:
         return skill_error("Invalid procedural workflow request", str(exc), error_kind="invalid_input")
     return skill_success("Validated a procedural workflow plan without mutation.", **result)
-

@@ -89,7 +89,9 @@ def test_apply_can_skip_reference_rewrites_explicitly(monkeypatch):
         def save_asset(_path, only_if_is_dirty=False):
             return True
 
-    host = SimpleNamespace(EditorAssetLibrary=AssetLibrary, AssetToolsHelpers=SimpleNamespace(get_asset_tools=lambda: AssetTools()))
+    host = SimpleNamespace(
+        EditorAssetLibrary=AssetLibrary, AssetToolsHelpers=SimpleNamespace(get_asset_tools=lambda: AssetTools())
+    )
     monkeypatch.setitem(sys.modules, "unreal", host)
     result = _load().apply_asset_handoff(plan=_plan(), rewrite_references=False)
     assert result["success"] is True

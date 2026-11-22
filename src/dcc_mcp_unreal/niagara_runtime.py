@@ -63,4 +63,3 @@ def validate_runtime_evidence(
         "execution_verified": status == "qualified",
         "teardown_verified": bool(evidence["world_teardown_observed"]),
     }
-

@@ -67,7 +67,9 @@ def apply_asset_handoff(plan: dict, rewrite_references: bool = True, **kwargs) -
                 source_asset = unreal.EditorAssetLibrary.load_asset(source)
                 destination_asset = unreal.EditorAssetLibrary.load_asset(destination)
                 if source_asset is None or destination_asset is None:
-                    raise RuntimeError(f"Cannot load source and destination for reference rewrite: {source} -> {destination}")
+                    raise RuntimeError(
+                        f"Cannot load source and destination for reference rewrite: {source} -> {destination}"
+                    )
                 if not unreal.EditorAssetLibrary.consolidate_assets(destination_asset, [source_asset]):
                     raise RuntimeError(f"Unreal failed to rewrite referencers: {source} -> {destination}")
                 rewritten.append({"source": source, "destination": destination})

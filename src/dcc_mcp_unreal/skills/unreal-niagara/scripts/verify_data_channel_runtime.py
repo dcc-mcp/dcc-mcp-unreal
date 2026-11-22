@@ -25,4 +25,3 @@ def verify_niagara_data_channel_runtime(
             **result,
         )
     return skill_success("Verified Niagara Data Channel runtime evidence.", **result)
-

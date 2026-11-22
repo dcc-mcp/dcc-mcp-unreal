@@ -21,4 +21,3 @@ def inspect_procedural_capabilities(**kwargs) -> dict:
             error_kind="host_unavailable",
         )
     return skill_success("Inspected procedural capability prerequisites without mutation.", **result)
-
