@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.18](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.17...v0.3.18) (2026-11-22)
+
+
+### Features
+
+* add transactional asset handoff apply ([a4e95e1](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a4e95e14a6ffb8d626fc429b764112d433292abc))
+* add transactional asset handoff apply ([a4d6756](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/a4d67562c477700dae637ac296476aec56a5a650))
+
 ## [0.3.17](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.16...v0.3.17) (2026-11-22)
 
 
