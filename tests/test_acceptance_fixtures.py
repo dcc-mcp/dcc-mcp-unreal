@@ -28,6 +28,17 @@ def test_reference_only_fixture_cannot_be_used_as_a_local_pass():
     assert inspect_local_fixture(entry, ROOT)["status"] == "rights-blocked"
 
 
+def test_native_fixture_runner_records_engine_and_reopen_postconditions():
+    script = (ROOT / "tests/ue_acceptance_fixture.py").read_text(encoding="utf-8")
+    assert "author_niagara_system_json" in script
+    assert "get_engine_version" in script
+    assert "load_asset" in script
+    assert "exists_after_reopen" in script
+    assert "NiagaraDataChannel_Global" in script
+    assert "ndc_payload_readback" in script
+    assert "quit_editor" in script
+
+
 def test_local_fixture_paths_cannot_escape_project_root():
     entry = {
         "id": "escape",

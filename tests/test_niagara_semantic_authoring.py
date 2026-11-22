@@ -205,7 +205,7 @@ def test_commandlet_probe_requires_stable_fail_closed_result_without_asset_mutat
     assert 'error_code == "niagara_editor_unavailable"' in probe
     assert "rollback_completed" in probe
     assert "does_asset_exist" in probe
-    assert 'ValidateSet("native", "python", "niagara", "niagara-commandlet")' in runner
+    assert 'ValidateSet("native", "python", "niagara", "niagara-commandlet", "acceptance-fixture")' in runner
     assert "-run=pythonscript" in runner
     assert "ue_niagara_commandlet.py" in runner
     assert "DccMcp.Smoke.NiagaraSemanticAuthoring" in runner

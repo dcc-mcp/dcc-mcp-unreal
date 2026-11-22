@@ -27,6 +27,11 @@ Create and configure Niagara VFX systems, spawn them as actors in the
 level, set float/color/vector parameters at runtime, inspect basic asset and
 component state, and preview particle effects.
 
+`create_niagara_data_channel` accepts only an explicitly observed UE type
+registry index. It verifies the persisted channel payload and Global/Islands
+routing after save and reopen. Runtime writer/reader frame ordering, GPU
+visibility, and PIE teardown require a separate qualified fixture.
+
 ## Workflow
 
 1. On UE 5.8+, call `author_niagara_system` to create and finalize emitters,
@@ -46,6 +51,7 @@ emitter graph authoring.
 
 ## Scripts
 
+- `create_niagara_data_channel` — Create and verify a typed NDC asset
 - `author_niagara_system` — Author and finalize an emitter/module/renderer graph on UE 5.8+
 - `create_niagara_system` — Create a new empty Niagara system
 - `spawn_niagara_actor` — Spawn a Niagara system as an actor in the level

@@ -1,4 +1,54 @@
 tools:
+  - name: create_niagara_data_channel
+    description: >-
+      Create a Global or Islands Niagara Data Channel with explicitly observed
+      UE type registry indices, then save, reopen, and verify payload readback.
+      It never guesses type indices or promises runtime writer/reader timing.
+    source_file: scripts/create_data_channel.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 90
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [channel_name, fields]
+      properties:
+        channel_name:
+          type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+        package_path:
+          type: string
+          pattern: "^/Game(?:/.*)?$"
+          default: /Game/VFX
+        routing:
+          type: string
+          enum: [global, islands]
+          default: global
+        keep_previous_frame_data:
+          type: boolean
+          default: false
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, type_registry_index]
+            properties:
+              name:
+                type: string
+                pattern: "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              type_registry_index:
+                type: integer
+                minimum: 0
+                maximum: 65535
+    next-tools: [unreal_niagara__get_niagara_system_info]
+
   - name: author_niagara_system
     description: >-
       Create and finalize a Niagara system through UE 5.8's public external
