@@ -447,6 +447,24 @@ tools:
           items: {type: string, minLength: 1}
           default: []
 
+  - name: apply_asset_handoff
+    description: Apply a planned non-overwriting asset copy with rollback on failure; reference rewriting and verification remain explicit follow-up stages.
+    source_file: scripts/apply_asset_handoff.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          type: object
+    next-tools: [unreal_assets__verify_asset_handoff]
+
   - name: delete_asset
     description: Delete one or more Content Browser assets.
     source_file: scripts/delete_asset.py
