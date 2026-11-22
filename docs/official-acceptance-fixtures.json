@@ -32,12 +32,15 @@
         "listing": "repository fixture"
       },
       "compatible_engine_versions": ["5.7", "5.8"],
-      "required_plugins": [],
+      "required_plugins": ["DccMcpUnreal", "Niagara", "PythonScriptPlugin"],
       "rights_status": "authorized-local",
-      "local_paths": ["tests/fixtures/acceptance/niagara_data_channel.json"],
+      "local_paths": ["tests/fixtures/acceptance/niagara_data_channel.json", "tests/ue_acceptance_fixture.py"],
+      "fixture_runner": "tests/ue_acceptance_fixture.py",
       "expected_behavior": [
         "duplicate fields are rejected",
-        "payload types and routing are explicit"
+        "payload types and routing are explicit",
+        "a native Niagara asset is saved and reopened on the declared engine",
+        "a Global Niagara Data Channel payload is saved and read back"
       ]
     }
   ]

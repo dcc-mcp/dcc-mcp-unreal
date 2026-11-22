@@ -1,7 +1,7 @@
 param(
     [string]$Project = ".",
     [string]$UERoot = "",
-    [ValidateSet("native", "python", "niagara", "niagara-commandlet")]
+[ValidateSet("native", "python", "niagara", "niagara-commandlet", "acceptance-fixture")]
     [string]$Mode = "native"
 )
 
@@ -32,7 +32,11 @@ if ($projectItem.PSIsContainer) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$scriptName = if ($Mode -eq "niagara-commandlet") { "ue_niagara_commandlet.py" } else { "ue_smoke.py" }
+$scriptName = switch ($Mode) {
+    "niagara-commandlet" { "ue_niagara_commandlet.py"; break }
+    "acceptance-fixture" { "ue_acceptance_fixture.py"; break }
+    default { "ue_smoke.py" }
+}
 $scriptPath = Join-Path $repoRoot "tests\$scriptName"
 if (-not (Test-Path -LiteralPath $scriptPath)) {
     throw "Smoke test script not found: $scriptPath"
