@@ -1,4 +1,32 @@
 tools:
+  - name: verify_niagara_data_channel_runtime
+    description: Validate recorded native Niagara Data Channel writer/reader timing, visibility, restart and world-teardown evidence. It never treats a visible particle alone as proof.
+    source_file: scripts/verify_data_channel_runtime.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 15
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [channel_path, routing, visibility, evidence]
+      properties:
+        channel_path: {type: string, pattern: "^/Game/.*"}
+        routing: {type: string, enum: [global, islands]}
+        visibility:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [blueprint, niagara_cpu, niagara_gpu]}
+        evidence:
+          type: object
+          additionalProperties: {type: boolean}
+    next-tools:
+      on-success: [unreal_niagara__create_niagara_data_channel]
+
   - name: create_niagara_data_channel
     description: >-
       Create a Global or Islands Niagara Data Channel with explicitly observed

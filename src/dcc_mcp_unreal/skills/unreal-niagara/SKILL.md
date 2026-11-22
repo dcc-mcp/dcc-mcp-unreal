@@ -32,6 +32,11 @@ registry index. It verifies the persisted channel payload and Global/Islands
 routing after save and reopen. Runtime writer/reader frame ordering, GPU
 visibility, and PIE teardown require a separate qualified fixture.
 
+`verify_niagara_data_channel_runtime` is the post-run evidence gate for Data
+Channels. It records writer/reader timing, visibility path, delayed frame
+semantics, unsubscribe, PIE restart and world teardown separately. GPU
+visibility is qualified only when its own observation is present.
+
 ## Workflow
 
 1. On UE 5.8+, call `author_niagara_system` to create and finalize emitters,

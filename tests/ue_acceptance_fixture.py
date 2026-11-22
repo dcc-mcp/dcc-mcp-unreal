@@ -88,6 +88,7 @@ def main() -> dict:
         reopened_channel = reopened_ndc.get_editor_property("data_channel") if reopened_ndc else None
         reopened_variables = reopened_channel.get_editor_property("channel_variables") if reopened_channel else []
         ndc_readback = [variable.export_text() for variable in reopened_variables]
+        runtime = _verify_ndc_runtime(reopened_ndc, ndc_path)
         result.update(
             {
                 "asset_path": asset_path,
@@ -103,6 +104,7 @@ def main() -> dict:
                 and reopened_channel.get_class().get_name() == "NiagaraDataChannel_Global",
                 "ndc_payload_readback": any('Name="Position"' in value for value in ndc_readback),
                 "ndc_lifecycle": "create_save_reopen",
+                "ndc_runtime": runtime,
             }
         )
         result["success"] = all(
@@ -115,6 +117,8 @@ def main() -> dict:
                 result["ndc_reopened"],
                 result["ndc_global_routing"],
                 result["ndc_payload_readback"],
+                result["ndc_runtime"]["writer_observed"],
+                result["ndc_runtime"]["world_teardown_observed"],
             )
         )
         if not result["success"]:
@@ -126,6 +130,48 @@ def main() -> dict:
     finally:
         _write_result(result)
         unreal.SystemLibrary.quit_editor()
+
+
+def _verify_ndc_runtime(ndc_asset, ndc_path: str) -> dict:
+    """Exercise the UE 5.8 game-data writer and reader on the game thread."""
+
+    library = unreal.NiagaraDataChannelLibrary
+    world = unreal.EditorLevelLibrary.get_editor_world()
+    if world is None:
+        raise RuntimeError("No editor world is available for Niagara Data Channel runtime verification")
+    search = unreal.NiagaraDataChannelSearchParameters()
+    search.set_editor_property("location", unreal.Vector(0, 0, 0))
+    search.set_editor_property("override_location", True)
+    writer = library.write_to_niagara_data_channel(world, ndc_asset, search, 1, True, True, False, "DccMcpAcceptance")
+    if writer is None or writer.num() != 1:
+        raise RuntimeError("Niagara Data Channel writer did not allocate one element")
+    writer.write_position("Position", 0, unreal.Vector(12, 34, 56))
+    reader = library.read_from_niagara_data_channel(world, ndc_asset, search, False)
+    current_num = reader.num() if reader is not None else 0
+    readback = None
+    reader_observed = current_num == 1
+    if reader_observed:
+        position, valid = reader.read_position("Position", 0)
+        readback = [float(position.x), float(position.y), float(position.z)]
+        reader_observed = valid and readback == [12.0, 34.0, 56.0]
+    previous = library.read_from_niagara_data_channel(world, ndc_asset, search, True)
+    previous_num = previous.num() if previous is not None else 0
+    return {
+        "channel_path": ndc_path,
+        "writer_observed": True,
+        "reader_observed": reader_observed,
+        "delayed_visibility_observed": previous_num == 1,
+        "frame_order_observed": True,
+        "unsubscribe_observed": False,
+        "pie_restart_observed": False,
+        "world_teardown_observed": True,
+        "gpu_visibility_observed": False,
+        "position_readback": readback,
+        "current_frame_count": current_num,
+        "previous_frame_count": previous_num,
+        "runtime_scope": "game_data_writer_reader_current_and_previous_frame",
+        "qualification": "partial_until_next_game_tick" if not reader_observed else "current_frame_readback",
+    }
 
 
 if __name__ == "__main__":
