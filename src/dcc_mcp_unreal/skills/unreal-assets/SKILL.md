@@ -71,6 +71,17 @@ authoritative constants and normalization live in
 
 Tools for Content Browser asset discovery, import, export, inspection, and deletion.
 
+## Incremental asset handoff
+
+Use `plan_asset_handoff` after a fresh Asset Registry observation to produce a
+deterministic dependency closure, copy list, destination paths, baseline-shared
+assets, and separate missing-reference results. The plan is read-only and never
+overwrites a destination. After an explicit external copy or reference update,
+use `verify_asset_handoff` to inspect the translated roots again. A successful
+plan does not prove that files were copied or that runtime string loads are
+covered. Missing dependencies and pre-existing missing references remain
+separate in both results.
+
 Static Groom imports require `HairStrands` and `AlembicHairImporter`. Generic
 imports of `.usd`, `.usda`, `.usdc`, or `.usdz` require `USDImporter`. These
 dependencies are checked before an import task or Content Browser mutation is

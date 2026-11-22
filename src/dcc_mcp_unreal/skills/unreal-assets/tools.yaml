@@ -394,6 +394,59 @@ tools:
       on-success: [unreal_assets__export_asset]
       on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
 
+  - name: plan_asset_handoff
+    description: Build a read-only dependency-aware plan for localizing plugin assets into project content.
+    source_file: scripts/plan_asset_handoff.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 60
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [asset_paths, source_root, destination_root]
+      properties:
+        asset_paths:
+          type: array
+          minItems: 1
+          items: {type: string, minLength: 1}
+        source_root:
+          type: string
+          minLength: 2
+          description: Plugin content root, such as /DccMcpUnreal.
+        destination_root:
+          type: string
+          minLength: 2
+          description: Project content root, such as /Game/Localized.
+        baseline_paths:
+          type: array
+          items: {type: string, minLength: 1}
+          default: []
+    next-tools: [unreal_assets__verify_asset_handoff]
+
+  - name: verify_asset_handoff
+    description: Verify a localized asset handoff against fresh dependencies and report remaining plugin references.
+    source_file: scripts/verify_asset_handoff.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 60
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          type: object
+        baseline_paths:
+          type: array
+          items: {type: string, minLength: 1}
+          default: []
+
   - name: delete_asset
     description: Delete one or more Content Browser assets.
     source_file: scripts/delete_asset.py
