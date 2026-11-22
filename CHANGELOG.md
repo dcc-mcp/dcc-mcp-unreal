@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.19](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.18...v0.3.19) (2026-11-22)
+
+
+### Features
+
+* add procedural workflow contracts ([6695a0a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/6695a0a2fca093de8130bbf14c7f9203f79afc21))
+
 ## [0.3.18](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.17...v0.3.18) (2026-11-22)
 
 
