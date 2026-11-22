@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.3.15](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.14...v0.3.15) (2026-11-21)
+
+
+### Features
+
+* **pcg:** author typed spline grammar settings through graph tools ([0bdef3a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0bdef3ad4ebc7c3b0e3eadad38bb5b19451d2c1d))
+
+
+### Bug Fixes
+
+* forward owned UI runtime through embedded bootstrap ([7fafe0a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7fafe0a4bd97e4a189a1f0582d52a3502bbb2c71))
+
+## [0.3.14](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.13...v0.3.14) (2026-11-19)
+
+
+### Features
+
+* **pcg:** preflight native Pathfinding inputs and settings ([f2623a3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/f2623a3394cf03e1770b1897315c185ad145680a))
+
+
+### Bug Fixes
+
+* enforce native toolchain selection and verification ([20d1aa0](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/20d1aa02cdb4d7a9613f709b587eaecdd5fd2a4a))
+
+## [0.3.13](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.12...v0.3.13) (2026-11-19)
+
+
+### Bug Fixes
+
+* adapt official MCP toolset discovery ([79808e3](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/79808e35bbe1bc9e77945507dbf8549fb01e99c2))
+* share Unreal dispatch and isolate runtime identity ([0376d5f](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0376d5f79159a58aa79b5a424008a1211b80e410))
+
 ## [0.3.12](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.11...v0.3.12) (2026-11-01)
 
 

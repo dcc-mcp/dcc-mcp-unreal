@@ -432,6 +432,11 @@ def _target_runtime(python_path: Path) -> dict[str, str]:
         trusted_overlay = str(Path(__file__).resolve().parents[1])
     completed = _run_bounded_probe([str(python_path), "-I", "-c", probe, trusted_overlay])
     if not completed.get("success") or completed.get("truncated"):
+        # A self-hosted runner under load can lose this short-lived child to a timeout or a
+        # transient launch failure. Retry once before blaming the target interpreter, so the
+        # preflight contract only reports a real version/identity problem.
+        completed = _run_bounded_probe([str(python_path), "-I", "-c", probe, trusted_overlay])
+    if not completed.get("success") or completed.get("truncated"):
         error_lines = str(completed.get("stderr") or completed.get("reason") or "").strip().splitlines()
         diagnostic = error_lines[-1] if error_lines else "import probe failed"
         raise ValueError(f"Target interpreter cannot import the adapter and Core: {diagnostic}")

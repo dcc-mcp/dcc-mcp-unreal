@@ -50,15 +50,14 @@ def _module_origin(module, package: str) -> str:
 
 def _install_identity(server) -> dict:
     import dcc_mcp_core  # noqa: PLC0415
-    import init_unreal  # noqa: PLC0415
 
     import dcc_mcp_unreal  # noqa: PLC0415
     import unreal  # noqa: PLC0415
 
     instance_id = str(uuid.UUID(str(getattr(server, "instance_id", ""))))
-    process_start_token = getattr(init_unreal, "PROCESS_START_TOKEN", None)
+    process_start_token = getattr(server, "process_start_token", None)
     if not isinstance(process_start_token, str) or re.fullmatch(r"[A-Fa-f0-9]{32}", process_start_token) is None:
-        raise ValueError("Unreal bootstrap process token is missing or invalid")
+        raise ValueError("Unreal server process token is missing or invalid")
     editor = Path(sys.executable).resolve()
     if not editor.is_file() or editor.stat().st_size <= 0:
         raise ValueError("Unreal editor executable identity is unavailable")

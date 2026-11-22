@@ -175,3 +175,124 @@ def test_client_propagates_inner_tool_error(monkeypatch):
     )
     with pytest.raises(official_mcp.OfficialMcpError, match="CaptureViewport failed"):
         client.call_tool("CaptureViewport")
+
+
+def _stub_description_session(monkeypatch, tools, result=None):
+    responses = iter(
+        [
+            _json_response({"result": {}}, headers={"Mcp-Session-Id": "description-session"}),
+            _Response(),
+            _json_response({"result": {"tools": tools}}),
+            _json_response({"result": result or {"structuredContent": {"tools": []}}}),
+            _Response(),
+        ]
+    )
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        # Validation failures close the session before any tools/call request.
+        return _Response() if request.method == "DELETE" else next(responses)
+
+    monkeypatch.setattr(official_mcp, "urlopen", fake_urlopen)
+    return requests
+
+
+def _description_tool(selector="toolset_names"):
+    # Synthetic schemas exercise binding; these are not captured UE 5.9 responses.
+    return {
+        "name": "describe_toolsets",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                selector: {"type": "array", "items": {"type": "string"}},
+                "include_schemas": {"type": "boolean"},
+            },
+            "required": [selector],
+        },
+    }
+
+
+@pytest.mark.parametrize("selector", ["toolset_names", "names"])
+def test_describe_toolset_uses_advertised_plural_schema(monkeypatch, selector):
+    requests = _stub_description_session(
+        monkeypatch, [None, "invalid descriptor", {"name": "describe_toolset"}, _description_tool(selector)]
+    )
+
+    result = official_mcp.bridge_official_mcp("describe_toolset", toolset_name="EditorToolset.ActorToolset")
+
+    assert result == {"structuredContent": {"tools": []}}
+    assert json.loads(requests[3].data)["params"] == {
+        "name": "describe_toolsets",
+        "arguments": {selector: ["EditorToolset.ActorToolset"], "include_schemas": True},
+    }
+    assert requests[-1].method == "DELETE"
+
+
+def test_describe_toolset_preserves_legacy_contract(monkeypatch):
+    requests = _stub_description_session(monkeypatch, [{"name": "describe_toolset"}])
+
+    official_mcp.bridge_official_mcp("describe_toolset", toolset_name="ActorTools")
+
+    assert json.loads(requests[3].data)["params"] == {
+        "name": "describe_toolset",
+        "arguments": {"toolset_name": "ActorTools"},
+    }
+    assert requests[-1].method == "DELETE"
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        None,
+        {},
+        {**_description_tool()["inputSchema"], "type": "string"},
+        {"properties": []},
+        {"properties": {"include_schemas": {"type": "boolean"}}},
+        {"properties": {"names": {"type": "array", "items": {"type": "string"}}}},
+        {
+            "properties": {
+                **_description_tool()["inputSchema"]["properties"],
+                "other_names": {"type": "array", "items": {"type": "string"}},
+            }
+        },
+        {**_description_tool()["inputSchema"], "required": ["unknown"]},
+        {**_description_tool()["inputSchema"], "required": "toolset_names"},
+        {**_description_tool()["inputSchema"], "required": [{}]},
+    ],
+)
+def test_describe_toolset_rejects_unknown_plural_schema_without_fallback(monkeypatch, schema):
+    requests = _stub_description_session(
+        monkeypatch, [{"name": "describe_toolsets", "inputSchema": schema}, {"name": "describe_toolset"}]
+    )
+
+    with pytest.raises(official_mcp.OfficialMcpError, match="describe_toolsets.*schema"):
+        official_mcp.bridge_official_mcp("describe_toolset", toolset_name="ActorTools")
+
+    assert len(requests) == 4
+    assert requests[-1].method == "DELETE"
+
+
+def test_describe_toolset_requires_advertised_discovery_tool(monkeypatch):
+    requests = _stub_description_session(monkeypatch, [{"name": "call_tool"}])
+
+    with pytest.raises(official_mcp.OfficialMcpError, match="description tool"):
+        official_mcp.bridge_official_mcp("describe_toolset", toolset_name="ActorTools")
+
+    assert len(requests) == 4
+    assert requests[-1].method == "DELETE"
+
+
+def test_describe_toolset_propagates_plural_tool_error_without_retry(monkeypatch):
+    requests = _stub_description_session(
+        monkeypatch,
+        [_description_tool(), {"name": "describe_toolset"}],
+        {"isError": True, "content": [{"type": "text", "text": "Unknown toolset"}]},
+    )
+
+    with pytest.raises(official_mcp.OfficialMcpError, match="Unknown toolset"):
+        official_mcp.bridge_official_mcp("describe_toolset", toolset_name="ActorTools")
+
+    assert len(requests) == 5
+    assert json.loads(requests[3].data)["params"]["name"] == "describe_toolsets"
+    assert requests[-1].method == "DELETE"
