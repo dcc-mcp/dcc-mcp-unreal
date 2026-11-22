@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.17](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.16...v0.3.17) (2026-11-22)
+
+
+### Features
+
+* author Niagara data channel contracts ([ed28f0c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/ed28f0c44b3d8b64ed869862e1ac25aaed5f3429))
+
 ## [0.3.16](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.15...v0.3.16) (2026-11-22)
 
 
