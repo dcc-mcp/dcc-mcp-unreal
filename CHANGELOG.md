@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.16](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.15...v0.3.16) (2026-11-22)
+
+
+### Features
+
+* add asset handoff and fixture contracts ([7ce91aa](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7ce91aa9840349f932472d935120d9001a3bebf9))
+* add incremental asset handoff contracts ([4e429d2](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4e429d246fc08275de542ecfee03ea1360cf819c))
+* add rights-aware acceptance fixture catalog ([49b9276](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/49b9276d15fb189aeaa3242009feec2a1dfb0703))
+* expose read-only asset handoff tools ([9bfe12c](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/9bfe12cf8694b5c934acfb7a62f00e8dee4e9822))
+* package verified Unreal source plugins for Fab ([0f5dc11](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0f5dc11bdf0aef373a26b1b870375da470ca6e69))
+
+
+### Bug Fixes
+
+* reconcile Fab branch with main ([747645e](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/747645e7f82cf0e9deec8981e200c93beff94e9a))
+
 ## [0.3.15](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.14...v0.3.15) (2026-11-21)
 
 
