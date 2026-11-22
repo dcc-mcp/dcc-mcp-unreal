@@ -1,0 +1,10 @@
+{
+  "schema": "dcc-mcp-unreal.synthetic-channel.v1",
+  "name": "DccMcpAcceptanceChannel",
+  "fields": [
+    {"name": "position", "type": "vector3"},
+    {"name": "intensity", "type": "float"}
+  ],
+  "routing": "global",
+  "payload": {"position": [0.0, 0.0, 0.0], "intensity": 1.0}
+}

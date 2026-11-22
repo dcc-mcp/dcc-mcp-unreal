@@ -1,0 +1,44 @@
+{
+  "schema": "dcc-mcp-unreal.official-acceptance-fixtures.v1",
+  "policy": {
+    "acquisition": "manual-only",
+    "redistribution": "forbidden-unless-explicitly-authorized",
+    "missing_dependency_result": "missing-dependency",
+    "preexisting_missing_references": "report-separately"
+  },
+  "fixtures": [
+    {
+      "id": "niagara-examples-channel-effects",
+      "source_url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/niagara-effects-in-unreal-engine",
+      "publisher": "Epic Games",
+      "identity": {
+        "name": "Niagara Examples",
+        "listing": "Niagara Examples Pack"
+      },
+      "compatible_engine_versions": ["5.7", "5.8"],
+      "required_plugins": ["Niagara"],
+      "rights_status": "reference-only",
+      "expected_behavior": [
+        "channel schema and typed payload are read back",
+        "runtime routing and teardown are measured separately"
+      ]
+    },
+    {
+      "id": "synthetic-channel-contract",
+      "source_url": "https://github.com/dcc-mcp/dcc-mcp-unreal",
+      "publisher": "dcc-mcp",
+      "identity": {
+        "name": "synthetic acceptance contract",
+        "listing": "repository fixture"
+      },
+      "compatible_engine_versions": ["5.7", "5.8"],
+      "required_plugins": [],
+      "rights_status": "authorized-local",
+      "local_paths": ["tests/fixtures/acceptance/niagara_data_channel.json"],
+      "expected_behavior": [
+        "duplicate fields are rejected",
+        "payload types and routing are explicit"
+      ]
+    }
+  ]
+}
