@@ -40,7 +40,14 @@ def main() -> dict:
             "emitters": [
                 {
                     "name": "AcceptanceEmitter",
-                    "modules": [],
+                    "modules": [
+                        {
+                            "name": "SpawnBurst",
+                            "script": "emitter_update",
+                            "asset_path": "/Niagara/Modules/Emitter/SpawnBurst_Instantaneous.SpawnBurst_Instantaneous",
+                            "inputs": {"Spawn Count": {"type": "int", "value": 1}},
+                        }
+                    ],
                     "renderers": [
                         {
                             "name": "SpriteRenderer",
