@@ -26,6 +26,8 @@ def test_plan_is_incremental_and_deterministic():
         "/Game/Localized/Textures/T_Mud",
     ]
     assert plan["overwrite_allowed"] is False
+    assert plan["reference_rewrites"] == plan["copy"]
+    assert plan["reference_rewrite_policy"].startswith("consolidate")
 
 
 def test_missing_dependencies_are_separated_from_baseline_missing_references():

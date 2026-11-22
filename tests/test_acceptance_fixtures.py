@@ -36,6 +36,8 @@ def test_native_fixture_runner_records_engine_and_reopen_postconditions():
     assert "exists_after_reopen" in script
     assert "NiagaraDataChannel_Global" in script
     assert "ndc_payload_readback" in script
+    assert "write_to_niagara_data_channel" in script
+    assert "read_from_niagara_data_channel" in script
     assert "quit_editor" in script
 
 

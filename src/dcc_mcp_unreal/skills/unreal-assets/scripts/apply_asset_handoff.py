@@ -6,8 +6,8 @@ from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
 @skill_entry
-def apply_asset_handoff(plan: dict, **kwargs) -> dict:
-    """Copy planned assets without claiming reference rewrites or verification."""
+def apply_asset_handoff(plan: dict, rewrite_references: bool = True, **kwargs) -> dict:
+    """Copy assets and optionally consolidate source referencers into copies."""
     from dcc_mcp_unreal.asset_handoff import AssetHandoffError  # noqa: PLC0415
 
     if kwargs:
@@ -25,6 +25,13 @@ def apply_asset_handoff(plan: dict, **kwargs) -> dict:
         for item in copy_items:
             if not isinstance(item, dict) or set(item) != {"source", "destination"}:
                 raise AssetHandoffError("plan copy entries require source and destination")
+        if not isinstance(rewrite_references, bool):
+            raise AssetHandoffError("rewrite_references must be boolean")
+        rewrites = plan.get("reference_rewrites", copy_items)
+        if not isinstance(rewrites, list) or any(
+            not isinstance(item, dict) or set(item) != {"source", "destination"} for item in rewrites
+        ):
+            raise AssetHandoffError("reference_rewrites must contain source and destination entries")
     except AssetHandoffError as exc:
         return skill_error("Invalid asset handoff apply request", str(exc), error_kind="invalid_input")
 
@@ -36,6 +43,8 @@ def apply_asset_handoff(plan: dict, **kwargs) -> dict:
             destination = str(item["destination"])
             if unreal.EditorAssetLibrary.does_asset_exist(destination):
                 raise RuntimeError(f"Refusing to overwrite existing asset: {destination}")
+        if rewrite_references and not callable(getattr(unreal.EditorAssetLibrary, "consolidate_assets", None)):
+            raise RuntimeError("Unreal host does not expose consolidate_assets for reference rewriting")
         asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
         for item in copy_items:
             source = str(item["source"])
@@ -50,6 +59,20 @@ def apply_asset_handoff(plan: dict, **kwargs) -> dict:
             if not unreal.EditorAssetLibrary.save_asset(destination, only_if_is_dirty=False):
                 raise RuntimeError(f"Unreal failed to save duplicated asset: {destination}")
             created.append(destination)
+        rewritten = []
+        if rewrite_references:
+            for item in rewrites:
+                source = str(item["source"])
+                destination = str(item["destination"])
+                source_asset = unreal.EditorAssetLibrary.load_asset(source)
+                destination_asset = unreal.EditorAssetLibrary.load_asset(destination)
+                if source_asset is None or destination_asset is None:
+                    raise RuntimeError(
+                        f"Cannot load source and destination for reference rewrite: {source} -> {destination}"
+                    )
+                if not unreal.EditorAssetLibrary.consolidate_assets(destination_asset, [source_asset]):
+                    raise RuntimeError(f"Unreal failed to rewrite referencers: {source} -> {destination}")
+                rewritten.append({"source": source, "destination": destination})
     except ImportError:
         return skill_error(
             "Unreal Python API is unavailable",
@@ -79,7 +102,8 @@ def apply_asset_handoff(plan: dict, **kwargs) -> dict:
         "Applied the non-overwriting asset copy plan.",
         status="applied_unverified",
         created_assets=created,
-        reference_rewrite="not_performed",
+        reference_rewrite="performed" if rewrite_references else "skipped_by_request",
+        rewritten_references=rewritten if rewrite_references else [],
         verification_required=True,
         assets_mutated=True,
         next_step="Call verify_asset_handoff with fresh Asset Registry evidence.",

@@ -89,12 +89,17 @@ def plan_handoff(
             {"source": package, "destination": _destination(package, source_root, destination_root)}
             for package in copy_packages
         ],
+        "reference_rewrites": [
+            {"source": package, "destination": _destination(package, source_root, destination_root)}
+            for package in copy_packages
+        ],
         "shared": shared_packages,
         "missing_dependencies": missing_new,
         "preexisting_missing_dependencies": missing_existing,
         "dependency_policy": "direct-asset-registry-closure",
         "apply_required": bool(copy_packages),
         "overwrite_allowed": False,
+        "reference_rewrite_policy": "consolidate_source_referencers_into_destination",
     }
 
 

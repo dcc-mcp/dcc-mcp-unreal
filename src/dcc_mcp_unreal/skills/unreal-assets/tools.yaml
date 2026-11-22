@@ -448,7 +448,7 @@ tools:
           default: []
 
   - name: apply_asset_handoff
-    description: Apply a planned non-overwriting asset copy with rollback on failure; reference rewriting and verification remain explicit follow-up stages.
+    description: Apply a planned non-overwriting asset copy, consolidate source referencers into destination assets, and roll back on failure.
     source_file: scripts/apply_asset_handoff.py
     execution: sync
     affinity: main
@@ -463,6 +463,10 @@ tools:
       properties:
         plan:
           type: object
+        rewrite_references:
+          type: boolean
+          default: true
+          description: Rewrite existing source referencers into the copied assets through Unreal consolidate_assets. Set false only for a copy-only dry handoff.
     next-tools: [unreal_assets__verify_asset_handoff]
 
   - name: delete_asset
