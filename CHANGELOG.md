@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.15](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.14...v0.3.15) (2026-11-21)
+
+
+### Features
+
+* **pcg:** author typed spline grammar settings through graph tools ([0bdef3a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/0bdef3ad4ebc7c3b0e3eadad38bb5b19451d2c1d))
+
+
+### Bug Fixes
+
+* forward owned UI runtime through embedded bootstrap ([7fafe0a](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/7fafe0a4bd97e4a189a1f0582d52a3502bbb2c71))
+
 ## [0.3.14](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.13...v0.3.14) (2026-11-19)
 
 
