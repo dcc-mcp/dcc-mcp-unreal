@@ -3,7 +3,7 @@ name: unreal-chaos
 description: >-
   Domain skill - convert pre-fractured Static Meshes into clustered Chaos Geometry
   Collections and place them as dynamic destruction actors in Unreal Engine 5.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

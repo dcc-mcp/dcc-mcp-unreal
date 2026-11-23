@@ -4,7 +4,7 @@ description: >-
   Safely inspect, patch, and verify the active Unreal project's allowlisted
   renderer ConsoleVariables, including Lumen, Nanite, virtual shadows, and
   temporal upsampling. Use this before UI Project Settings edits.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write Edit
 metadata:

@@ -6,7 +6,7 @@ description: >-
   vertex handles, set defaults, inspect nodes, build, save, and validate. Use
   for procedural audio graphs in Unreal Engine 5.4+. Not for arbitrary asset
   management or Blueprint gameplay logic.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.4+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

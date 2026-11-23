@@ -1,0 +1,14 @@
+NOTICE
+
+Repository-owned source is Copyright (c) 2026 Long Hao (Hal Long).
+
+This project is distributed under the Apache License, Version 2.0. See LICENSE.
+The Apache license applies only to repository-owned material. Third-party
+libraries, host applications, SDKs, runtimes, bundled binaries, models, sample
+assets, generated files, and other included material remain under their own
+licenses and notices. Keep those notices with any redistribution.
+
+DCC-MCP is an independent project and ecosystem name. This notice does not
+grant rights to third-party trademarks or imply endorsement by a host vendor.
+Commercial distribution contact is welcome, but it is not a condition of the
+Apache-2.0 license.

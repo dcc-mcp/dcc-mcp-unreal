@@ -5,7 +5,7 @@ description: >-
   load and save maps, read or edit world settings, and measure native collision
   distances in Editor or PIE worlds. Not for individual actor transform edits - use
   unreal-actors for that.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

@@ -5,7 +5,7 @@ description: >-
   as Windows archives, Setup executables, SteamPipe builds, or WeGame submission
   folders. Use for long-running compilation, cooking, staging, and packaging.
   Do not use for platform account registration or store publication.
-license: MIT
+license: Apache-2.0
 compatibility: Windows, Unreal Engine 4.18+, Python 3.9+
 allowed-tools: Read Bash Write
 metadata:

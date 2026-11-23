@@ -5,7 +5,7 @@ description: >-
   through the DCC MCP gateway. Use when the user asks to set up, include,
   compare, inspect, or use Epic's official MCP or Toolset Registry
   capabilities. Not a replacement for DCC MCP on Unreal 4.18-5.7.
-license: MIT
+license: Apache-2.0
 compatibility: DCC MCP Unreal 0.2+, optional Unreal Engine 5.8+ Unreal MCP plugin
 allowed-tools: Read Bash
 metadata:

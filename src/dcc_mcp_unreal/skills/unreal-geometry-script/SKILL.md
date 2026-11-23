@@ -3,7 +3,7 @@ name: unreal-geometry-script
 description: >-
   Domain skill - read and write per-vertex skin weights on existing Unreal
   DynamicMesh objects through the native Geometry Script API.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine with Geometry Scripting and Python enabled; Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

@@ -325,7 +325,7 @@ my-unreal-skill/
 ---
 name: my-unreal-skill
 description: "What this skill does"
-license: "MIT"
+license: "Apache-2.0"
 allowed-tools: Bash Read
 metadata:
   dcc-mcp:
@@ -498,7 +498,7 @@ skill packages, and structured Unreal results.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+Apache-2.0 — see [LICENSE](LICENSE), [NOTICE](NOTICE), and [TRADEMARKS.md](TRADEMARKS.md).
 
 ---
 

@@ -5,7 +5,7 @@ description: >-
   add event/function nodes, connect nodes, add variables, and compile.
   Use when building or modifying Blueprint logic in the Unreal Editor.
   Not for level actor placement - use unreal-actors for that.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read
 metadata:

@@ -3,7 +3,7 @@ name: unreal-hair
 description: >-
   Domain skill - bind and inspect Unreal Groom assets and versioned Groom
   Caches on an explicit GroomComponent, and add a Groom Cache Sequencer track.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

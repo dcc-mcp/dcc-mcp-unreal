@@ -4,7 +4,7 @@ description: >-
   Domain skill - run screenshot-light PIE playtest episodes with structured
   entity observations, bounded semantic actions, transition polling, and
   in-memory traces for QA and external policy or RL runners.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Read Bash
 metadata:

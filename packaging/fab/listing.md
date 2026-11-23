@@ -55,7 +55,7 @@ Epic's installed toolsets. Epic's experimental plugin is not included.
 
 **Free and open source.**
 
-The project source is available on GitHub under the MIT license. The plugin
+The project source is available on GitHub under the Apache-2.0 license. See the repository LICENSE, NOTICE, and TRADEMARKS.md files. The plugin
 does not include an AI model or AI service credits. AI-provider access and
 external service costs depend on the tools you choose.
 

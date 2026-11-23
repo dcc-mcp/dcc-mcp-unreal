@@ -4,7 +4,7 @@ description: >-
   Domain skill - Unreal Engine native Automation Test and MCP health validation.
   Use to inspect typed plugin readiness, list UE Automation tests, queue native
   test runs, and run a safe self-check against the active MCP server.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

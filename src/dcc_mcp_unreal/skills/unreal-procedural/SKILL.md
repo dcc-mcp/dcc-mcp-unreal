@@ -1,7 +1,7 @@
 ---
 name: unreal-procedural
 description: Capability-gated Unreal procedural workflows for PCG manual overrides, Procedural Vegetation, Nanite Foliage, Mesh Terrain, MegaLights, and Substrate.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Python host, Python 3.9+; feature APIs are detected at runtime
 allowed-tools: Bash Read Write
 metadata:

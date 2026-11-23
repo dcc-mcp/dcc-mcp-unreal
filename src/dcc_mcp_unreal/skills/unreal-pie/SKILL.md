@@ -6,7 +6,7 @@ description: >-
   injection (no OS dependency), viewport screenshot capture, output log
   snapshot, performance sampling, and Automation Test execution with async
   job polling. Use for reproducible, agent-driven playtest workflows.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read
 metadata:

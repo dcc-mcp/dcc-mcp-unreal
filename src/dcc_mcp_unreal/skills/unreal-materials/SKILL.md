@@ -4,7 +4,7 @@ description: >-
   Domain skill - create reusable Material Instances, set typed material parameters,
   connect material-expression outputs to Customized UV inputs, and bind materials to
   Static Meshes, Geometry Caches, or live level actors in Unreal Engine.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

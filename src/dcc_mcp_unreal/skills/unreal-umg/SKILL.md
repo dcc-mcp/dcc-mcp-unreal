@@ -7,7 +7,7 @@ description: >-
   editing) with UMG-specialized widget, slot, animation, and event-binding
   operations. Not for general Blueprint node editing — use unreal-blueprints
   for that.
-license: MIT
+license: Apache-2.0
 compatibility: "Unreal Engine 5.4+; Python 3.9+; dcc-mcp-core 0.17+"
 allowed-tools: Bash Read Write Edit
 metadata:
