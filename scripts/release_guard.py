@@ -422,7 +422,11 @@ def _parser() -> argparse.ArgumentParser:
     resolve.add_argument("--repo", type=Path, required=True)
     resolve.add_argument("--tag", default="")
     resolve.add_argument("--event-sha", required=True)
-    resolve.add_argument("--shell-output", action="store_true", help="emit shell assignments for $GITHUB_OUTPUT")
+    resolve.add_argument(
+        "--guard-output",
+        action="store_true",
+        help="emit a single RELEASE_GUARD_OUTPUTS=<json> line for the workflow to parse",
+    )
 
     verify = commands.add_parser("verify-source")
     verify.add_argument("--repo", type=Path, required=True)
@@ -462,15 +466,10 @@ def main() -> int:
     try:
         if args.command == "resolve-source":
             resolved = resolve_source(args.repo.resolve(), args.tag, args.event_sha)
-            if args.shell_output:
+            if args.guard_output:
                 values = dict(resolved)
                 values["should_release"] = resolved.get("mode") != "idle"
-                for name in ("mode", "publish_pypi", "should_release", "source_sha", "tag_name", "version"):
-                    value = values[name]
-                    rendered = str(value).lower() if isinstance(value, bool) else str(value)
-                    if "\n" in rendered or "\r" in rendered:
-                        raise ReleaseGuardError("GitHub output contains a newline")
-                    print("{}={}".format(name, rendered))
+                print("RELEASE_GUARD_OUTPUTS=" + json.dumps(values, sort_keys=True, separators=(",", ":")))
             else:
                 _print_json(resolved)
         elif args.command == "verify-source":

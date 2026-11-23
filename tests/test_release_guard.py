@@ -191,7 +191,7 @@ def test_release_subject_without_component_scope_is_recognized(
     assert json.loads(completed.stdout)["tag_name"] == "v1.2.5"
 
 
-def test_shell_output_can_be_written_to_the_current_step(monkeypatch, tmp_path: Path) -> None:
+def test_guard_output_can_be_parsed_by_the_workflow(tmp_path: Path) -> None:
     repo = tmp_path / "repository"
     repo.mkdir()
     _git(repo, "init", "--initial-branch=main")
@@ -204,7 +204,7 @@ def test_shell_output_can_be_written_to_the_current_step(monkeypatch, tmp_path: 
 
     completed = _guard(
         "resolve-source",
-        "--shell-output",
+        "--guard-output",
         "--repo",
         str(repo),
         "--event-sha",
@@ -213,8 +213,10 @@ def test_shell_output_can_be_written_to_the_current_step(monkeypatch, tmp_path: 
     )
 
     assert completed.returncode == 0, completed.stderr
-    values = dict(line.split("=", 1) for line in completed.stdout.splitlines())
-    assert values["should_release"] == "true"
+    line = completed.stdout.strip()
+    assert line.startswith("RELEASE_GUARD_OUTPUTS=")
+    values = json.loads(line.split("=", 1)[1])
+    assert values["should_release"] is True
     assert values["source_sha"] == source_sha
     assert values["tag_name"] == "v1.2.6"
 
