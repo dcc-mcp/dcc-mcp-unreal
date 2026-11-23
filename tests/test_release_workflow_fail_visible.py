@@ -68,7 +68,9 @@ def test_publish_is_independent_of_the_self_hosted_unreal_runner() -> None:
 
 def test_manual_recovery_uses_the_tagged_commit_and_skips_pypi() -> None:
     jobs = _workflow()["jobs"]
-    resolve = next(step for step in jobs["prepare-release"]["steps"] if step.get("name") == "Resolve immutable release source")
+    resolve = next(
+        step for step in jobs["prepare-release"]["steps"] if step.get("name") == "Resolve immutable release source"
+    )
     plugin_inputs = jobs["build-unreal-plugin"]["with"]
 
     assert "resolve-source" in resolve["run"]
