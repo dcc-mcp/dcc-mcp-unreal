@@ -46,12 +46,12 @@ jobs:
       (needs.release-please.result == 'success' || needs.release-please.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
-      mode: ${{ steps.resolve.outputs.mode }}
-      publish_pypi: ${{ steps.resolve.outputs.publish_pypi }}
-      should_release: ${{ steps.resolve.outputs.should_release }}
-      source_sha: ${{ steps.resolve.outputs.source_sha }}
-      tag_name: ${{ steps.resolve.outputs.tag_name }}
-      version: ${{ steps.resolve.outputs.version }}
+      mode: ${{ steps.export.outputs.mode }}
+      publish_pypi: ${{ steps.export.outputs.publish_pypi }}
+      should_release: ${{ steps.export.outputs.should_release }}
+      source_sha: ${{ steps.export.outputs.source_sha }}
+      tag_name: ${{ steps.export.outputs.tag_name }}
+      version: ${{ steps.export.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +74,22 @@ jobs:
           path: scripts/release_guard.py
           if-no-files-found: error
           retention-days: 1
+      - name: Publish release guard outputs
+        id: export
+        env:
+          MODE: ${{ steps.resolve.outputs.mode }}
+          PUBLISH_PYPI: ${{ steps.resolve.outputs.publish_pypi }}
+          SHOULD_RELEASE: ${{ steps.resolve.outputs.should_release }}
+          TAG_NAME: ${{ steps.resolve.outputs.tag_name }}
+          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          printf 'mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
+          printf 'publish_pypi=%s\n' "$PUBLISH_PYPI" >> "$GITHUB_OUTPUT"
+          printf 'should_release=%s\n' "$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+          printf 'tag_name=%s\n' "$TAG_NAME" >> "$GITHUB_OUTPUT"
+          printf 'source_sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare-release]
