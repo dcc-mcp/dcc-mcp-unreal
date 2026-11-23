@@ -6,7 +6,7 @@ Setup API. Activating a portable MSVC environment alone does not make its
 compiler discoverable to UBT.
 
 The current native CI matrix in [build-uplugin.yml](../.github/workflows/build-uplugin.yml)
-builds UE 5.5, 5.7, 5.8, 4.18 and 4.26. It does not download msvc-kit, provision
+builds UE 5.5, 5.7, 5.8, 5.9, 4.18 and 4.26. It does not download msvc-kit, provision
 UE 5.2's compiler, or modify Visual Studio installations. Provision compatible
 toolsets on the runner before running a job.
 

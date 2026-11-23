@@ -62,7 +62,7 @@ def test_plugin_workflows_use_job_scoped_ubt_toolchain_configuration() -> None:
     assert release["jobs"]["build-unreal-plugin"]["uses"] == ("./.github/workflows/build-uplugin.yml")
 
 
-@pytest.mark.parametrize("ue_version", ["5.7", "5.8"])
+@pytest.mark.parametrize("ue_version", ["5.7", "5.8", "5.9"])
 def test_toolchain_script_preserves_engine_compiler_selection_for_modern_ue(
     tmp_path: Path,
     ue_version: str,
@@ -101,6 +101,7 @@ def test_build_workflow_targets_available_unreal_versions() -> None:
         "5.5",
         "5.7",
         "5.8",
+        "5.9",
         "4.18",
         "4.26",
     ]
@@ -209,31 +210,60 @@ def test_ue4_uat_uses_precompiled_automation_tool_on_restricted_runners() -> Non
     assert "with temporarily_clear_legacy_ubt_user_config(uat_dir.parent," in builder
 
 
-def test_release_jobs_run_after_release_please_is_skipped_for_tag_events() -> None:
-    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
-    jobs = workflow["jobs"]
+def _job_ancestors(jobs: dict, name: str) -> set[str]:
+    direct = jobs[name].get("needs", [])
+    if isinstance(direct, str):
+        direct = [direct]
+    ancestors = set(direct)
+    for dependency in direct:
+        ancestors.update(_job_ancestors(jobs, dependency))
+    return ancestors
 
-    for job_name in ("build", "build-unreal-plugin", "standalone", "publish", "attach-release-assets"):
-        assert "always()" in jobs[job_name]["if"]
 
+def test_public_release_finalization_has_an_executable_fail_closed_dag() -> None:
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    jobs = yaml.safe_load(text)["jobs"]
+
+    assert {"prepare-release", "build", "build-unreal-plugin", "standalone", "publish"} <= _job_ancestors(
+        jobs, "finalize-release"
+    )
     assert "needs.build.result == 'success'" in jobs["publish"]["if"]
-    assert "needs.publish.result == 'success'" in jobs["attach-release-assets"]["if"]
-    assert "needs.build-unreal-plugin.result == 'success'" in jobs["attach-release-assets"]["if"]
+    final_condition = jobs["finalize-release"]["if"]
+    assert "needs.build.result == 'success'" in final_condition
+    assert "needs.build-unreal-plugin.result == 'success'" in final_condition
+    assert "needs.standalone.result == 'success'" in final_condition
+    assert "needs.publish.result == 'success'" in final_condition
+    assert "gh release create" not in "\n".join(
+        str(step.get("run", ""))
+        for name, job in jobs.items()
+        if name != "finalize-release"
+        for step in job.get("steps", [])
+    )
+    final_commands = "\n".join(str(step.get("run", "")) for step in jobs["finalize-release"]["steps"])
+    assert "gh release create" in final_commands
+    assert "--draft" in final_commands
+    assert "gh release upload" in final_commands
+    assert "--clobber" not in final_commands
+    assert "gh release edit" in final_commands
+    assert "--draft=false" in final_commands
+    assert final_commands.index("gh release create") < final_commands.index("gh release upload")
+    assert final_commands.index("gh release upload") < final_commands.index("gh release edit")
 
 
 def test_release_please_runs_on_main_without_publishing_ordinary_pushes() -> None:
     text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     workflow = yaml.safe_load(text)
     jobs = workflow["jobs"]
-    tag_push = "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
-
     assert "branches: [main]" in text
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in jobs["release-please"]["if"]
-    for job_name in ("build", "build-unreal-plugin", "standalone", "attach-release-assets"):
-        assert tag_push in jobs[job_name]["if"]
-        assert "github.event_name == 'push' ||" not in jobs[job_name]["if"]
-    assert tag_push not in jobs["publish"]["if"]
-    assert "needs.release-please.outputs.release_created == 'true'" in jobs["publish"]["if"]
+    release_step = next(
+        step for step in jobs["release-please"]["steps"] if "release-please-action" in step.get("uses", "")
+    )
+    assert release_step["with"]["skip-github-release"] is True
+    assert "tags:" not in text.split("workflow_dispatch:", 1)[0]
+    assert "release:" not in text.split("workflow_dispatch:", 1)[0]
+    for job_name in ("build", "build-unreal-plugin", "standalone", "publish", "finalize-release"):
+        assert "needs.prepare-release.outputs.should_release == 'true'" in jobs[job_name]["if"]
 
 
 def test_release_please_can_update_the_runtime_version_module() -> None:
@@ -275,39 +305,48 @@ def test_release_plugin_build_uses_registry_free_embedded_python() -> None:
 def test_manual_tag_recovery_rebuilds_assets_without_republishing_pypi() -> None:
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
-    manual_tag = "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != ''"
+    resolve_step = next(
+        step for step in jobs["prepare-release"]["steps"] if step.get("name") == "Resolve immutable release source"
+    )
+    prepare_commands = str(resolve_step["run"])
 
-    assert (
-        "github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name == ''"
-        in (jobs["release-please"]["if"])
+    assert "resolve-source" in prepare_commands
+    assert resolve_step["env"]["REQUESTED_TAG"] == "${{ github.event.inputs.tag_name || '' }}"
+    assert "needs.prepare-release.outputs.publish_pypi == 'true'" in jobs["publish"]["if"]
+    assert "needs.prepare-release.outputs.mode == 'recovery'" in jobs["finalize-release"]["if"]
+    assert "needs.publish.result == 'skipped'" in jobs["finalize-release"]["if"]
+    assert jobs["build-unreal-plugin"]["with"]["source_sha"] == "${{ needs.prepare-release.outputs.source_sha }}"
+    assert jobs["build-unreal-plugin"]["with"]["release_tag"] == "${{ needs.prepare-release.outputs.tag_name }}"
+    assert jobs["build-unreal-plugin"]["with"]["require_existing_tag"] == (
+        "${{ needs.prepare-release.outputs.mode == 'recovery' }}"
     )
-    assert manual_tag not in jobs["publish"]["if"]
-    assert manual_tag in jobs["attach-release-assets"]["if"]
-    assert "needs.publish.result == 'skipped'" in jobs["attach-release-assets"]["if"]
 
-    attach_step = next(
-        step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Attach wheels to GitHub Release"
+    for job_name in ("build", "standalone"):
+        checkout = next(
+            step for step in jobs[job_name]["steps"] if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+        assert checkout["with"]["ref"] == "${{ needs.prepare-release.outputs.source_sha }}"
+
+    build_workflow = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+    build_checkout = next(
+        step
+        for step in build_workflow["jobs"]["build-uplugin"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
     )
-    tag_expression = attach_step["with"]["tag_name"]
-    assert "github.event.inputs.tag_name" in tag_expression
-    assert tag_expression.index("github.event.inputs.tag_name") < tag_expression.index("github.ref_name")
-    download_step = next(
-        step for step in jobs["attach-release-assets"]["steps"] if step.get("name") == "Download Unreal plugin package"
-    )
-    assert download_step["with"]["pattern"] == "DccMcpUnreal-*"
+    assert build_checkout["with"]["ref"] == "${{ inputs.source_sha || github.sha }}"
 
 
 def test_release_checks_out_installer_before_attaching_assets() -> None:
-    steps = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["attach-release-assets"]["steps"]
+    steps = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["finalize-release"]["steps"]
     checkout_index = next(
         index for index, step in enumerate(steps) if str(step.get("uses", "")).startswith("actions/checkout@")
     )
-    attach_index = next(
-        index for index, step in enumerate(steps) if step.get("name") == "Attach wheels to GitHub Release"
-    )
+    stage_index = next(index for index, step in enumerate(steps) if step.get("name") == "Stage release assets")
 
-    assert checkout_index < attach_index
-    assert "scripts/install-standalone.ps1" in steps[attach_index]["with"]["files"]
+    assert checkout_index < stage_index
+    stage_commands = str(steps[stage_index]["run"])
+    assert "scripts/install-standalone.ps1" in stage_commands
+    assert "plan-assets" in stage_commands
 
 
 def test_release_builds_pythonless_standalone_sidecars() -> None:
@@ -323,7 +362,13 @@ def test_release_builds_pythonless_standalone_sidecars() -> None:
     download = next(step for step in standalone["steps"] if step.get("name") == "Download native core sidecar")
     assert "gh release list --repo dcc-mcp/dcc-mcp-core" in download["run"]
     assert "No recent dcc-mcp-core release contains" in download["run"]
-    assert jobs["attach-release-assets"]["needs"] == ["release-please", "publish", "build-unreal-plugin", "standalone"]
+    assert jobs["finalize-release"]["needs"] == [
+        "prepare-release",
+        "build",
+        "publish",
+        "build-unreal-plugin",
+        "standalone",
+    ]
 
 
 def test_standalone_archive_contains_installation_readme() -> None:

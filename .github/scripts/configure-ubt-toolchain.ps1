@@ -12,12 +12,12 @@ if ([string]::IsNullOrWhiteSpace($EnvironmentFile)) {
     throw "GITHUB_ENV or -EnvironmentFile is required"
 }
 
-if ($UEVersion -notin @("5.5", "5.6", "5.7", "5.8")) {
+if ($UEVersion -notin @("5.5", "5.6", "5.7", "5.8", "5.9")) {
     Write-Host "No job-scoped UnrealBuildTool compiler override configured for UE $UEVersion"
     return
 }
 
-if ($UEVersion -in @("5.7", "5.8")) {
+if ($UEVersion -in @("5.7", "5.8", "5.9")) {
     # Modern engines load these job-scoped settings after user XML files.
     @(
         "UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false"
