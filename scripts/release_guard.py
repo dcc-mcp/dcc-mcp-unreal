@@ -414,18 +414,6 @@ def _print_json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
-def _write_github_outputs(path: Path, resolved: Dict[str, object]) -> None:
-    values = dict(resolved)
-    values["should_release"] = resolved.get("mode") != "idle"
-    with path.open("a", encoding="utf-8", newline="\n") as stream:
-        for name in ("mode", "publish_pypi", "should_release", "source_sha", "tag_name", "version"):
-            value = values[name]
-            rendered = str(value).lower() if isinstance(value, bool) else str(value)
-            if "\n" in rendered or "\r" in rendered:
-                raise ReleaseGuardError("GitHub output contains a newline")
-            stream.write("{}={}\n".format(name, rendered))
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -434,7 +422,7 @@ def _parser() -> argparse.ArgumentParser:
     resolve.add_argument("--repo", type=Path, required=True)
     resolve.add_argument("--tag", default="")
     resolve.add_argument("--event-sha", required=True)
-    resolve.add_argument("--github-output", type=Path)
+    resolve.add_argument("--shell-output", action="store_true", help="emit shell assignments for $GITHUB_OUTPUT")
 
     verify = commands.add_parser("verify-source")
     verify.add_argument("--repo", type=Path, required=True)
@@ -474,9 +462,17 @@ def main() -> int:
     try:
         if args.command == "resolve-source":
             resolved = resolve_source(args.repo.resolve(), args.tag, args.event_sha)
-            if args.github_output is not None:
-                _write_github_outputs(args.github_output, resolved)
-            _print_json(resolved)
+            if args.shell_output:
+                values = dict(resolved)
+                values["should_release"] = resolved.get("mode") != "idle"
+                for name in ("mode", "publish_pypi", "should_release", "source_sha", "tag_name", "version"):
+                    value = values[name]
+                    rendered = str(value).lower() if isinstance(value, bool) else str(value)
+                    if "\n" in rendered or "\r" in rendered:
+                        raise ReleaseGuardError("GitHub output contains a newline")
+                    print("{}={}".format(name, rendered))
+            else:
+                _print_json(resolved)
         elif args.command == "verify-source":
             _print_json(verify_source(args.repo.resolve(), args.tag, args.expected_sha, args.require_tag))
         elif args.command == "plan-assets":

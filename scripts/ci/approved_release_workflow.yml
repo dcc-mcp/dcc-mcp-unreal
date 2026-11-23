@@ -61,11 +61,10 @@ jobs:
         env:
           REQUESTED_TAG: ${{ github.event.inputs.tag_name || '' }}
         run: |
-          python scripts/release_guard.py resolve-source \
+          python scripts/release_guard.py resolve-source --shell-output \
             --repo . \
             --tag "$REQUESTED_TAG" \
-            --event-sha "$GITHUB_SHA" \
-            --github-output "$GITHUB_OUTPUT"
+            --event-sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - name: Export release guard
         if: steps.resolve.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4

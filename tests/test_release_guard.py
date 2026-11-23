@@ -191,6 +191,34 @@ def test_release_subject_without_component_scope_is_recognized(
     assert json.loads(completed.stdout)["tag_name"] == "v1.2.5"
 
 
+def test_shell_output_can_be_written_to_the_current_step(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repository"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "config", "user.name", "Release Test")
+    _git(repo, "config", "user.email", "release@example.invalid")
+    _write_release_identity(repo, "1.2.6")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "chore: release 1.2.6")
+    source_sha = _git(repo, "rev-parse", "HEAD")
+
+    completed = _guard(
+        "resolve-source",
+        "--shell-output",
+        "--repo",
+        str(repo),
+        "--event-sha",
+        source_sha,
+        cwd=repo,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    values = dict(line.split("=", 1) for line in completed.stdout.splitlines())
+    assert values["should_release"] == "true"
+    assert values["source_sha"] == source_sha
+    assert values["tag_name"] == "v1.2.6"
+
+
 def test_asset_plan_retains_only_digest_identical_assets(tmp_path: Path) -> None:
     local = tmp_path / "local"
     existing = tmp_path / "existing"
