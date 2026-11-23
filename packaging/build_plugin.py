@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import re
@@ -146,6 +148,25 @@ def install_python_payload(
             )
 
     run(pip_base + ["--no-deps", str(REPO_ROOT)])
+    remove_builder_provenance(target_dir)
+
+
+def remove_builder_provenance(target_dir: Path) -> None:
+    """Remove local build origins while keeping installed RECORD metadata coherent."""
+    for metadata_dir in sorted(target_dir.glob("*.dist-info")):
+        direct_url = metadata_dir / "direct_url.json"
+        if not direct_url.is_file():
+            continue
+        record = metadata_dir / "RECORD"
+        if record.is_file():
+            rows = list(csv.reader(io.StringIO(record.read_text(encoding="utf-8"))))
+            direct_url_name = "{}/direct_url.json".format(metadata_dir.name)
+            rows = [row for row in rows if not row or row[0] != direct_url_name]
+            rendered = io.StringIO(newline="")
+            csv.writer(rendered, lineterminator="\n").writerows(rows)
+            with record.open("w", encoding="utf-8", newline="") as stream:
+                stream.write(rendered.getvalue())
+        direct_url.unlink()
 
 
 def read_plugin_version(plugin_dir: Path) -> str:
@@ -172,25 +193,58 @@ def write_build_info(
     core_wheel: Optional[Path],
     core_root: Path,
     use_local_core: bool,
+    skip_core: bool,
     skip_python_deps: bool,
     ue_root: Path,
     package_mode: str,
     python_plugin_name: str,
 ) -> None:
     version = read_plugin_version(out_dir)
+    core_source = (
+        "omitted"
+        if skip_python_deps or skip_core
+        else ("wheel" if core_wheel else ("local" if use_local_core else "registry"))
+    )
     lines = [
         "dcc-mcp-unreal {}".format(version),
-        "ue_root={}".format(ue_root),
-        "python={}".format(python_exe),
+        "engine_tag={}".format(read_engine_tag(ue_root)),
+        "python_version={}".format(_read_python_version(python_exe)),
         "core_spec={}".format(core_spec),
-        "core_wheel={}".format(core_wheel or ""),
-        "core_root={}".format(core_root),
-        "use_local_core={}".format(use_local_core),
-        "skip_python_deps={}".format(skip_python_deps),
+        "core_source={}".format(core_source),
+        "source_commit={}".format(_source_commit()),
         "package_mode={}".format(package_mode),
         "python_plugin_name={}".format(python_plugin_name),
     ]
     (out_dir / "BUILD_INFO.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _read_python_version(python_exe: Path) -> str:
+    completed = subprocess.run(
+        [str(python_exe), "-I", "-c", "import platform; print(platform.python_version())"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    version = completed.stdout.strip()
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+        raise ValueError("Cannot determine a canonical Python version for BUILD_INFO")
+    return version
+
+
+def _source_commit() -> str:
+    configured = os.environ.get("DCC_MCP_SOURCE_COMMIT", "").strip().lower()
+    if configured:
+        if re.fullmatch(r"[0-9a-f]{40}", configured) is None:
+            raise ValueError("DCC_MCP_SOURCE_COMMIT must be an exact 40-character commit SHA")
+        return configured
+    completed = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    discovered = completed.stdout.strip().lower()
+    return discovered if completed.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", discovered) else "unknown"
 
 
 def read_engine_tag(ue_root: Path) -> str:
@@ -275,6 +329,7 @@ def build(args: argparse.Namespace) -> None:
         core_wheel=core_wheel,
         core_root=core_root,
         use_local_core=args.use_local_core,
+        skip_core=args.skip_core,
         skip_python_deps=args.skip_python_deps,
         ue_root=ue_root,
         package_mode="python-only" if args.no_native else "source",

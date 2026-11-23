@@ -74,6 +74,72 @@ def test_local_core_version_must_meet_plugin_minimum(tmp_path):
         raise AssertionError("stale local core must be rejected")
 
 
+def test_build_info_contains_only_portable_release_provenance(tmp_path, monkeypatch):
+    module = _load_build_plugin_module()
+    plugin = tmp_path / "DccMcpUnreal"
+    plugin.mkdir()
+    (plugin / "DccMcpUnreal.uplugin").write_text(
+        json.dumps({"FileVersion": 3, "VersionName": "1.2.3"}),
+        encoding="utf-8",
+    )
+    engine = tmp_path / "runner" / "UE_5.8"
+    build = engine / "Engine" / "Build"
+    build.mkdir(parents=True)
+    (build / "Build.version").write_text(
+        json.dumps({"MajorVersion": 5, "MinorVersion": 8, "PatchVersion": 0}),
+        encoding="utf-8",
+    )
+    core_wheel = tmp_path / "wheelhouse" / "dcc_mcp_core.whl"
+    core_root = tmp_path / "checkout" / "dcc-mcp-core"
+    monkeypatch.setenv("DCC_MCP_SOURCE_COMMIT", "a" * 40)
+
+    module.write_build_info(
+        plugin,
+        python_exe=Path(sys.executable),
+        core_spec="dcc-mcp-core==0.20.13",
+        core_wheel=core_wheel,
+        core_root=core_root,
+        use_local_core=False,
+        skip_core=False,
+        skip_python_deps=False,
+        ue_root=engine,
+        package_mode="native",
+        python_plugin_name="PythonScriptPlugin",
+    )
+
+    text = (plugin / "BUILD_INFO.txt").read_text(encoding="utf-8")
+    assert text.splitlines()[0] == "dcc-mcp-unreal 1.2.3"
+    provenance = dict(line.split("=", 1) for line in text.splitlines()[1:])
+    assert provenance == {
+        "engine_tag": "ue5.8",
+        "python_version": ".".join(str(part) for part in sys.version_info[:3]),
+        "core_spec": "dcc-mcp-core==0.20.13",
+        "core_source": "wheel",
+        "source_commit": "a" * 40,
+        "package_mode": "native",
+        "python_plugin_name": "PythonScriptPlugin",
+    }
+    for local_path in (tmp_path, Path(sys.executable)):
+        assert str(local_path).casefold() not in text.casefold()
+
+
+def test_python_payload_removes_builder_local_direct_url_metadata(tmp_path):
+    module = _load_build_plugin_module()
+    payload = tmp_path / "python"
+    adapter_metadata = payload / "dcc_mcp_unreal-1.2.3.dist-info" / "direct_url.json"
+    core_metadata = payload / "dcc_mcp_core-0.20.13.dist-info" / "direct_url.json"
+    for metadata in (adapter_metadata, core_metadata):
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text(
+            json.dumps({"url": (tmp_path / "checkout").as_uri(), "dir_info": {}}),
+            encoding="utf-8",
+        )
+
+    module.remove_builder_provenance(payload)
+
+    assert not list(payload.glob("*.dist-info/direct_url.json"))
+
+
 def test_build_plugin_package_reuses_repository_build_script(tmp_path, monkeypatch):
     module = _load_build_package_module()
     repository = tmp_path / "repo"

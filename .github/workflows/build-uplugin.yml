@@ -8,6 +8,21 @@ on:
         required: false
         type: string
         default: "latest"
+      source_sha:
+        description: "Exact source commit to build"
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        description: "Canonical release tag whose source and archives must be verified"
+        required: false
+        type: string
+        default: ""
+      require_existing_tag:
+        description: "Require the release tag to pre-exist for manual recovery"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -31,6 +46,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -56,6 +72,10 @@ jobs:
             ue_root: F:\UE\UE_5.8
             package_mode: native
             artifact_suffix: win64
+          - ue_version: "5.9"
+            ue_root: F:\UE\UE_5.9
+            package_mode: native
+            artifact_suffix: win64
           - ue_version: "4.18"
             ue_root: F:\UE\UE_4.18
             package_mode: native
@@ -69,9 +89,13 @@ jobs:
       UE_ROOT: ${{ matrix.ue_root }}
       DCC_MCP_UNREAL_PACKAGE_MODE: ${{ matrix.package_mode }}
       CORE_VERSION: ${{ inputs.core_version || github.event.inputs.core_version || 'latest' }}
+      DCC_MCP_SOURCE_COMMIT: ${{ inputs.source_sha || github.sha }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          fetch-depth: 0
 
       - name: Set up Python
         shell: pwsh
@@ -102,6 +126,28 @@ jobs:
           }
           "PYTHON_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Python $pythonVersion ready at $installDir"
+
+      - name: Download release guard
+        if: inputs.release_tag != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tools
+          path: ${{ runner.temp }}/release-tools
+
+      - name: Verify exact release source
+        if: inputs.release_tag != ''
+        shell: pwsh
+        run: |
+          $verifyArgs = @(
+            "$env:RUNNER_TEMP\release-tools\release_guard.py",
+            "verify-source",
+            "--repo", ".",
+            "--tag", "${{ inputs.release_tag }}",
+            "--expected-sha", "${{ inputs.source_sha }}"
+          )
+          if ("${{ inputs.require_existing_tag }}" -eq "true") { $verifyArgs += "--require-tag" }
+          & "$env:PYTHON_HOME\python.exe" @verifyArgs
+          if ($LASTEXITCODE -ne 0) { throw "release source identity verification failed" }
 
       - name: Install Python build tools
         shell: pwsh
@@ -153,6 +199,27 @@ jobs:
             --python "$env:PYTHON_HOME\python.exe" `
             --mode "${env:DCC_MCP_UNREAL_PACKAGE_MODE}" `
             --core-wheel "${{ steps.core.outputs.wheel }}"
+
+      - name: Normalize and verify release archive identity
+        if: inputs.release_tag != ''
+        shell: pwsh
+        run: |
+          $archive = @(Get-ChildItem -LiteralPath dist -Filter "DccMcpUnreal-*-ue${env:UE_VERSION}-${{ matrix.artifact_suffix }}.zip")
+          if ($archive.Count -ne 1) { throw "expected exactly one Unreal plugin archive" }
+          $guard = "$env:RUNNER_TEMP\release-tools\release_guard.py"
+          & "$env:PYTHON_HOME\python.exe" $guard normalize-plugin-archive `
+            --archive $archive[0].FullName `
+            --tag "${{ inputs.release_tag }}" `
+            --source-sha "${{ inputs.source_sha }}" `
+            --engine-tag "ue${env:UE_VERSION}" `
+            --python-version "3.12.10"
+          if ($LASTEXITCODE -ne 0) { throw "release archive normalization failed" }
+          & "$env:PYTHON_HOME\python.exe" $guard verify-plugin-archive `
+            --archive $archive[0].FullName `
+            --tag "${{ inputs.release_tag }}" `
+            --source-sha "${{ inputs.source_sha }}" `
+            --engine-tag "ue${env:UE_VERSION}"
+          if ($LASTEXITCODE -ne 0) { throw "release archive identity verification failed" }
 
       - name: Upload uplugin artifact
         uses: actions/upload-artifact@v4
