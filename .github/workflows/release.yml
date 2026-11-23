@@ -46,12 +46,12 @@ jobs:
       (needs.release-please.result == 'success' || needs.release-please.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
-      mode: ${{ steps.export.outputs.mode }}
-      publish_pypi: ${{ steps.export.outputs.publish_pypi }}
-      should_release: ${{ steps.export.outputs.should_release }}
-      source_sha: ${{ steps.export.outputs.source_sha }}
-      tag_name: ${{ steps.export.outputs.tag_name }}
-      version: ${{ steps.export.outputs.version }}
+      mode: ${{ fromJSON(env.RELEASE_GUARD_STATE).mode }}
+      publish_pypi: ${{ fromJSON(env.RELEASE_GUARD_STATE).publish_pypi }}
+      should_release: ${{ fromJSON(env.RELEASE_GUARD_STATE).should_release }}
+      source_sha: ${{ fromJSON(env.RELEASE_GUARD_STATE).source_sha }}
+      tag_name: ${{ fromJSON(env.RELEASE_GUARD_STATE).tag_name }}
+      version: ${{ fromJSON(env.RELEASE_GUARD_STATE).version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,35 +60,25 @@ jobs:
         id: resolve
         env:
           REQUESTED_TAG: ${{ github.event.inputs.tag_name || '' }}
+          RELEASE_GUARD_STATE: ""
         run: |
-          python scripts/release_guard.py resolve-source --shell-output \
+          python scripts/release_guard.py resolve-source --guard-output \
             --repo . \
             --tag "$REQUESTED_TAG" \
-            --event-sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            --event-sha "$GITHUB_SHA" > release-guard.txt
+          guard=$(grep '^RELEASE_GUARD_OUTPUTS=' release-guard.txt)
+          printf '%s\n' "${guard#RELEASE_GUARD_OUTPUTS=}" > guard.json
+          printf 'RELEASE_GUARD_STATE<<GUARD_EOF\n%s\nGUARD_EOF\n' "$(cat guard.json)" >> "$GITHUB_ENV"
       - name: Export release guard
-        if: steps.resolve.outputs.should_release == 'true'
+        if: fromJSON(env.RELEASE_GUARD_STATE).should_release
         uses: actions/upload-artifact@v4
         with:
           name: release-tools
-          path: scripts/release_guard.py
+          path: |
+            scripts/release_guard.py
+            guard.json
           if-no-files-found: error
           retention-days: 1
-      - name: Publish release guard outputs
-        id: export
-        env:
-          MODE: ${{ steps.resolve.outputs.mode }}
-          PUBLISH_PYPI: ${{ steps.resolve.outputs.publish_pypi }}
-          SHOULD_RELEASE: ${{ steps.resolve.outputs.should_release }}
-          TAG_NAME: ${{ steps.resolve.outputs.tag_name }}
-          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
-          VERSION: ${{ steps.resolve.outputs.version }}
-        run: |
-          printf 'mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
-          printf 'publish_pypi=%s\n' "$PUBLISH_PYPI" >> "$GITHUB_OUTPUT"
-          printf 'should_release=%s\n' "$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
-          printf 'tag_name=%s\n' "$TAG_NAME" >> "$GITHUB_OUTPUT"
-          printf 'source_sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare-release]
