@@ -89,3 +89,8 @@ ue-niagara-smoke project=".":
 ue-niagara-commandlet project=".":
     just install-project '{{project}}'
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run_ue_smoke.ps1 -Project '{{project}}' -UERoot '{{ue_root}}' -Mode niagara-commandlet
+
+
+# Verify the pinned VX and just toolchain.
+toolchain-ci:
+    vx just@1.58 --version
