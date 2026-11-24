@@ -6,7 +6,7 @@ description: >-
   bounded readback, and one minimal, transaction-backed key-authoring action.
   Behavior-tree graph, StateTree and EQS node editing are documented gaps and
   are not implemented here.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.7 syntax; runtime-gated, not native-qualified
 allowed-tools: Bash Read Write
 metadata:

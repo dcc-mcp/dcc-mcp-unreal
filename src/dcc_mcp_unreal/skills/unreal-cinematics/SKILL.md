@@ -6,7 +6,7 @@ description: >-
   Sequences, authoring camera animation, or preparing an MRQ job in Unreal Engine 5.
   Not for Blueprint scripting (unreal-blueprints) or runtime playback
   (unreal-runtime).
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+, UE 5.8+ for official MCP integration
 allowed-tools: Read Bash Write
 metadata:

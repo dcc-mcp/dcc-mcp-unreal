@@ -5,7 +5,7 @@ description: >-
   export, inspect, and delete assets. Use for package and asset operations in
   the Unreal Editor. Not for actor placement or transforms - use unreal-actors
   for that.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

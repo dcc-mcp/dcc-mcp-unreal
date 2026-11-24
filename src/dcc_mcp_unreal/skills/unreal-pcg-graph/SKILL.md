@@ -1,7 +1,7 @@
 ---
 name: unreal-pcg-graph
 description: Inspect bounded PCG topology or explicitly create, add nodes, edit scalar or typed spline grammar settings, connect pins and save a graph without implying execution or disk-reopen verification.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Editor Python 3.9+ with detected PCG and editor scripting APIs; documented against UE 5.5, not native-qualified
 allowed-tools: Bash Read Write
 metadata:

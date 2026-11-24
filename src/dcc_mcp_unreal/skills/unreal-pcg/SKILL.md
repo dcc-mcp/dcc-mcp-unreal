@@ -1,7 +1,7 @@
 ---
 name: unreal-pcg
 description: Inspect PCG capabilities without mutations, or refresh generated Unreal PCG output after source changes.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Python host, Python 3.9+; individual PCG APIs and plugins are detected at runtime
 allowed-tools: Bash Read Write
 metadata:

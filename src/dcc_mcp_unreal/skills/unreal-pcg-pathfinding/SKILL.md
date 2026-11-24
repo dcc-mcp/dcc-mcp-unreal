@@ -1,7 +1,7 @@
 ---
 name: unreal-pcg-pathfinding
 description: Preflight bounded point-cloud Pathfinding inputs against actual native PCG settings and pins without running or saving a graph.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Python host, Python 3.9+; runtime-gated PCG APIs documented in UE 5.5 and 5.7
 allowed-tools: Bash Read Write
 metadata:

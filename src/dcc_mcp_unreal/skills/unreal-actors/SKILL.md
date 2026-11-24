@@ -5,7 +5,7 @@ description: >-
   delete level actors. Use when inspecting or editing actors in the current
   Unreal Editor level. Not for Content Browser asset import/export - use
   unreal-assets for that.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read
 metadata:

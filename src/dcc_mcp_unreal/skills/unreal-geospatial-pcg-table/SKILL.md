@@ -5,7 +5,7 @@ description: >-
   Data Tables with georeferenced roads, pedestrian ways, buildings, railways, water, and
   land-use points for UE 5.8's native Load Data Table node. Use after a geospatial provider such as
   openstreetmap-city-data. Not for downloading source data.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.8+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

@@ -7,7 +7,7 @@ description: >-
   spawning Niagara actors in the level, or inspecting basic component state.
   Not for Chaos destruction (unreal-chaos) or material editing
   (unreal-materials).
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+; UE 5.8+ for semantic emitter/module/renderer authoring
 allowed-tools: Read Bash Write
 metadata:

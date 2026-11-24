@@ -3,7 +3,7 @@ name: unreal-runtime
 description: >-
   Domain skill - control Unreal's Simulation-in-Editor lifecycle for validating
   live physics behavior without exposing arbitrary editor scripting.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.0+, Python 3.9+
 allowed-tools: Bash Read Write
 metadata:

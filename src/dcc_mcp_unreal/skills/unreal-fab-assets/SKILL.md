@@ -5,7 +5,7 @@ description: >-
   integration, then verify the imported Content Browser assets. Use when the
   user asks to find, download, add, or import Fab or Unreal Marketplace assets.
   Not for arbitrary file imports - use unreal-assets instead.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.3+, Python 3.9+
 allowed-tools: Read Bash
 metadata:

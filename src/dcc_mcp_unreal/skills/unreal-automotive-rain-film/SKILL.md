@@ -5,7 +5,7 @@ description: >-
   Epic's Automotive Configurator sample. Use for the official BP_AudiA5 asset,
   wet PBR LookDev, Niagara rain/impact fields, HDRI lighting, cinematic DOF,
   and 4K Movie Render Queue output. Not for placeholder or low-poly cars.
-license: MIT
+license: Apache-2.0
 compatibility: Unreal Engine 5.8+, Python 3.11+
 metadata:
   dcc-mcp:
