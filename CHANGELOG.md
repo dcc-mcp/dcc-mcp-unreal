@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.20](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.19...v0.3.20) (2026-11-24)
+
+
+### Bug Fixes
+
+* bind release guard outputs to job state ([b5162dc](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/b5162dcbd647ba099b63559a4051c5164f865d28))
+* export release guard outputs separately ([5cdb27e](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/5cdb27ee59b12ea3317eb80cfe588085a8cd866a))
+* publish verified Unreal plugin releases ([34200b5](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/34200b556cd88d8bc61ed3f73c15b5748ff478d0))
+* write release state to the active step output ([4d4e9ea](https://github.com/dcc-mcp/dcc-mcp-unreal/commit/4d4e9eaddd5b2beb04f6d0f7177e31421e9a7acc))
+
 ## [0.3.19](https://github.com/dcc-mcp/dcc-mcp-unreal/compare/v0.3.18...v0.3.19) (2026-11-22)
 
 
