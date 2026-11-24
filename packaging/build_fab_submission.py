@@ -158,6 +158,9 @@ def build_submission(
         write_file(
             stage, PurePosixPath("Documentation/License.txt"), (repo_root / "packaging/fab/License.txt").read_bytes()
         )
+        write_file(
+            stage, PurePosixPath("Documentation/NOTICE"), (repo_root / "NOTICE").read_bytes()
+        )
         notices = b"DCC MCP Unreal: Apache-2.0 license; source: https://github.com/dcc-mcp/dcc-mcp-unreal\n\n"
         notices += (
             b"dcc-mcp-core: MIT license; native Rust Python extension and Python package.\nSource: https://github.com/dcc-mcp/dcc-mcp-core\n\n"
