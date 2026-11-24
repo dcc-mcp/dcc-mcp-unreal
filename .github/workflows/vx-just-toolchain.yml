@@ -15,4 +15,4 @@ concurrency:
 
 jobs:
   toolchain:
-    uses: dcc-mcp/.github/.github/workflows/vx-just-toolchain.yml@ef8dd8d0b472caa6710836ca99b777aa62d45844
+    uses: dcc-mcp/.github/.github/workflows/vx-just-toolchain.yml@1abc2755a2827aff859dba49c1af95332f4fd7e7
