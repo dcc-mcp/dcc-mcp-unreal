@@ -310,6 +310,11 @@ def download_result(task_uuid: str, result_path: str, file_name: str = "") -> Di
             f"Hyper3D result download failed with HTTP {response.status}",
             f"download_http_{response.status}",
         )
+    if getattr(response, "truncated", False):
+        raise Hyper3DClientError(
+            "Hyper3D result download exceeded the maximum response size",
+            "download_response_truncated",
+        )
     written = atomic_write_bytes(destination, response.bytes, max_bytes=MAX_DOWNLOAD_BYTES)
     return {
         "task_uuid": str(task_uuid).strip(),

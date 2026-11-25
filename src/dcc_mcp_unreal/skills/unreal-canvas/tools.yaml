@@ -38,6 +38,9 @@ tools:
           pattern: ^/Game/.+
           default: /Game/Merlin/Generated
           description: Content Browser folder used by the import node in the returned Graph contract.
+        download_result_path:
+          type: string
+          description: Absolute local path used by the download node for the generated Hyper3D file.
         include_import_node:
           type: boolean
           default: true

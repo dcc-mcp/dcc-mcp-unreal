@@ -36,12 +36,18 @@ Spatial Annotations. It also reports the live runtime plugin names when Unreal
 exposes them, the UE 5.9 version gate, native Canvas capabilities, and the
 MCP/Action-card fallback.
 
-For a native setup, call `unreal_official_mcp__prepare_official_mcp` with
-`include_all_toolsets=true`, `include_canvas_bridge=true`, and
+Before setup, verify that the intended Editor and project own the loopback
+listener, confirm the exact configured port, and confirm the effective bind
+address is loopback. For a native setup, call
+`unreal_official_mcp__prepare_official_mcp` with the verified
+`server_port`, `include_all_toolsets=true`, `include_canvas_bridge=true`, and
 `include_spatial_annotations=true`. The setup enables project references to
-installed Epic plugins and requires an authorized editor restart. It does not
-download the Canvas server, local AI models, provider credentials, or agent
-runtime. Complete those steps in the Unreal Canvas tab as documented by Epic.
+installed Epic plugins and writes autostart settings. It returns
+`restart_required` and does not start or restart the server. After an
+authorized restart, verify the actual listener and official MCP status before
+using the Canvas surface. It does not download the Canvas server, local AI
+models, provider credentials, or agent runtime. Complete those steps in the
+Unreal Canvas tab as documented by Epic.
 
 When the native Canvas plugins are unavailable, DCC MCP still exposes the
 typed Graph contract and the Hyper3D lifecycle through its normal MCP gateway.

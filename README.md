@@ -155,17 +155,22 @@ All Toolsets, Toolset Registry, Python, and Unreal MCP. It also provides typed
 Action-card Graph contracts and generation-to-import workflows that can be
 used from the Canvas agent or through the regular DCC-MCP endpoint.
 
-To prepare an authorized UE 5.9 project for the native stack, enable the
-installed Epic plugins and restart the editor:
+Before preparing an authorized UE 5.9 project, verify that the intended Editor
+and project own the loopback listener, confirm the exact configured port, and
+confirm the effective bind address is loopback. Pass that verified port to the
+setup call below. The command enables installed Epic plugins and writes the
+autostart settings. It returns `restart_required` and does not start or restart
+the server.
 
 ```powershell
-dcc-mcp-cli call unreal_official_mcp__prepare_official_mcp --json '{"include_all_toolsets":true,"include_canvas_bridge":true,"include_spatial_annotations":true}'
+dcc-mcp-cli call unreal_official_mcp__prepare_official_mcp --json '{"server_port":8000,"include_all_toolsets":true,"include_canvas_bridge":true,"include_spatial_annotations":true}'
 ```
 
-The Canvas server build, local AI models, provider keys, and agent sign-in
-remain managed by Unreal Canvas. Open **Tools → Unreal Canvas**, complete its
-health check, then use `dcc-mcp-cli call` or the Unreal Assistant with the
-same editor instance.
+After an authorized restart, verify the actual listener address, port, owning
+Editor/project, and official MCP status. The Canvas server build, local AI
+models, provider keys, and agent sign-in remain managed by Unreal Canvas. Open
+**Tools → Unreal Canvas**, complete its health check, then use
+`dcc-mcp-cli call` or the Unreal Assistant with the same editor instance.
 
 ## Why DCC MCP when Unreal already has an official MCP?
 

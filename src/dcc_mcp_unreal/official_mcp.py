@@ -176,10 +176,10 @@ def bridge_official_mcp(
     endpoint: str = DEFAULT_OFFICIAL_MCP_URL,
     toolset_name: str = "",
     tool_name: str = "",
-    tool_names: Optional[Sequence[str]] = None,
-    resource_uri: str = "",
     arguments: Optional[Mapping[str, Any]] = None,
     timeout: float = 15.0,
+    tool_names: Optional[Sequence[str]] = None,
+    resource_uri: str = "",
 ) -> Dict[str, Any]:
     """Execute one bounded operation against Epic's optional UE 5.8+ MCP server."""
     operation = operation.strip().lower()

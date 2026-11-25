@@ -268,12 +268,14 @@ def _resolve_plugin_descriptor(engine_plugins_dir: Path, plugin_name: str) -> tu
     declared_name = descriptor.get("Name", plugin_name)
     if not isinstance(declared_name, str) or not declared_name.strip():
         raise ValueError("Installed descriptor has an invalid Name: {}".format(existing[0]))
-    return existing[0], declared_name
+    return existing[0], existing[0].stem
 
 
-def _validate_pcg_dependencies(engine_plugins_dir: Path, project_data: dict[str, Any]) -> list[str]:
+def _validate_pcg_dependencies(
+    pcg_descriptor: Path, plugin_roots: Iterable[Path], project_data: dict[str, Any]
+) -> list[str]:
     """Preflight the installed PCGToolset's direct requirements without scanning the engine."""
-    descriptor = _read_plugin_descriptor(engine_plugins_dir / _PLUGIN_RELATIVE_PATHS["PCGToolset"])
+    descriptor = _read_plugin_descriptor(pcg_descriptor)
     references = descriptor.get("Plugins", [])
     if not isinstance(references, list) or any(
         not isinstance(ref, dict)
@@ -306,7 +308,12 @@ def _validate_pcg_dependencies(engine_plugins_dir: Path, project_data: dict[str,
             if name in _PLUGIN_RELATIVE_PATHS
             else ()
         )
-        installed = [engine_plugins_dir / path for path in relative_paths if (engine_plugins_dir / path).is_file()]
+        installed = []
+        for plugin_root in plugin_roots:
+            for relative_path in relative_paths:
+                candidate = plugin_root / relative_path
+                if candidate.is_file() and candidate not in installed:
+                    installed.append(candidate)
         if len(installed) != 1:
             raise ValueError(f"Cannot verify one installed descriptor for required PCGToolset dependency {name}")
         _read_plugin_descriptor(installed[0])
@@ -464,9 +471,12 @@ def prepare_official_mcp(
         config_path = project_file.parent / "Config" / "DefaultEditorPerProjectUserSettings.ini"
         config_original = _read_optional_bytes(config_path)
         config_contents = _render_autostart(config_original, server_port)
-        required_dependencies = (
-            _validate_pcg_dependencies(engine_plugins_dir, project_data) if include_pcg_toolset else []
-        )
+        required_dependencies = []
+        if include_pcg_toolset:
+            pcg_descriptor = resolved_plugins["PCGToolset"][0]
+            if pcg_descriptor is None:
+                raise ValueError("PCGToolset descriptor resolution unexpectedly returned no path")
+            required_dependencies = _validate_pcg_dependencies(pcg_descriptor, plugin_roots, project_data)
         project_plugin_names = [declared_name for _, declared_name in resolved_plugins.values()]
         changed_plugins = _upsert_plugins(project_data, project_plugin_names)
         project_contents = project_original

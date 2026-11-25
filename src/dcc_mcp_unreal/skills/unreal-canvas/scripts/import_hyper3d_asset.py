@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
@@ -43,19 +45,22 @@ def import_hyper3d_asset(
         return skill_error("Invalid Content Browser destination", "invalid_destination_path")
 
     name = asset_name.strip() or source.stem
-    if not name:
+    if not name or Path(name).name != name or name in {".", ".."}:
         return skill_error("Unable to determine an Unreal asset name", "invalid_asset_name")
 
     try:
-        task = unreal.AssetImportTask()
-        task.set_editor_property("filename", str(source))
-        task.set_editor_property("destination_path", destination_path)
-        task.set_editor_property("destination_name", name)
-        task.set_editor_property("replace_existing", bool(replace_existing))
-        task.set_editor_property("automated", True)
-        task.set_editor_property("save", True)
-        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
-        imported = task.get_editor_property("imported_object_paths")
+        with tempfile.TemporaryDirectory(prefix="dcc_mcp_hyper3d_") as staging_dir:
+            staged_source = Path(staging_dir) / f"{name}{source.suffix}"
+            shutil.copy2(source, staged_source)
+            task = unreal.AssetImportTask()
+            task.set_editor_property("filename", str(staged_source))
+            task.set_editor_property("destination_path", destination_path)
+            task.set_editor_property("destination_name", name)
+            task.set_editor_property("replace_existing", bool(replace_existing))
+            task.set_editor_property("automated", True)
+            task.set_editor_property("save", True)
+            unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+            imported = task.get_editor_property("imported_object_paths")
     except Exception as exc:
         return skill_error("Failed to import the Hyper3D asset", type(exc).__name__)
 
