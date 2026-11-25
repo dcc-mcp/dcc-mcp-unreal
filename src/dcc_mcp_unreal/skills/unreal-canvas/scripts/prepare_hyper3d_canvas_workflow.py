@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
 
@@ -23,12 +25,18 @@ def prepare_hyper3d_canvas_workflow(
     dcc_mcp_tool: str = "queue_sequence_render",
     include_dcc_mcp_node: bool = True,
     include_render_node: bool = True,
+    download_result_path: str = "",
     **kwargs,
 ) -> dict:
     if not asset_destination_path.startswith("/Game/") or asset_destination_path.endswith("/"):
         return skill_error(
             "Invalid Unreal asset destination",
             "asset_destination_path must start with /Game/ and not end with /",
+        )
+    if download_result_path and not Path(download_result_path).expanduser().is_absolute():
+        return skill_error(
+            "Invalid Hyper3D download destination",
+            "download_result_path must be an absolute path",
         )
 
     nodes = [
@@ -48,7 +56,7 @@ def prepare_hyper3d_canvas_workflow(
             "submit_hyper3d",
             "unreal_canvas__submit_hyper3d_generation",
             [
-                {"name": "images", "type": "image[]", "required": False},
+                {"name": "image_paths", "type": "image[]", "required": False},
                 {"name": "prompt", "type": "text", "required": False},
                 {"name": "tier", "type": "text", "default": "Gen-2.5-Medium"},
                 {"name": "mesh_mode", "type": "text", "default": "Raw"},
@@ -72,7 +80,10 @@ def prepare_hyper3d_canvas_workflow(
         ),
     ]
     connections = [
-        {"from": {"node": "image_input", "pin": "images"}, "to": {"node": "submit_hyper3d", "pin": "images"}},
+        {
+            "from": {"node": "image_input", "pin": "images"},
+            "to": {"node": "submit_hyper3d", "pin": "image_paths"},
+        },
         {"from": {"node": "text_input", "pin": "prompt"}, "to": {"node": "submit_hyper3d", "pin": "prompt"}},
         {
             "from": {"node": "submit_hyper3d", "pin": "subscription_key"},
@@ -87,7 +98,14 @@ def prepare_hyper3d_canvas_workflow(
                     "unreal_canvas__download_hyper3d_result",
                     [
                         {"name": "task_uuid", "type": "text", "required": True},
-                        {"name": "result_path", "type": "path", "required": True},
+                        {
+                            "name": "result_path",
+                            "type": "path",
+                            "required": True,
+                            "source": "setting",
+                            "default": download_result_path,
+                            "description": "Absolute local path for the downloaded Hyper3D result.",
+                        },
                         {"name": "file_name", "type": "text", "required": False},
                     ],
                     [{"name": "result_path", "type": "path"}],
@@ -249,6 +267,7 @@ def prepare_hyper3d_canvas_workflow(
         },
         "manual_settings": {
             "dcc_mcp": ["endpoint", "skill_name", "tool_name", "arguments"],
+            "download": ["result_path"],
             "render": ["sequence_path", "output_path", "resolution_x", "resolution_y", "output_format", "temporal_samples"],
             "description": "Canvas Subscript settings can be filled manually before running the graph.",
         },

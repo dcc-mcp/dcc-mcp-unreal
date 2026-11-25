@@ -411,16 +411,40 @@ def test_ue59_canvas_and_all_toolsets_are_resolved_from_descriptor_metadata(setu
         "ModelContextProtocol",
         "EditorToolset",
         "AllToolsets",
-        "UnrealCanvasBridge",
-        "UnrealCanvasSpatialAnnotations",
+        "CanvasBridge",
+        "Spatial",
     ]
     assert {entry["Name"] for entry in json.loads(project.read_bytes())["Plugins"]} == {
         "ModelContextProtocol",
         "EditorToolset",
         "AllToolsets",
-        "UnrealCanvasBridge",
-        "UnrealCanvasSpatialAnnotations",
+        "CanvasBridge",
+        "Spatial",
     }
+
+
+def test_project_pcg_descriptor_is_used_for_dependency_preflight(setup_project):
+    prepare, project, config, plugins = setup_project
+    engine_pcg_toolset = plugins / prepare._PLUGIN_RELATIVE_PATHS["PCGToolset"]
+    engine_pcg_toolset.unlink()
+    engine_pcg = plugins / "PCG" / "PCG.uplugin"
+    engine_pcg.unlink()
+
+    project_plugins = project.parent / "Plugins"
+    project_pcg_toolset = project_plugins / prepare._PLUGIN_RELATIVE_PATHS["PCGToolset"]
+    project_pcg_toolset.parent.mkdir(parents=True, exist_ok=True)
+    project_pcg_toolset.write_text(
+        json.dumps({"FileVersion": 3, "Plugins": [{"Name": "PCG", "Enabled": True}]}),
+        encoding="utf-8",
+    )
+    project_pcg = project_plugins / "PCG" / "PCG.uplugin"
+    project_pcg.parent.mkdir(parents=True, exist_ok=True)
+    project_pcg.write_text(json.dumps({"FileVersion": 3}), encoding="utf-8")
+
+    result = prepare.prepare_official_mcp(include_pcg_toolset=True)
+
+    assert result["success"] is True, result
+    assert result["context"]["required_dependencies"] == ["PCG"]
 
 
 @pytest.mark.parametrize("contents", [None, b"broken json", b"[]", b"{}", b'{"FileVersion":true}'])

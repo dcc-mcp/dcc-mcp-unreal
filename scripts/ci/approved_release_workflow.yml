@@ -69,14 +69,15 @@ jobs:
           guard=$(grep '^RELEASE_GUARD_OUTPUTS=' release-guard.txt)
           printf '%s\n' "${guard#RELEASE_GUARD_OUTPUTS=}" > guard.json
           printf 'RELEASE_GUARD_STATE<<GUARD_EOF\n%s\nGUARD_EOF\n' "$(cat guard.json)" >> "$GITHUB_ENV"
+          mkdir -p release-tools
+          cp scripts/release_guard.py release-tools/release_guard.py
+          cp guard.json release-tools/guard.json
       - name: Export release guard
         if: fromJSON(env.RELEASE_GUARD_STATE).should_release
         uses: actions/upload-artifact@v4
         with:
           name: release-tools
-          path: |
-            scripts/release_guard.py
-            guard.json
+          path: release-tools
           if-no-files-found: error
           retention-days: 1
 

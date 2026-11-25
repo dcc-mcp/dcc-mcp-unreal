@@ -27,10 +27,11 @@ def _load_script(name: str):
 
 
 class FakeResponse:
-    def __init__(self, status: int, payload: Any = None, body: bytes = b"") -> None:
+    def __init__(self, status: int, payload: Any = None, body: bytes = b"", truncated: bool = False) -> None:
         self.status = status
         self._payload = payload
         self.bytes = body
+        self.truncated = truncated
 
     def json(self) -> Any:
         return self._payload
@@ -85,6 +86,13 @@ def test_canvas_workflow_keeps_wiring_inside_action_graph():
     setting_names = {pin["name"] for pin in dcc_node["inputs"] if pin.get("source") == "setting"}
     assert setting_names == {"endpoint", "skill_name", "tool_name", "arguments"}
     assert graph["manual_settings"]["dcc_mcp"] == ["endpoint", "skill_name", "tool_name", "arguments"]
+    submit_node = next(node for node in graph["nodes"] if node["id"] == "submit_hyper3d")
+    assert {pin["name"] for pin in submit_node["inputs"]} >= {"image_paths", "prompt"}
+    download_node = next(node for node in graph["nodes"] if node["id"] == "download_hyper3d")
+    result_path_pin = next(pin for pin in download_node["inputs"] if pin["name"] == "result_path")
+    assert result_path_pin["source"] == "setting"
+    assert "absolute" in result_path_pin["description"].lower()
+    assert graph["manual_settings"]["download"] == ["result_path"]
     assert any(
         connection["from"]["node"] == "dcc_mcp_action"
         and connection["to"]["node"] == "render_showcase"
@@ -335,6 +343,25 @@ def test_download_writes_selected_geometry_without_returning_signed_url(tmp_path
     assert "signature" not in str(result)
 
 
+def test_download_rejects_truncated_response(tmp_path, monkeypatch):
+    monkeypatch.delenv("HYPER3D_API_KEY", raising=False)
+    monkeypatch.setenv("RODIN_API_KEY", "test-secret-key")
+    module = _load_script("download_hyper3d_result")
+    client = sys.modules["_hyper3d_client"]
+    result_path = tmp_path / "generated.glb"
+    responses = [
+        FakeResponse(200, {"list": [{"name": "model.glb", "url": "https://example.invalid/model.glb"}]}),
+        FakeResponse(200, body=b"partial", truncated=True),
+    ]
+
+    with patch.object(client, "http_request", side_effect=responses):
+        result = module.download_hyper3d_result(task_uuid="task-uuid", result_path=str(result_path))
+
+    assert result["success"] is False
+    assert result["error"] == "download_response_truncated"
+    assert not result_path.exists()
+
+
 def test_import_hyper3d_asset_uses_asset_tools(tmp_path, monkeypatch):
     source = tmp_path / "model.glb"
     source.write_bytes(b"glb")
@@ -360,11 +387,13 @@ def test_import_hyper3d_asset_uses_asset_tools(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "unreal", fake_unreal)
     module = _load_script("import_hyper3d_asset")
 
-    result = module.import_hyper3d_asset(source_path=str(source))
+    result = module.import_hyper3d_asset(source_path=str(source), asset_name="Hero")
 
     assert result["success"] is True
     assert result["context"]["imported_object_paths"] == ["/Game/Merlin/Generated/model.model"]
     task = calls["tasks"][0]
-    assert task.properties["filename"] == str(source)
+    assert Path(task.properties["filename"]).stem == "Hero"
+    assert Path(task.properties["filename"]).suffix == ".glb"
+    assert not Path(task.properties["filename"]).exists()
     assert task.properties["destination_path"] == "/Game/Merlin/Generated"
-    assert task.properties["destination_name"] == "model"
+    assert task.properties["destination_name"] == "Hero"

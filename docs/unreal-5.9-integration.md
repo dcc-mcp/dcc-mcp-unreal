@@ -26,17 +26,22 @@ capability metadata, and the Canvas workflow contract.
 1. Install a UE 5.9 build that contains Unreal Canvas and the official MCP
    plugins.
 2. Install and enable `DccMcpUnreal` in the project.
-3. Run the following command through the DCC MCP gateway for an authorized
-   project configuration change.
+3. Before setup, verify that the intended Editor and project own the loopback
+   listener, confirm the exact configured port, and confirm the effective bind
+   address is loopback. Run the following command through the DCC MCP gateway
+   with that verified port.
 
    ```powershell
-   dcc-mcp-cli call unreal_official_mcp__prepare_official_mcp --json '{"include_all_toolsets":true,"include_canvas_bridge":true,"include_spatial_annotations":true}'
+   dcc-mcp-cli call unreal_official_mcp__prepare_official_mcp --json '{"server_port":8000,"include_all_toolsets":true,"include_canvas_bridge":true,"include_spatial_annotations":true}'
    ```
 
-4. Restart the editor when the tool reports `restart_required=true`.
-5. Call `unreal_canvas__inspect_canvas_support` and then verify the official
-   endpoint with `unreal_official_mcp__official_mcp_bridge` using
-   `operation=status` and the configured loopback endpoint.
+4. The setup call writes project plugin and autostart settings. It returns
+   `restart_required` and does not start or restart the server. Perform an
+   authorized restart when required.
+5. Verify the actual listener address, port, owning Editor/project, and official
+   MCP status. Then call `unreal_canvas__inspect_canvas_support` and
+   `unreal_official_mcp__official_mcp_bridge` with `operation=status` and the
+   configured loopback endpoint.
 6. Open **Tools → Unreal Canvas**, install the Canvas server and optional local
    models, configure providers, and run the Canvas health check.
 

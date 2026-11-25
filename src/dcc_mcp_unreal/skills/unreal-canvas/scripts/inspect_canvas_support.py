@@ -73,7 +73,7 @@ def _uproject_plugins(project_dir: Optional[Path]) -> Mapping[str, bool]:
     if not candidates:
         return {}
     try:
-        data = json.loads(candidates[0].read_text(encoding="utf-8"))
+        data = json.loads(candidates[0].read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
     result = {}
