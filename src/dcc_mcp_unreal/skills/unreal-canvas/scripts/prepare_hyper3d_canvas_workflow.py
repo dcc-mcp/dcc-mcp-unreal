@@ -268,7 +268,14 @@ def prepare_hyper3d_canvas_workflow(
         "manual_settings": {
             "dcc_mcp": ["endpoint", "skill_name", "tool_name", "arguments"],
             "download": ["result_path"],
-            "render": ["sequence_path", "output_path", "resolution_x", "resolution_y", "output_format", "temporal_samples"],
+            "render": [
+                "sequence_path",
+                "output_path",
+                "resolution_x",
+                "resolution_y",
+                "output_format",
+                "temporal_samples",
+            ],
             "description": "Canvas Subscript settings can be filled manually before running the graph.",
         },
         "nodes": nodes,

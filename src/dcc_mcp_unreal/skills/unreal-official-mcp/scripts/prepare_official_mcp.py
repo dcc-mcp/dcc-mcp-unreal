@@ -261,7 +261,9 @@ def _resolve_plugin_descriptor(engine_plugins_dir: Path, plugin_name: str) -> tu
             if _descriptor_matches_plugin(path, aliases) and path not in existing:
                 existing.append(path)
     if len(existing) > 1:
-        raise ValueError("Multiple installed descriptors match {}: {}".format(plugin_name, ", ".join(map(str, existing))))
+        raise ValueError(
+            "Multiple installed descriptors match {}: {}".format(plugin_name, ", ".join(map(str, existing)))
+        )
     if not existing:
         return None, plugin_name
     descriptor = _read_plugin_descriptor(existing[0])

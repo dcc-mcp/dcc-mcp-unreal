@@ -78,8 +78,7 @@ def test_canvas_workflow_keeps_wiring_inside_action_graph():
         "canvas_output",
     }
     assert any(
-        connection["from"]["node"] == "download_hyper3d"
-        and connection["to"]["node"] == "import_hyper3d"
+        connection["from"]["node"] == "download_hyper3d" and connection["to"]["node"] == "import_hyper3d"
         for connection in graph["connections"]
     )
     dcc_node = next(node for node in graph["nodes"] if node["id"] == "dcc_mcp_action")
@@ -94,13 +93,11 @@ def test_canvas_workflow_keeps_wiring_inside_action_graph():
     assert "absolute" in result_path_pin["description"].lower()
     assert graph["manual_settings"]["download"] == ["result_path"]
     assert any(
-        connection["from"]["node"] == "dcc_mcp_action"
-        and connection["to"]["node"] == "render_showcase"
+        connection["from"]["node"] == "dcc_mcp_action" and connection["to"]["node"] == "render_showcase"
         for connection in graph["connections"]
     )
     assert any(
-        connection["from"]["node"] == "render_showcase"
-        and connection["to"]["node"] == "canvas_output"
+        connection["from"]["node"] == "render_showcase" and connection["to"]["node"] == "canvas_output"
         for connection in graph["connections"]
     )
 
@@ -209,7 +206,9 @@ def test_submit_accepts_shared_hyper3d_api_key(monkeypatch):
     monkeypatch.setenv("HYPER3D_API_KEY", "test-hyper3d-key")
     monkeypatch.delenv("RODIN_API_KEY", raising=False)
     module = _load_script("submit_hyper3d_generation")
-    monkeypatch.setattr(module, "submit_generation", lambda **kwargs: {"task_uuid": "task", "subscription_key": "subscription"})
+    monkeypatch.setattr(
+        module, "submit_generation", lambda **kwargs: {"task_uuid": "task", "subscription_key": "subscription"}
+    )
 
     result = module.submit_hyper3d_generation(prompt="A small robot")
 
@@ -280,9 +279,7 @@ def test_status_returns_only_graph_safe_job_fields(monkeypatch):
         return_value=FakeResponse(
             200,
             {
-                "jobs": [
-                    {"uuid": "job-uuid", "status": "Done", "progress": 1.0, "subscription_key": "hidden"}
-                ],
+                "jobs": [{"uuid": "job-uuid", "status": "Done", "progress": 1.0, "subscription_key": "hidden"}],
                 "signed_url": "https://example.invalid/secret",
             },
         ),
