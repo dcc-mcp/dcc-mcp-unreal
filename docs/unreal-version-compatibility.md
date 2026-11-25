@@ -8,7 +8,8 @@ that a current Unreal Python API exists on every version.
 | --- | --- | --- |
 | 4.18+ without `PythonScriptPlugin` | Native baseline | The C++ plugin and native automation bridge remain buildable with that engine's required toolchain; Python skills require an external sidecar. |
 | Engine with `PythonScriptPlugin` through 5.7 | DCC MCP Python | The DCC MCP server, skill discovery, asset, actor, level, automation, and app-ui integrations are available subject to per-API gates. |
-| 5.8+ | DCC MCP plus Epic | All normal DCC MCP capabilities remain available; typed Chaos Geometry Collection, material binding, and Simulation-in-Editor validation are available. `unreal-official-mcp` can optionally bridge Epic's installed Unreal MCP and Toolset Registry. |
+| 5.8 | DCC MCP plus Epic | All normal DCC MCP capabilities remain available; typed Chaos Geometry Collection, material binding, and Simulation-in-Editor validation are available. `unreal-official-mcp` can bridge Epic's installed Unreal MCP and Toolset Registry. |
+| 5.9+ | DCC MCP plus Epic and Canvas | The 5.8 integration remains available. The adapter discovers UE 5.9's dynamic MCP toolsets, MCP Resources, and tool-search meta-tools, and can prepare the installed All Toolsets, Unreal Canvas Bridge, and Spatial Annotations plugins without redistributing Epic binaries. |
 
 Epic's `ModelContextProtocol` plugin is experimental and marked `NoRedist`.
 The adapter detects and calls an installed loopback endpoint; it does not copy
@@ -24,8 +25,13 @@ be enabled for packaged game targets.
 3. Unreal object mutation stays on the game thread. Network calls back into
    Epic Unreal MCP run off the game thread to avoid same-process deadlocks.
 4. CI should test the oldest supported engine, the oldest Python-enabled
-   engine available to the project, the latest stable 5.x engine, and 5.8's
-   optional official-MCP composition path.
+   engine available to the project, the latest stable 5.x engine, the 5.8
+   official-MCP composition path, and the 5.9 Canvas and tool-search path.
+
+5. Unreal Canvas is an optional native UE 5.9 integration. Its server build,
+   local AI models, provider credentials, and agent sign-in remain managed by
+   Epic's Canvas Bridge and the Unreal Editor. DCC MCP does not replace or
+   redistribute those components.
 
 The local UE 4.18 audit successfully built the native plugin with Visual Studio
 2017 Build Tools and MSVC 14.16. Use `msvc-kit install-into-vs --check` to audit

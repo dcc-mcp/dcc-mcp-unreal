@@ -23,7 +23,8 @@ standalone sidecar below.
 | **4.27** | C++ plugin + standalone sidecar | No system Python required | Stock Python 3.7 is unsupported; internal Python 3.9+ builds may select embedded mode |
 | **5.0 – 5.2** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.9 | Full DCC MCP skill catalog |
 | **5.3 – 5.6** | C++ plugin + `PythonScriptPlugin` | Engine-bundled Python 3.11 | Full DCC MCP skill catalog |
-| **5.7+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.12 | DCC MCP tools + optional Epic MCP bridge where available |
+| **5.7 – 5.8** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP bridge | Engine-bundled Python 3.12 | DCC MCP tools + optional Epic MCP bridge where available |
+| **5.9+** | C++ plugin + `PythonScriptPlugin` + optional Epic MCP and Canvas Bridge | Engine-bundled Python 3.12 | DCC MCP tools, dynamic Epic toolsets and Resources, and native Unreal Canvas integration where installed |
 
 ### Per-Tier Detail
 
@@ -45,6 +46,17 @@ can optionally bridge Epic's installed `ModelContextProtocol` plugin —
 discover and call Epic tools through the same MCP endpoint without
 redistribution. Keep the Epic plugin installed with the engine; the adapter
 detects and calls its loopback endpoint only.
+
+**UE 5.9+ (Epic MCP and Unreal Canvas)**
+The adapter remains additive to the native UE 5.9 stack. Use
+`unreal_official_mcp__prepare_official_mcp` with
+`include_all_toolsets`, `include_canvas_bridge`, and
+`include_spatial_annotations` to enable installed Epic plugins in the project.
+Use `unreal_canvas__inspect_canvas_support` to check the engine and project
+before opening **Tools → Unreal Canvas**. Epic's Canvas tab still owns the
+Canvas server build, local AI models, provider credentials, and agent setup.
+See the [UE 5.9 integration guide](unreal-5.9-integration.md) for the feature
+matrix.
 
 ---
 
@@ -100,7 +112,7 @@ project or engine installation.
 ### From GitHub Releases
 
 1. Go to the [Releases page](https://github.com/dcc-mcp/dcc-mcp-unreal/releases)
-2. Download the ZIP matching your engine: `DccMcpUnreal-0.3.0-ue5.7-win64.zip`,
+2. Download the ZIP matching your engine: `DccMcpUnreal-0.3.0-ue5.9-win64.zip`,
    `DccMcpUnreal-0.3.0-ue5.8-win64.zip`, or `DccMcpUnreal-0.3.0-ue4.18-win64.zip`
 3. Extract into your project or engine:
 

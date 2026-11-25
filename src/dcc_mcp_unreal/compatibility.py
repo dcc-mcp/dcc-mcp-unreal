@@ -7,6 +7,7 @@ from typing import Dict, Tuple
 
 MINIMUM_UNREAL_VERSION = (4, 18)
 OFFICIAL_MCP_VERSION = (5, 8)
+UNREAL_CANVAS_VERSION = (5, 9)
 
 
 def parse_unreal_version(value: str) -> Tuple[int, int]:
@@ -30,11 +31,13 @@ def unreal_compatibility(
     engine_version: str,
     has_embedded_python: bool,
     has_official_mcp: bool = False,
+    has_unreal_canvas: bool = False,
 ) -> Dict[str, object]:
     """Describe supported integration layers without calling unavailable APIs."""
     version = parse_unreal_version(engine_version)
     supported = version >= MINIMUM_UNREAL_VERSION
     official_bridge = supported and version >= OFFICIAL_MCP_VERSION and has_official_mcp
+    native_canvas = supported and version >= UNREAL_CANVAS_VERSION and has_unreal_canvas
     if official_bridge and has_embedded_python:
         integration_tier = "dcc-mcp-plus-epic"
     elif has_embedded_python and supported:
@@ -53,6 +56,10 @@ def unreal_compatibility(
         limitations.append("Epic Unreal MCP and Toolset Registry bridging require Unreal Engine 5.8+")
     elif not has_official_mcp:
         limitations.append("Epic Unreal MCP is optional and is not currently available")
+    if version < UNREAL_CANVAS_VERSION:
+        limitations.append("Unreal Canvas native integration requires Unreal Engine 5.9+")
+    elif not has_unreal_canvas:
+        limitations.append("Unreal Canvas is optional and its UE 5.9 plugins are not currently available")
 
     return {
         "engine_version": engine_version,
@@ -62,5 +69,6 @@ def unreal_compatibility(
         "native_baseline": supported,
         "embedded_python": supported and has_embedded_python,
         "official_mcp_bridge": official_bridge,
+        "unreal_canvas": native_canvas,
         "limitations": limitations,
     }

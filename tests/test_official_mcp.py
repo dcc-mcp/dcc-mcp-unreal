@@ -177,6 +177,31 @@ def test_client_propagates_inner_tool_error(monkeypatch):
         client.call_tool("CaptureViewport")
 
 
+def test_bridge_reads_official_mcp_resource(monkeypatch):
+    responses = iter(
+        [
+            _json_response({"result": {}}, headers={"Mcp-Session-Id": "resource-session"}),
+            _Response(),
+            _json_response({"result": {"tools": []}}),
+            _json_response({"result": {"contents": [{"uri": "ue://project/context", "text": "context"}]}}),
+            _Response(),
+        ]
+    )
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return _Response() if request.method == "DELETE" else next(responses)
+
+    monkeypatch.setattr(official_mcp, "urlopen", fake_urlopen)
+
+    result = official_mcp.bridge_official_mcp("read_resource", resource_uri="ue://project/context")
+
+    assert result == {"contents": [{"uri": "ue://project/context", "text": "context"}]}
+    assert json.loads(requests[3].data)["params"] == {"uri": "ue://project/context"}
+    assert requests[-1].method == "DELETE"
+
+
 def _stub_description_session(monkeypatch, tools, result=None):
     responses = iter(
         [
@@ -237,6 +262,29 @@ def test_describe_toolset_preserves_legacy_contract(monkeypatch):
     assert json.loads(requests[3].data)["params"] == {
         "name": "describe_toolset",
         "arguments": {"toolset_name": "ActorTools"},
+    }
+    assert requests[-1].method == "DELETE"
+
+
+def test_describe_tools_uses_ue59_discovery_schema(monkeypatch):
+    tool = {
+        "name": "describe_tools",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tool_names": {"type": "array", "items": {"type": "string"}}},
+            "required": ["tool_names"],
+        },
+    }
+    requests = _stub_description_session(monkeypatch, [tool])
+
+    official_mcp.bridge_official_mcp(
+        "describe_tools",
+        tool_names=["EditorToolset.ActorToolset.GetSelectedActors"],
+    )
+
+    assert json.loads(requests[3].data)["params"] == {
+        "name": "describe_tools",
+        "arguments": {"tool_names": ["EditorToolset.ActorToolset.GetSelectedActors"]},
     }
     assert requests[-1].method == "DELETE"
 

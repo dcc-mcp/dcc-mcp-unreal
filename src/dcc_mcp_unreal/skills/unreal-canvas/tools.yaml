@@ -1,0 +1,241 @@
+tools:
+  - name: inspect_canvas_support
+    description: Inspect Unreal Canvas plugin, Graph, MCP, Python, and project enablement support without exposing credentials.
+    source_file: scripts/inspect_canvas_support.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 30
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments: {}
+        note: Detect native Unreal Canvas support before preparing a Canvas workflow.
+
+  - name: prepare_hyper3d_canvas_workflow
+    description: Prepare a typed Unreal Canvas Action-card Graph contract for Hyper3D generation and Unreal import.
+    source_file: scripts/prepare_hyper3d_canvas_workflow.py
+    execution: sync
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 10
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        asset_destination_path:
+          type: string
+          pattern: ^/Game/.+
+          default: /Game/Merlin/Generated
+          description: Content Browser folder used by the import node in the returned Graph contract.
+        include_import_node:
+          type: boolean
+          default: true
+          description: Include download and Unreal import nodes in the Graph contract.
+        dcc_mcp_skill:
+          type: string
+          default: unreal-cinematics
+          description: Default marketplace or local DCC-MCP skill slug for the manual DCC-MCP node settings.
+        dcc_mcp_tool:
+          type: string
+          default: queue_sequence_render
+          description: Default DCC-MCP tool name for the manual DCC-MCP node settings.
+        include_dcc_mcp_node:
+          type: boolean
+          default: true
+          description: Include the manual DCC-MCP skill/tool/arguments node and Canvas output wiring.
+        include_render_node:
+          type: boolean
+          default: true
+          description: Include the manual Movie Render Queue showcase node and Canvas output wiring.
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments: {}
+        note: Prepare the complete image-or-text to Hyper3D to Unreal import graph.
+      - arguments:
+          asset_destination_path: /Game/Generated/Hyper3D
+        note: Route imported results to a project-specific Content Browser folder.
+      - arguments:
+          dcc_mcp_skill: unreal-cinematics
+          dcc_mcp_tool: queue_sequence_render
+        note: Prepare manual DCC-MCP and render settings for a complete Showcase graph.
+
+  - name: submit_hyper3d_generation
+    description: Submit a Hyper3D Rodin Gen-2.5 image-to-3D or text-to-3D task and return task-scoped identifiers for the next Graph nodes.
+    source_file: scripts/submit_hyper3d_generation.py
+    execution: sync
+    job_strategy: isolated
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        image_paths:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+          description: One to five absolute image paths for image-to-3D. Omit this field for text-to-3D.
+        prompt:
+          type: string
+          maxLength: 1024
+          description: Text-to-3D description, or optional guidance for image-to-3D.
+        tier:
+          type: string
+          enum: [Gen-2.5-Extreme-Low, Gen-2.5-Low, Gen-2.5-Medium, Gen-2.5-High, Gen-2.5-Extreme-High]
+          default: Gen-2.5-Medium
+        mesh_mode:
+          type: string
+          enum: [Raw, Quad]
+          default: Raw
+        quality:
+          type: string
+          enum: [high, medium, low, extra-low]
+          default: medium
+        texture_mode:
+          type: string
+          enum: [legacy, extreme-low, low, medium, high, extreme-high]
+          description: Optional texture generation effort level.
+        geometry_file_format:
+          type: string
+          enum: [glb, usdz, fbx, obj, stl]
+          default: glb
+        material:
+          type: string
+          enum: [PBR, Shaded, All, Hybrid, None]
+          default: PBR
+    output_schema:
+      type: object
+      additionalProperties: true
+    call_examples:
+      - arguments:
+          image_paths: [C:/Assets/robot-front.png, C:/Assets/robot-side.png]
+          tier: Gen-2.5-Medium
+          mesh_mode: Raw
+          quality: medium
+          geometry_file_format: glb
+        note: Generate a textured GLB from two reference views.
+      - arguments:
+          prompt: A small stylized wooden treasure chest with brass trim
+          tier: Gen-2.5-Low
+          geometry_file_format: glb
+        note: Generate a mesh from a text description.
+    next-tools:
+      on-success: [unreal_canvas__get_hyper3d_generation_status]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: get_hyper3d_generation_status
+    description: Check a Hyper3D task using its jobs.subscription_key and return sanitized job states for Graph branching.
+    source_file: scripts/get_hyper3d_generation_status.py
+    execution: sync
+    job_strategy: isolated
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 60
+    read_only: true
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [subscription_key]
+      additionalProperties: false
+      properties:
+        subscription_key:
+          type: string
+          minLength: 1
+          description: Task-scoped key returned by submit_hyper3d_generation.jobs.subscription_key.
+    output_schema:
+      type: object
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_canvas__download_hyper3d_result]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: download_hyper3d_result
+    description: Download a completed Hyper3D result to a local file without returning signed URLs or credentials.
+    source_file: scripts/download_hyper3d_result.py
+    execution: sync
+    job_strategy: isolated
+    affinity: any
+    enforce_thread_affinity: false
+    timeout_hint_secs: 180
+    read_only: false
+    destructive: false
+    idempotent: true
+    input_schema:
+      type: object
+      required: [task_uuid, result_path]
+      additionalProperties: false
+      properties:
+        task_uuid:
+          type: string
+          minLength: 1
+          description: Top-level task UUID returned by submit_hyper3d_generation, not the subscription key.
+        result_path:
+          type: string
+          minLength: 1
+          description: Absolute local path for the downloaded model file.
+        file_name:
+          type: string
+          description: Optional exact name from the Hyper3D download list. Defaults to the first geometry result.
+    output_schema:
+      type: object
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_canvas__import_hyper3d_asset]
+      on-failure: [dcc_diagnostics__audit_log]
+
+  - name: import_hyper3d_asset
+    description: Import a downloaded Hyper3D model into the Unreal Content Browser using the editor AssetTools API.
+    source_file: scripts/import_hyper3d_asset.py
+    execution: sync
+    affinity: main
+    enforce_thread_affinity: true
+    timeout_hint_secs: 120
+    read_only: false
+    destructive: false
+    idempotent: false
+    input_schema:
+      type: object
+      required: [source_path]
+      additionalProperties: false
+      properties:
+        source_path:
+          type: string
+          minLength: 1
+          description: Absolute local path to a downloaded GLB, FBX, OBJ, USDZ, or STL file.
+        destination_path:
+          type: string
+          pattern: ^/Game/.+
+          default: /Game/Merlin/Generated
+          description: Content Browser destination folder.
+        asset_name:
+          type: string
+          description: Optional imported asset name. Defaults to the source filename stem.
+        replace_existing:
+          type: boolean
+          default: false
+          description: Replace an existing asset with the same destination name.
+    output_schema:
+      type: object
+      additionalProperties: true
+    next-tools:
+      on-success: [unreal_assets__get_asset_info]
+      on-failure: [dcc_diagnostics__screenshot, dcc_diagnostics__audit_log]
