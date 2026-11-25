@@ -246,9 +246,7 @@ def bridge_official_mcp(
             if "describe_tools" not in names:
                 raise OfficialMcpError("Epic MCP did not advertise the describe_tools discovery tool")
             tool = next(
-                item
-                for item in tool_list["tools"]
-                if isinstance(item, dict) and item.get("name") == "describe_tools"
+                item for item in tool_list["tools"] if isinstance(item, dict) and item.get("name") == "describe_tools"
             )
             schema = tool.get("inputSchema")
             properties = schema.get("properties") if isinstance(schema, dict) else None

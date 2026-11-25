@@ -46,10 +46,7 @@ def _api_url(path: str) -> str:
 
 
 def _api_key() -> str:
-    key = (
-        os.environ.get("HYPER3D_API_KEY", "").strip()
-        or os.environ.get("RODIN_API_KEY", "").strip()
-    )
+    key = os.environ.get("HYPER3D_API_KEY", "").strip() or os.environ.get("RODIN_API_KEY", "").strip()
     if not key:
         raise Hyper3DClientError(
             "HYPER3D_API_KEY or RODIN_API_KEY is not configured",
@@ -138,7 +135,9 @@ def _validate_images(image_paths: Iterable[str]) -> List[Path]:
     for value in values:
         path = Path(value).expanduser()
         if not path.is_absolute() or not path.is_file():
-            raise Hyper3DClientError(f"Image path does not point to an existing absolute file: {value}", "invalid_image_path")
+            raise Hyper3DClientError(
+                f"Image path does not point to an existing absolute file: {value}", "invalid_image_path"
+            )
         if path.stat().st_size > MAX_IMAGE_BYTES:
             raise Hyper3DClientError(f"Image exceeds the 25 MiB limit: {value}", "image_too_large")
         validated.append(path)
@@ -190,7 +189,9 @@ def submit_generation(
     _require_choice(geometry_file_format, "geometry_file_format", ("glb", "usdz", "fbx", "obj", "stl"))
     _require_choice(material, "material", ("PBR", "Shaded", "All", "Hybrid", "None"))
     if texture_mode:
-        _require_choice(texture_mode, "texture_mode", ("legacy", "extreme-low", "low", "medium", "high", "extreme-high"))
+        _require_choice(
+            texture_mode, "texture_mode", ("legacy", "extreme-low", "low", "medium", "high", "extreme-high")
+        )
 
     fields = {
         "tier": tier,

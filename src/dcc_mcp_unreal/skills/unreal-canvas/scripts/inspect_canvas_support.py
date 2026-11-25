@@ -194,8 +194,12 @@ def inspect_canvas_support(**kwargs) -> dict:
             }
         engine_version = _engine_version(unreal)
         version_supported = _supports_native_canvas(engine_version)
-        bridge_ready = plugins["unreal_canvas_bridge"]["installed"] and plugins["unreal_canvas_bridge"]["enabled"] is not False
-        graph_ready = plugins["unreal_canvas_graph"]["installed"] and plugins["unreal_canvas_graph"]["enabled"] is not False
+        bridge_ready = (
+            plugins["unreal_canvas_bridge"]["installed"] and plugins["unreal_canvas_bridge"]["enabled"] is not False
+        )
+        graph_ready = (
+            plugins["unreal_canvas_graph"]["installed"] and plugins["unreal_canvas_graph"]["enabled"] is not False
+        )
         mcp_ready = plugins["unreal_mcp"]["installed"] and plugins["unreal_mcp"]["enabled"] is not False
         spatial_ready = (
             plugins["unreal_canvas_spatial_annotations"]["installed"]
