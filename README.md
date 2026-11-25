@@ -134,6 +134,39 @@ Each skill script is a standalone Python file that uses Unreal Engine's
 
 ---
 
+## UE 5.9 native MCP and Unreal Canvas compatibility
+
+`dcc-mcp-unreal` is fully interoperable with Epic's native Unreal MCP. It is
+an additive adapter that keeps the official endpoint, toolset names, input
+schemas, output payloads, game-thread execution model, and MCP Resources
+available through the shared DCC-MCP gateway. The adapter does not replace,
+disable, copy, or redistribute Epic's engine plugins.
+
+On UE 5.9, the official endpoint can expose All Toolsets, Blueprint and editor
+actions, MVVM, Slate inspection, performance, files, scene capture, console,
+Texture Graph, widget animation, Fab search, Sequencer, Semantic Search,
+Knowledge Base, MCP Client, and any other toolsets registered by the installed
+engine build. DCC MCP discovers these capabilities at runtime instead of
+maintaining a stale allow-list.
+
+Unreal Canvas remains native when the UE 5.9 Canvas Bridge is installed. The
+`unreal-canvas` skill detects Canvas Bridge, Canvas Graph, Spatial Annotations,
+All Toolsets, Toolset Registry, Python, and Unreal MCP. It also provides typed
+Action-card Graph contracts and generation-to-import workflows that can be
+used from the Canvas agent or through the regular DCC-MCP endpoint.
+
+To prepare an authorized UE 5.9 project for the native stack, enable the
+installed Epic plugins and restart the editor:
+
+```powershell
+dcc-mcp-cli call unreal_official_mcp__prepare_official_mcp --json '{"include_all_toolsets":true,"include_canvas_bridge":true,"include_spatial_annotations":true}'
+```
+
+The Canvas server build, local AI models, provider keys, and agent sign-in
+remain managed by Unreal Canvas. Open **Tools → Unreal Canvas**, complete its
+health check, then use `dcc-mcp-cli call` or the Unreal Assistant with the
+same editor instance.
+
 ## Why DCC MCP when Unreal already has an official MCP?
 
 MCP is a protocol, not a complete automation product. It standardizes how an
@@ -152,15 +185,17 @@ pipeline.
 | Capability | Epic Unreal MCP | DCC MCP Unreal |
 | --- | --- | --- |
 | Primary role | Expose one Unreal instance through MCP | Discover, extend, and operate Unreal through the shared DCC MCP ecosystem |
-| Engine coverage | Experimental in Unreal Engine 5.8+ | Capability-gated support from Unreal Engine 4.18+, including Python and standalone sidecar paths |
+| Engine coverage | Experimental in Unreal Engine 5.8+ | Capability-gated support from Unreal Engine 4.18+, including Python, standalone sidecar, UE 5.9 Canvas, and official MCP composition |
 | Extension model | Unreal Toolset Registry with Python or C++ toolsets | Portable `SKILL.md` + `tools.yaml` packages, built-in and external skill paths, plus the Epic Toolset Registry bridge |
 | Discovery and routing | Clients connect to the editor's local endpoint | Progressive search/load/call, stable gateway routing, CLI access, and multiple live-instance discovery |
 | Execution contract | Unreal-native tool schemas and game-thread execution | Typed schemas plus affinity, timeout, read-only, destructive, and idempotency metadata |
-| Pipeline scope | Unreal Engine | The same gateway and skill contract across Unreal and other DCC adapters |
+| Pipeline scope | Unreal Engine | The same gateway and skill contract across Unreal and other DCC adapters, while preserving Epic's native toolsets and Resources |
 
 On Unreal Engine 5.8+, DCC MCP can discover and call the installed Epic
 endpoint through the `unreal-official-mcp` skill while preserving Epic's tool
-names and schemas. It does not copy or redistribute Epic's `NoRedist` plugin.
+names and schemas. On UE 5.9 it also forwards the official tool-search
+meta-tools and MCP Resources. It does not copy or redistribute Epic's
+`NoRedist` plugin.
 The resulting capability set is therefore:
 
 > **DCC MCP native skills + optional Epic toolsets + shared gateway/CLI +
@@ -188,8 +223,10 @@ them.
   the task through the shared gateway and CLI
 - **Contract-aware execution** — schemas declare thread affinity, timeouts,
   mutability, destructiveness, and idempotency
-- **Official MCP composition** — bridge installed UE 5.8+ Epic toolsets without
-  copying or redistributing Epic's plugin
+- **Official MCP composition** — bridge installed UE 5.8+ Epic toolsets and
+  MCP Resources without copying or redistributing Epic's plugin
+- **UE 5.9 Canvas integration** — detect and prepare the native Canvas Bridge,
+  Canvas Graph, Spatial Annotations, All Toolsets, and Toolset Registry paths
 
 ---
 
@@ -203,7 +240,8 @@ them.
 | dcc-mcp-core | >= 0.20.13, < 0.21.0 |
 
 See the [Unreal version compatibility contract](docs/unreal-version-compatibility.md)
-for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
+for native-only, Python-enabled, UE 5.8 official-MCP, and UE 5.9 Canvas
+integration tiers.
 
 ### Enable the Python Plugin
 
@@ -219,7 +257,7 @@ for native-only, Python-enabled, and UE 5.8 official-MCP integration tiers.
 📖 **[Agent-first install, verify, upgrade, and uninstall](install.md)** — the
 standard lifecycle contract. The
 **[extended installation guide](docs/installation.md)** covers pip install,
-uplugin deployment, GitHub Releases, UE 4.18–5.8+ matrix, agent-oriented paths,
+uplugin deployment, GitHub Releases, UE 4.18–5.9+ matrix, agent-oriented paths,
 environment variables, and troubleshooting.
 
 ### Quick Install
@@ -300,7 +338,9 @@ Use `dcc-mcp-cli list` when a direct instance URL is needed.
 | `unreal_automation__list_automation_tests` | List native Unreal Automation tests |
 | `unreal_automation__queue_automation_tests` | Queue native Unreal Automation tests from MCP |
 | `unreal_fab_assets__prepare_free_asset_acquisition` | Prepare a license- and visual-gated Fab acquisition plan for the official UI workflow |
-| `unreal_official_mcp__official_mcp_bridge` | Discover and call an installed UE 5.8+ Epic MCP endpoint without redistributing it |
+| `unreal_canvas__inspect_canvas_support` | Detect native UE 5.9 Canvas plugins, runtime enablement, and Canvas capabilities |
+| `unreal_canvas__prepare_hyper3d_canvas_workflow` | Prepare a typed Canvas Action-card Graph for generation, import, DCC-MCP actions, and rendering |
+| `unreal_official_mcp__official_mcp_bridge` | Discover and call an installed UE 5.8+ Epic MCP endpoint, toolsets, and Resources without redistributing it |
 
 ---
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from time import monotonic
-from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -120,6 +120,12 @@ class OfficialMcpClient:
     def list_tools(self) -> Dict[str, Any]:
         return self._send("tools/list", {}).get("result", {})
 
+    def list_resources(self) -> Dict[str, Any]:
+        return self._send("resources/list", {}).get("result", {})
+
+    def read_resource(self, uri: str) -> Dict[str, Any]:
+        return self._send("resources/read", {"uri": uri}).get("result", {})
+
     def call_tool(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         result = self._send("tools/call", {"name": name, "arguments": dict(arguments or {})}).get("result", {})
         if result.get("isError"):
@@ -170,6 +176,8 @@ def bridge_official_mcp(
     endpoint: str = DEFAULT_OFFICIAL_MCP_URL,
     toolset_name: str = "",
     tool_name: str = "",
+    tool_names: Optional[Sequence[str]] = None,
+    resource_uri: str = "",
     arguments: Optional[Mapping[str, Any]] = None,
     timeout: float = 15.0,
 ) -> Dict[str, Any]:
@@ -185,6 +193,12 @@ def bridge_official_mcp(
             return tool_list
         if operation == "list_toolsets":
             return client.call_tool("list_toolsets")
+        if operation == "list_resources":
+            return client.list_resources()
+        if operation == "read_resource":
+            if not resource_uri:
+                raise OfficialMcpError("resource_uri is required for read_resource")
+            return client.read_resource(resource_uri)
         if operation == "describe_toolset":
             if not toolset_name:
                 raise OfficialMcpError("toolset_name is required for describe_toolset")
@@ -223,6 +237,32 @@ def bridge_official_mcp(
             if "describe_toolset" in names:
                 return client.call_tool("describe_toolset", {"toolset_name": toolset_name})
             raise OfficialMcpError("Epic MCP did not advertise a toolset description tool")
+        if operation == "describe_tools":
+            names_to_describe = list(tool_names or ())
+            if tool_name and not names_to_describe:
+                names_to_describe = [tool_name]
+            if not names_to_describe:
+                raise OfficialMcpError("tool_names or tool_name is required for describe_tools")
+            if "describe_tools" not in names:
+                raise OfficialMcpError("Epic MCP did not advertise the describe_tools discovery tool")
+            tool = next(
+                item
+                for item in tool_list["tools"]
+                if isinstance(item, dict) and item.get("name") == "describe_tools"
+            )
+            schema = tool.get("inputSchema")
+            properties = schema.get("properties") if isinstance(schema, dict) else None
+            selectors = [
+                name
+                for name, prop in (properties or {}).items()
+                if isinstance(prop, dict)
+                and prop.get("type") == "array"
+                and isinstance(prop.get("items"), dict)
+                and prop["items"].get("type") == "string"
+            ]
+            if not isinstance(properties, dict) or schema.get("type", "object") != "object" or len(selectors) != 1:
+                raise OfficialMcpError("Epic MCP describe_tools has an unsupported input schema")
+            return client.call_tool("describe_tools", {selectors[0]: names_to_describe})
         if operation == "call_tool":
             if not tool_name:
                 raise OfficialMcpError("tool_name is required for call_tool")

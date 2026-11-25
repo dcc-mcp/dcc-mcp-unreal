@@ -389,6 +389,40 @@ def test_ue_5_8_1_dependencies_are_verified_without_enabling_them_directly(setup
     assert config.read_bytes() == original_config
 
 
+def test_ue59_canvas_and_all_toolsets_are_resolved_from_descriptor_metadata(setup_project):
+    prepare, project, config, plugins = setup_project
+    descriptors = {
+        "AllToolsets": plugins / "Experimental" / "Toolsets" / "AllToolsets.uplugin",
+        "UnrealCanvasBridge": plugins / "Experimental" / "Canvas" / "CanvasBridge.uplugin",
+        "UnrealCanvasSpatialAnnotations": plugins / "Experimental" / "Canvas" / "Spatial.uplugin",
+    }
+    for plugin_name, path in descriptors.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"FileVersion": 3, "Name": plugin_name}), encoding="utf-8")
+
+    result = prepare.prepare_official_mcp(
+        include_all_toolsets=True,
+        include_canvas_bridge=True,
+        include_spatial_annotations=True,
+    )
+
+    assert result["success"] is True, result
+    assert result["context"]["enabled_plugins"] == [
+        "ModelContextProtocol",
+        "EditorToolset",
+        "AllToolsets",
+        "UnrealCanvasBridge",
+        "UnrealCanvasSpatialAnnotations",
+    ]
+    assert {entry["Name"] for entry in json.loads(project.read_bytes())["Plugins"]} == {
+        "ModelContextProtocol",
+        "EditorToolset",
+        "AllToolsets",
+        "UnrealCanvasBridge",
+        "UnrealCanvasSpatialAnnotations",
+    }
+
+
 @pytest.mark.parametrize("contents", [None, b"broken json", b"[]", b"{}", b'{"FileVersion":true}'])
 def test_ue_5_8_1_registry_missing_or_malformed_blocks_without_writes(setup_ue_5_8_1_project, contents, monkeypatch):
     prepare, project, config, plugins = setup_ue_5_8_1_project

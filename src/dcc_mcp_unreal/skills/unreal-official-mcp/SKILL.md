@@ -6,7 +6,7 @@ description: >-
   compare, inspect, or use Epic's official MCP or Toolset Registry
   capabilities. Not a replacement for DCC MCP on Unreal 4.18-5.7.
 license: Apache-2.0
-compatibility: DCC MCP Unreal 0.2+, optional Unreal Engine 5.8+ Unreal MCP plugin
+compatibility: DCC MCP Unreal 0.2+, optional Unreal Engine 5.8+ Unreal MCP plugin, UE 5.9 Canvas plugins
 allowed-tools: Read Bash
 metadata:
   dcc-mcp:
@@ -23,8 +23,9 @@ metadata:
 
 Enable and bridge Epic's optional Unreal MCP into DCC MCP without
 redistributing the Epic plugin. The engine plugin must be installed with the
-engine; this skill can enable it for the current project and configure its
-HTTP port and path. It does not configure or verify the listener's bind address.
+engine. This skill can enable it for the current project, configure its HTTP
+port and path, and opt into UE 5.9 All Toolsets and Canvas plugins. It does not
+configure or verify the listener's bind address.
 
 ## Workflow
 
@@ -35,13 +36,18 @@ HTTP port and path. It does not configure or verify the listener's bind address.
    to change project configuration, then call `prepare_official_mcp`. Enable
    `NiagaraToolsets` only when the task needs Niagara authoring. Set
    `include_pcg_toolset=true` only for a PCG task; it defaults to false. Pass
-   `server_port` for a non-default port; omission retains the 8000 default.
+   `include_all_toolsets=true` for the complete UE 5.9 toolset catalog. Pass
+   `include_canvas_bridge=true` and `include_spatial_annotations=true` for a
+   native Canvas workflow. Pass `server_port` for a non-default port; omission
+   retains the 8000 default.
 3. When `restart_required` is true, obtain authorization for the isolated
    instance restart after the ownership, port and binding checks below. Verify
    the DCC MCP instance, then retry `operation=status` with the returned
    `configured_endpoint`. Do not claim success from configuration alone.
-4. Use `list_toolsets`, then `describe_toolset`, before calling an unfamiliar
-   tool. Preserve Epic's tool names and schemas.
+4. Use `list_toolsets`, `describe_toolset`, or `describe_tools` before calling
+   an unfamiliar tool. Use `list_resources` and `read_resource` when the
+   official server exposes project or engine context. Preserve Epic's tool
+   names and schemas.
 5. Use `call_tool` with the selected toolset and arguments. Do not issue
    overlapping mutating calls; Epic serializes tool invocations on the game
    thread.
@@ -53,13 +59,15 @@ never block Unreal's game thread while making an HTTP request back into the
 same editor process.
 
 The adapter's `describe_toolset` operation remains the same across engine
-versions. When Epic advertises `describe_toolsets` (documented in UE 5.9),
+versions. When Epic advertises `describe_toolsets` or `describe_tools`
+(documented in UE 5.9),
 the bridge uses its input schema to select one unambiguous string-array
 parameter and requests `include_schemas=true`. Unsupported schemas or extra
 required arguments return an error. Older endpoints that advertise only
 `describe_toolset` retain the singular call. A failed plural call is not retried
-through the older tool. This discovery compatibility does not establish native
-UE 5.9 acceptance.
+through the older tool. The bridge also forwards the official MCP
+`resources/list` and `resources/read` operations. This discovery compatibility
+does not establish native UE 5.9 acceptance.
 
 ## Explicit ports and verification boundaries
 
@@ -96,7 +104,7 @@ the DCC MCP instance and official `status`/tool schemas. A successful HTTP reply
 alone does not identify the owning instance. Setup provides none of these runtime
 checks and always returns `runtime_verified=false`.
 
-Epic documents `-ModelContextProtocolPort=N` for UE 5.8 (invalid values can fall
+Epic documents `-ModelContextProtocolPort=N` for UE 5.8 and newer (invalid values can fall
 back to settings). An explicitly validated launch override may suit an isolated
 temporary instance without changing persistent settings, but is not native
 acceptance of this setup parameter. UE 5.8+ support depends on installed plugins;
@@ -104,7 +112,7 @@ older adapter build coverage does not qualify official MCP. A normal Editor
 with `NullRHI`/`Unattended` remains a host-specific test proposal. Commandlet HTTP
 startup does not establish the Slate ticks or DCC MCP/Toolset Registry workflow.
 
-Reference: [Epic Unreal MCP configuration](https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor?application_version=5.8).
+Reference: [Epic Unreal MCP configuration](https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor).
 
 ## PCG opt-in and safe setup
 
@@ -139,7 +147,8 @@ or PCG tool is available. `runtime_verified` remains false. Restart when request
 then verify the live endpoint and discover its actual toolsets before authoring;
 setup never starts a service, loads Unreal, or mutates a PCG graph.
 
-References: [PCGToolset](https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex/PCGToolset),
+References: [Unreal MCP](https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor),
+[PCGToolset](https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex/PCGToolset),
 [PCG](https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex/PCG), and
 [Unreal plugins](https://dev.epicgames.com/documentation/en-us/unreal-engine/plugins-in-unreal-engine).
 

@@ -1,9 +1,9 @@
-"""Bridge DCC MCP calls to Unreal Engine 5.8's optional built-in MCP server."""
+"""Bridge DCC MCP calls to Unreal Engine 5.8+'s optional built-in MCP server."""
 
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from dcc_mcp_core.skill import skill_entry, skill_error, skill_success
 
@@ -16,6 +16,8 @@ def official_mcp_bridge(
     endpoint: str = DEFAULT_OFFICIAL_MCP_URL,
     toolset_name: str = "",
     tool_name: str = "",
+    tool_names: Optional[Sequence[str]] = None,
+    resource_uri: str = "",
     arguments: Optional[Dict[str, Any]] = None,
     timeout: float = 15.0,
     **kwargs,
@@ -37,6 +39,8 @@ def official_mcp_bridge(
             endpoint=endpoint,
             toolset_name=toolset_name,
             tool_name=tool_name,
+            tool_names=tool_names,
+            resource_uri=resource_uri,
             arguments=arguments,
             timeout=timeout,
         )

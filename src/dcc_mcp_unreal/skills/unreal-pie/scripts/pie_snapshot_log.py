@@ -172,7 +172,7 @@ def _collect_log_entries(
     since_line = cursor if cursor is not None else since_line
     try:
         project_dir = unreal.Paths.project_dir()
-        log_dir = os.path.join(project_dir, "Saved", "Logs")
+        log_dir = os.path.join(project_dir, "Saved", "Logs") if project_dir else ""
         if os.path.isdir(log_dir):
             log_files = sorted(
                 (f for f in os.listdir(log_dir) if f.endswith(".log")),

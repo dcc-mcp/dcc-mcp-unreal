@@ -38,3 +38,20 @@ def test_ue58_can_compose_dcc_and_epic_mcp():
     compatibility = unreal_compatibility("5.8", has_embedded_python=True, has_official_mcp=True)
     assert compatibility["integration_tier"] == "dcc-mcp-plus-epic"
     assert compatibility["official_mcp_bridge"] is True
+
+
+def test_ue59_reports_native_canvas_when_plugins_are_available():
+    compatibility = unreal_compatibility(
+        "5.9.0",
+        has_embedded_python=True,
+        has_official_mcp=True,
+        has_unreal_canvas=True,
+    )
+    assert compatibility["unreal_canvas"] is True
+    assert not any("requires Unreal Engine 5.9" in item for item in compatibility["limitations"])
+
+
+def test_ue59_keeps_canvas_optional():
+    compatibility = unreal_compatibility("5.9.0", has_embedded_python=True, has_official_mcp=True)
+    assert compatibility["unreal_canvas"] is False
+    assert any("Unreal Canvas is optional" in item for item in compatibility["limitations"])

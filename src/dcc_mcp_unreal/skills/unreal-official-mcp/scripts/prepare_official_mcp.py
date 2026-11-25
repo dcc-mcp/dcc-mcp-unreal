@@ -1,4 +1,4 @@
-"""Enable Unreal Engine 5.8's built-in MCP plugins for the current project."""
+"""Enable Unreal Engine 5.8+'s built-in MCP plugins for the current project."""
 
 from __future__ import annotations
 
@@ -20,6 +20,26 @@ _PLUGIN_RELATIVE_PATHS = {
     "NiagaraToolsets": Path("Experimental/Toolsets/NiagaraToolsets/NiagaraToolsets.uplugin"),
     "PCGToolset": Path("Experimental/Toolsets/PCGToolset/PCGToolset.uplugin"),
     "ToolsetRegistry": Path("Experimental/ToolsetRegistry/ToolsetRegistry.uplugin"),
+}
+# UE 5.9 moved several experimental plugins between distributions. Resolve
+# these by descriptor metadata first, with common installed-build locations as
+# cheap candidates. The plugin ID written to the project comes from the
+# descriptor when it is available.
+_PLUGIN_CANDIDATE_PATHS = {
+    "AllToolsets": (Path("Experimental/Toolsets/AllToolsets/AllToolsets.uplugin"),),
+    "UnrealCanvasBridge": (
+        Path("Experimental/UnrealCanvas/UnrealCanvasBridge/UnrealCanvasBridge.uplugin"),
+        Path("Experimental/UnrealCanvas/Bridge/UnrealCanvasBridge.uplugin"),
+    ),
+    "UnrealCanvasSpatialAnnotations": (
+        Path("Experimental/UnrealCanvas/UnrealCanvasSpatialAnnotations/UnrealCanvasSpatialAnnotations.uplugin"),
+        Path("Experimental/UnrealCanvas/SpatialAnnotations/UnrealCanvasSpatialAnnotations.uplugin"),
+    ),
+}
+_PLUGIN_NAME_ALIASES = {
+    "AllToolsets": ("alltoolsets",),
+    "UnrealCanvasBridge": ("unrealcanvasbridge",),
+    "UnrealCanvasSpatialAnnotations": ("unrealcanvasspatialannotations",),
 }
 # Inspect supported installed locations, never infer availability from an engine version.
 _PCG_DEPENDENCY_PATHS = (Path("PCG/PCG.uplugin"), Path("Experimental/PCG/PCG.uplugin"))
@@ -208,6 +228,49 @@ def _read_plugin_descriptor(path: Path) -> dict[str, Any]:
     return descriptor
 
 
+def _normalize_plugin_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.casefold())
+
+
+def _descriptor_matches_plugin(path: Path, aliases: Iterable[str]) -> bool:
+    names = {_normalize_plugin_name(path.stem), _normalize_plugin_name(path.parent.name)}
+    try:
+        descriptor = _read_plugin_descriptor(path)
+    except (OSError, ValueError):
+        return False
+    for key in ("Name", "FriendlyName", "DisplayName"):
+        value = descriptor.get(key)
+        if isinstance(value, str) and value.strip():
+            names.add(_normalize_plugin_name(value))
+    return any(alias == name or alias in name for alias in aliases for name in names)
+
+
+def _resolve_plugin_descriptor(engine_plugins_dir: Path, plugin_name: str) -> tuple[Path | None, str]:
+    """Resolve one installed descriptor without assuming a UE 5.9 layout."""
+    candidates = []
+    if plugin_name in _PLUGIN_RELATIVE_PATHS:
+        candidates.append(engine_plugins_dir / _PLUGIN_RELATIVE_PATHS[plugin_name])
+    candidates.extend(engine_plugins_dir / path for path in _PLUGIN_CANDIDATE_PATHS.get(plugin_name, ()))
+    existing = []
+    for path in candidates:
+        if path.is_file() and path not in existing:
+            existing.append(path)
+    if not existing and plugin_name in _PLUGIN_NAME_ALIASES:
+        aliases = _PLUGIN_NAME_ALIASES[plugin_name]
+        for path in engine_plugins_dir.rglob("*.uplugin"):
+            if _descriptor_matches_plugin(path, aliases) and path not in existing:
+                existing.append(path)
+    if len(existing) > 1:
+        raise ValueError("Multiple installed descriptors match {}: {}".format(plugin_name, ", ".join(map(str, existing))))
+    if not existing:
+        return None, plugin_name
+    descriptor = _read_plugin_descriptor(existing[0])
+    declared_name = descriptor.get("Name", plugin_name)
+    if not isinstance(declared_name, str) or not declared_name.strip():
+        raise ValueError("Installed descriptor has an invalid Name: {}".format(existing[0]))
+    return existing[0], declared_name
+
+
 def _validate_pcg_dependencies(engine_plugins_dir: Path, project_data: dict[str, Any]) -> list[str]:
     """Preflight the installed PCGToolset's direct requirements without scanning the engine."""
     descriptor = _read_plugin_descriptor(engine_plugins_dir / _PLUGIN_RELATIVE_PATHS["PCGToolset"])
@@ -298,6 +361,9 @@ def prepare_official_mcp(
     include_editor_toolset: bool = True,
     include_niagara_toolsets: bool = False,
     include_pcg_toolset: bool = False,
+    include_all_toolsets: bool = False,
+    include_canvas_bridge: bool = False,
+    include_spatial_annotations: bool = False,
     server_port: int = 8000,
     **kwargs,
 ) -> dict:
@@ -306,6 +372,9 @@ def prepare_official_mcp(
         "include_editor_toolset": include_editor_toolset,
         "include_niagara_toolsets": include_niagara_toolsets,
         "include_pcg_toolset": include_pcg_toolset,
+        "include_all_toolsets": include_all_toolsets,
+        "include_canvas_bridge": include_canvas_bridge,
+        "include_spatial_annotations": include_spatial_annotations,
     }
     invalid_flags = [name for name, value in flags.items() if type(value) is not bool]
     if invalid_flags:
@@ -351,8 +420,31 @@ def prepare_official_mcp(
         plugin_names.append("NiagaraToolsets")
     if include_pcg_toolset:
         plugin_names.append("PCGToolset")
+    if include_all_toolsets:
+        plugin_names.append("AllToolsets")
+    if include_canvas_bridge:
+        plugin_names.append("UnrealCanvasBridge")
+    if include_spatial_annotations:
+        plugin_names.append("UnrealCanvasSpatialAnnotations")
 
-    missing = [name for name in plugin_names if not (engine_plugins_dir / _PLUGIN_RELATIVE_PATHS[name]).is_file()]
+    try:
+        plugin_roots = [engine_plugins_dir, project_file.parent / "Plugins"]
+        resolved_plugins = {}
+        for name in plugin_names:
+            resolved = _resolve_plugin_descriptor(plugin_roots[0], name)
+            if resolved[0] is None:
+                resolved = _resolve_plugin_descriptor(plugin_roots[1], name)
+            resolved_plugins[name] = resolved
+    except (OSError, ValueError) as exc:
+        return skill_error(
+            "Epic Unreal MCP plugin descriptors could not be verified",
+            str(exc),
+            possible_solutions=[
+                "Use the installed UE 5.8 or UE 5.9 plugin distribution that matches the editor.",
+                "Resolve duplicate or malformed .uplugin descriptors before enabling the integration.",
+            ],
+        )
+    missing = [name for name, (path, _) in resolved_plugins.items() if path is None]
     if missing:
         return skill_error(
             "Epic Unreal MCP plugins are not installed in this engine",
@@ -375,7 +467,8 @@ def prepare_official_mcp(
         required_dependencies = (
             _validate_pcg_dependencies(engine_plugins_dir, project_data) if include_pcg_toolset else []
         )
-        changed_plugins = _upsert_plugins(project_data, plugin_names)
+        project_plugin_names = [declared_name for _, declared_name in resolved_plugins.values()]
+        changed_plugins = _upsert_plugins(project_data, project_plugin_names)
         project_contents = project_original
         if changed_plugins:
             project_contents = (json.dumps(project_data, ensure_ascii=False, indent="\t") + "\n").encode("utf-8")
@@ -435,7 +528,7 @@ def prepare_official_mcp(
         ),
         project_file=str(project_file),
         config_file=str(config_path),
-        enabled_plugins=plugin_names,
+        enabled_plugins=project_plugin_names,
         changed_plugins=changed_plugins,
         required_dependencies=required_dependencies,
         config_changed=config_changed,
